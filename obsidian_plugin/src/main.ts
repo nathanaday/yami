@@ -1,16 +1,23 @@
 import { FileSystemAdapter, Notice, Plugin } from "obsidian";
 import { createYami } from "yami";
-import { type Agent, claude, createAgent } from "yami/agent";
+import { ClaudeAgent } from "yami/agent/claude";
+import { CodexAgent } from "yami/agent/codex";
 
 declare global {
   interface Window {
-    yami?: { agent: Agent; createAgent: typeof createAgent; claude: typeof claude };
+    yami?: {
+      claude: ClaudeAgent;
+      codex: CodexAgent;
+      ClaudeAgent: typeof ClaudeAgent;
+      CodexAgent: typeof CodexAgent;
+    };
   }
 }
 
 export default class YamiPlugin extends Plugin {
   private yami = createYami();
-  agent!: Agent;
+  private claude!: ClaudeAgent;
+  private codex!: CodexAgent;
 
   async onload() {
 
@@ -20,8 +27,10 @@ export default class YamiPlugin extends Plugin {
     if (!(adapter instanceof FileSystemAdapter)) {
       throw new Error("Yami needs a vault on the local file system.");
     }
-    this.agent = createAgent(claude(), { cwd: adapter.getBasePath() });
-    window.yami = { agent: this.agent, createAgent, claude };
+    const cwd = adapter.getBasePath();
+    this.claude = new ClaudeAgent({ preferences: { cwd } });
+    this.codex = new CodexAgent({ preferences: { cwd } });
+    window.yami = { claude: this.claude, codex: this.codex, ClaudeAgent, CodexAgent };
 
     this.addRibbonIcon("hand", "HeelllooOOoOoOOOOoooo", () => this.sayHello());
 
@@ -33,7 +42,8 @@ export default class YamiPlugin extends Plugin {
   }
 
   onunload() {
-    this.agent.closeAll();
+    this.claude.closeAll();
+    this.codex.closeAll();
     delete window.yami;
   }
 

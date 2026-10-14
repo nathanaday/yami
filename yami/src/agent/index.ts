@@ -1,3 +1,3 @@
-export { Agent, createAgent } from "./agent.js";
-export { ClaudeHarness, claude, findClaudeExecutable, type ClaudeOptions } from "./claude.js";
+export { Agent } from "./agent.js";
+export { Session } from "./session.js";
 export type * from "./types.js";

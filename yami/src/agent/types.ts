@@ -1,8 +1,8 @@
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
- * - `read-only`: the agent can read and search files in `cwd`.
- * - `edit`: the agent can also create and change files in `cwd`.
+ * - `read-only`: the agent cannot change files.
+ * - `edit`: the agent can change files in `cwd`.
  */
 export type Access = "read-only" | "edit";
 
@@ -18,26 +18,36 @@ export interface Preferences {
   access?: Access;
 }
 
-export interface HarnessInfo {
+export interface AgentInfo {
   harness: string;
   version: string;
   account: {
+    /** How the harness connects, in its own terms: `ChatGPT` for Codex, `firstParty` for Claude. */
+    login?: string;
     email?: string;
     organization?: string;
     subscription?: string;
   };
 }
 
+export interface Usage {
+  /** Includes cached input tokens. */
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface TurnResult {
   status: "success" | "error" | "interrupted";
   text: string;
   errors: string[];
-  costUsd: number;
+  usage: Usage;
+  /** Only harnesses that report cost set this. */
+  costUsd?: number;
   durationMs: number;
 }
 
 export type SessionEvent =
-  | { type: "ready"; sessionId: string; model: string; tools: string[] }
+  | { type: "ready"; sessionId: string; model?: string; tools?: string[] }
   | { type: "text"; text: string }
   | { type: "tool-call"; id: string; name: string; input: unknown }
   | { type: "tool-result"; id: string; isError: boolean; output: string }
@@ -45,26 +55,3 @@ export type SessionEvent =
   | { type: "closed"; error?: Error };
 
 export type SessionListener = (event: SessionEvent) => void;
-
-export interface Session {
-  /** Known after the `ready` event. */
-  readonly id: string | undefined;
-  readonly closed: boolean;
-  /**
-   * Sends one prompt and resolves when the turn ends. A turn that the harness
-   * ends with an error resolves with `status: "error"`. The promise rejects
-   * only when the session cannot run the turn.
-   */
-  send(prompt: string): Promise<TurnResult>;
-  /** Returns a function that removes the listener. */
-  subscribe(listener: SessionListener): () => void;
-  /** Ends the current turn with status `interrupted`. The session stays open. */
-  interrupt(): Promise<void>;
-  close(): void;
-}
-
-export interface Harness {
-  readonly name: string;
-  connect(preferences: Preferences): Promise<HarnessInfo>;
-  openSession(preferences: Preferences): Session;
-}

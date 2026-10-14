@@ -26,24 +26,29 @@ A hello world Obsidian plugin. It adds a ribbon icon and a "Say hello" command. 
 
 4. In Obsidian, open **Settings → Community plugins** and turn on **Yami**. To load your changes, turn the plugin off and on again, or run the command **Reload app without saving**.
 
-## Try the agent
+## Try the agents
 
-The plugin starts an agent for the vault folder and puts it on `window.yami`. The agent uses [Claude Code](https://code.claude.com), so install Claude Code and sign in first.
+The plugin makes two agents for the vault folder, and puts them on `window.yami`:
+
+- `yami.claude` uses [Claude Code](https://code.claude.com).
+- `yami.codex` uses [Codex](https://developers.openai.com/codex).
+
+Install the harness that you want to use, and sign in to it first.
 
 Open the developer console with **View → Toggle Developer Tools**. Then type:
 
 ```js
-const { agent } = yami;
-await agent.connect();                  // shows the Claude Code version and account
+const agent = yami.claude;              // or yami.codex
+await agent.connect();                  // shows the harness version and account
 agent.setPreferences({ effort: "low" });
 const session = agent.startSession();
 session.subscribe((event) => console.log(event));
 await session.send("Which notes are in this vault?");
 ```
 
-The agent can read the vault and cannot change it. To let it change notes, start a session with `agent.startSession({ access: "edit" })`. `window.yami` also contains `createAgent` and `claude`, so you can make agents with other preferences. For the full agent API, see [`yami/README.md`](../yami/README.md).
+The agents can read the vault and cannot change it. To let an agent change notes, start a session with `agent.startSession({ access: "edit" })`. To make an agent with other options, use `new yami.ClaudeAgent({ ... })` or `new yami.CodexAgent({ ... })`. For the full agent API, see [`yami/README.md`](../yami/README.md).
 
-The agent starts a process, so the plugin works only on desktop.
+The agents start processes, so the plugin works only on desktop.
 
 ## Build a release
 

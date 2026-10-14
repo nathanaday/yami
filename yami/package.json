@@ -14,6 +14,14 @@
     "./agent": {
       "types": "./dist/agent/index.d.ts",
       "default": "./dist/agent/index.js"
+    },
+    "./agent/claude": {
+      "types": "./dist/agent/claude.d.ts",
+      "default": "./dist/agent/claude.js"
+    },
+    "./agent/codex": {
+      "types": "./dist/agent/codex.d.ts",
+      "default": "./dist/agent/codex.js"
     }
   },
   "files": [
@@ -25,6 +33,7 @@
     "prepare": "npm run build"
   },
   "devDependencies": {
+    "@openai/codex-sdk": "^0.162.1",
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2"
   },

@@ -1,32 +1,33 @@
-import type { Harness, HarnessInfo, Preferences, Session } from "./types.js";
+import type { Session } from "./session.js";
+import type { AgentInfo, Preferences } from "./types.js";
 
-export class Agent {
-  private current: Preferences;
+/**
+ * Holds the preferences for one harness and starts sessions with them.
+ * Each harness adds its own preferences to `P`.
+ */
+export abstract class Agent<P extends Preferences = Preferences> {
+  abstract readonly harness: string;
+  private current: P;
   private readonly sessions = new Set<Session>();
 
-  constructor(
-    readonly harness: Harness,
-    preferences: Preferences = {},
-  ) {
-    this.current = { ...preferences };
+  constructor(preferences?: P) {
+    this.current = { ...preferences } as P;
   }
 
-  get preferences(): Readonly<Preferences> {
+  get preferences(): Readonly<P> {
     return this.current;
   }
 
   /** Changes apply to sessions that start after this call. */
-  setPreferences(changes: Preferences): void {
+  setPreferences(changes: Partial<P>): void {
     this.current = { ...this.current, ...changes };
   }
 
-  /** Starts the harness once to confirm that it runs and is signed in. */
-  connect(): Promise<HarnessInfo> {
-    return this.harness.connect(this.current);
-  }
+  /** Runs the harness once to confirm that it starts and is signed in. */
+  abstract connect(): Promise<AgentInfo>;
 
-  startSession(overrides: Preferences = {}): Session {
-    const session = this.harness.openSession({ ...this.current, ...overrides });
+  startSession(overrides: Partial<P> = {}): Session {
+    const session = this.createSession({ ...this.current, ...overrides });
     this.sessions.add(session);
     session.subscribe((event) => {
       if (event.type === "closed") this.sessions.delete(session);
@@ -37,8 +38,6 @@ export class Agent {
   closeAll(): void {
     for (const session of this.sessions) session.close();
   }
-}
 
-export function createAgent(harness: Harness, preferences?: Preferences): Agent {
-  return new Agent(harness, preferences);
+  protected abstract createSession(preferences: P): Session;
 }
