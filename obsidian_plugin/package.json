@@ -1,5 +1,5 @@
 {
-  "name": "yami",
+  "name": "yami-obsidian",
   "version": "0.1.0",
   "private": true,
   "description": "A hello world Obsidian plugin.",
@@ -13,6 +13,6 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "yami_sdk": "file:../yami_sdk"
+    "yami": "file:../yami"
   }
 }

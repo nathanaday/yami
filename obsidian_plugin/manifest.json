@@ -5,5 +5,5 @@
   "minAppVersion": "1.0.0",
   "description": "A hello world plugin.",
   "author": "nathanaday",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

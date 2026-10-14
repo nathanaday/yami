@@ -12,7 +12,12 @@ const context = await esbuild.context({
     "@codemirror/*",
     "@lezer/*",
     ...builtinModules,
+    ...builtinModules.map((name) => `node:${name}`),
   ],
+  // The Agent SDK calls createRequire(import.meta.url) on load, and a CJS
+  // bundle has no import.meta. Any file URL works for the built-in modules
+  // that the SDK requires.
+  define: { "import.meta.url": JSON.stringify("file:///") },
   format: "cjs",
   target: "es2022",
   logLevel: "info",
