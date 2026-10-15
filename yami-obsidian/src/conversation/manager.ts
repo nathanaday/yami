@@ -1,4 +1,4 @@
-import { type App, MarkdownView, normalizePath, type Plugin, TFile } from "obsidian";
+import { type App, MarkdownView, normalizePath, Notice, type Plugin, TFile } from "obsidian";
 import type { ApprovalSetting } from "yami/agent";
 import { availablePath, nameFrom, newConversation, noteName, stamp, unnamed } from "yami/conversation";
 import type { ConversationAgent } from "../agents.js";
@@ -77,8 +77,7 @@ export class ConversationManager {
 
   /** Creates a conversation note and opens it, with the cursor in the composer. */
   async create(agent: ConversationAgent, options: CreateOptions = {}): Promise<TFile> {
-    const folder = normalizePath((options.folder ?? this.options.folder()) || "/");
-    if (folder !== "/" && !this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
+    const folder = await this.folder(normalizePath((options.folder ?? this.options.folder()) || "/"));
     const path = availablePath(folder, options.name ?? unnamed(), (candidate) => Boolean(this.app.vault.getAbstractFileByPath(candidate)));
     const file = await this.app.vault.create(
       path,
@@ -102,6 +101,23 @@ export class ConversationManager {
       this.composers.get(leaf.view as MarkdownView)?.focus();
     }
     return file;
+  }
+
+  /**
+   * The folder for a new note, created when it is missing. A folder that exists with other letter
+   * case is used as it is, because a case-insensitive file system refuses a second one.
+   */
+  private async folder(path: string): Promise<string> {
+    if (path === "/") return path;
+    const existing = this.app.vault.getFolderByPath(path) ?? this.app.vault.getAllFolders().find((folder) => folder.path.toLowerCase() === path.toLowerCase());
+    if (existing) return existing.path;
+    try {
+      await this.app.vault.createFolder(path);
+    } catch (error) {
+      // The folder can be on disk before Obsidian has indexed it.
+      if (!(await this.app.vault.adapter.exists(path))) throw new Error(`Could not create the folder ${path}: ${(error as Error).message}`);
+    }
+    return path;
   }
 
   /** Creates a conversation note and sends its first message. */
@@ -184,7 +200,7 @@ export class ConversationManager {
       controller = new ConversationController(this.app, this.hub, file, this.options.agents, this.prompts, {
         animate: this.options.animate,
         idleMinutes: this.options.idleMinutes,
-        newConversation: (agent) => void this.create(agent),
+        newConversation: (agent) => void this.create(agent).catch((error: Error) => new Notice(`Yami could not start a conversation: ${error.message}`, 10_000)),
         onActivity: this.options.onActivity,
         onTurnEnd: (turn) => this.turnEnded(file, turn),
       });

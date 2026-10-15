@@ -119,6 +119,8 @@ function fakeApp() {
   const files = new Map<string, TFile>();
   const text = new Map<TFile, string>();
   const folders = new Set<string>();
+  /** Folders on disk that Obsidian has not indexed. */
+  const onDisk = new Set<string>();
   const listeners = new Set<(file: TFile) => void>();
   const leaves: { view: MarkdownView }[] = [];
   const frontmatter = (file: TFile) => {
@@ -145,7 +147,13 @@ function fakeApp() {
     vault: {
       getAbstractFileByPath: (path: string) => files.get(path) ?? (folders.has(path) ? {} : null),
       getFileByPath: (path: string) => files.get(path) ?? null,
-      createFolder: async (path: string) => void folders.add(path),
+      getFolderByPath: (path: string) => (folders.has(path) ? { path } : null),
+      getAllFolders: () => [...folders].map((path) => ({ path })),
+      createFolder: vi.fn(async (path: string) => {
+        if (folders.has(path) || onDisk.has(path)) throw new Error("Folder already exists.");
+        folders.add(path);
+      }),
+      adapter: { exists: async (path: string) => folders.has(path) || onDisk.has(path) },
       create: async (path: string, content: string) => {
         const file = new FakeFile(path);
         file.parent = { path: path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "/" } as TFile["parent"];
@@ -185,7 +193,7 @@ function fakeApp() {
       iterateAllLeaves: (visit: (leaf: { view: MarkdownView }) => void) => leaves.forEach(visit),
     },
   };
-  return { app, text, folders, getLeaf };
+  return { app, text, folders, onDisk, getLeaf };
 }
 
 /** A shared note over the fake file's text. */
@@ -266,6 +274,19 @@ describe("ConversationManager", () => {
     expect(text()).toMatch(/\nagent: codex\nmodule: "\[\[hello\/Session 1\]\]"\n/);
     expect(claude.started).toHaveLength(0);
     expect(session.sent[0]).toMatch(/^\/atlas-obsidian:wiki-ingest\n/);
+  });
+
+  it("uses a conversation folder that exists with other letter case, or on disk only", async () => {
+    fake.folders.add("Conversations");
+    const { file } = await start({ message: "Hello", open: false });
+    expect(file.path).toMatch(/^Conversations\//);
+    expect(fake.app.vault.createFolder).not.toHaveBeenCalled();
+
+    fake.folders.clear();
+    fake.onDisk.add("changes");
+    const other = await start({ message: "Hello", folder: "changes", open: false });
+    expect(other.file.path).toMatch(/^changes\//);
+    expect(fake.app.vault.createFolder).toHaveBeenCalledWith("changes");
   });
 
   it("opens the note in a new tab unless asked not to", async () => {

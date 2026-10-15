@@ -70,12 +70,12 @@ export default class YamiPlugin extends Plugin {
 
     this.statusEl = this.addStatusBarItem();
     this.statusEl.addClass("yami-status");
-    this.addRibbonIcon("message-square-plus", "New conversation", () => void this.conversations.create(this.agents[0]!));
+    this.addRibbonIcon("message-square-plus", "New conversation", () => this.newConversation(this.agents[0]!));
     for (const registered of this.agents) {
       this.addCommand({
         id: `new-conversation-${registered.name}`,
         name: `New conversation with ${registered.name}`,
-        callback: () => void this.conversations.create(registered),
+        callback: () => this.newConversation(registered),
       });
     }
     this.addCommand({
@@ -177,6 +177,10 @@ export default class YamiPlugin extends Plugin {
     new Notice(`Running ${path} with ${agent.harness}…`);
     const result = await runSession(this.vault, agent, hello, path, { conversations: new ObsidianConversations(this.conversations, () => this.agents) });
     return `${path}: ${result.state} after ${result.iterations} iteration(s).`;
+  }
+
+  private newConversation(agent: ConversationAgent): void {
+    this.notify(this.conversations.create(agent).then((file) => `Opened ${file.path}.`));
   }
 
   /** Shows the result of a command, or its error, in a notice. */
