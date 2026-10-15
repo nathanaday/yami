@@ -40,8 +40,18 @@ export function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
 }
 
+/** The display name of a document: the file name, or the folder name of a `SKILL.md`. */
+export function documentName(path: string): string {
+  const name = basename(path);
+  return name === "SKILL" ? basename(path.slice(0, path.lastIndexOf("/"))) : name;
+}
+
+/**
+ * A link to a document by its full path, with the document name as the alias.
+ * Obsidian resolves it whatever other documents are named.
+ */
 export function link(path: string): string {
-  return `[[${basename(path)}]]`;
+  return `[[${path.replace(/\.md$/, "")}|${documentName(path)}]]`;
 }
 
 /** The target name of a link: `[[Name|alias]]` gives `Name`. A plain name passes through. */
@@ -55,9 +65,10 @@ export function linksOf(value: unknown): string[] {
   return values.filter((item): item is string => typeof item === "string" && item !== "").map(linkTarget);
 }
 
-/** Finds the file named `name`, searching `folders` in order and then the whole vault. */
+/** Finds a link target: a path, or a file name searched in `folders` in order and then the whole vault. */
 export async function resolveLink(vault: Vault, name: string, folders: string[]): Promise<string | undefined> {
   const file = name.endsWith(".md") ? name : `${name}.md`;
+  if (file.includes("/") && (await vault.exists(file))) return file;
   for (const folder of [...folders, ""]) {
     const found = (await vault.list(folder)).find((path) => path === file || path.endsWith(`/${file}`));
     if (found) return found;

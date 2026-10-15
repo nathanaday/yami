@@ -6,8 +6,9 @@ import { CodexAgent } from "yami/agent/codex";
 import { timestamp } from "yami/document";
 import { createSession, enableModule, runSession } from "yami/module";
 import { hello } from "yami/modules/hello";
-import { TEST_VIEW, TestView } from "./test-view";
 import { ObsidianVault } from "./vault";
+
+const MODULES = [hello];
 
 declare global {
   interface Window {
@@ -40,18 +41,9 @@ export default class YamiPlugin extends Plugin {
     this.codex = new CodexAgent({ preferences: { cwd } });
     window.yami = { claude: this.claude, codex: this.codex, ClaudeAgent, CodexAgent };
 
-    this.registerView(TEST_VIEW, (leaf) => new TestView(leaf, { claude: this.claude, codex: this.codex }));
-    this.addCommand({
-      id: "open-test-view",
-      name: "Open test view",
-      callback: () => this.openTestView(),
-    });
 
-    this.addCommand({
-      id: "hello-enable",
-      name: "Hello: enable module",
-      callback: () => this.notify(enableModule(this.vault, hello).then(() => "Hello module enabled.")),
-    });
+    this.app.workspace.onLayoutReady(() => this.enableModules());
+
     this.addCommand({
       id: "hello-new-session",
       name: "Hello: new session",
@@ -80,9 +72,21 @@ export default class YamiPlugin extends Plugin {
   }
 
   onunload() {
-    this.claude.closeAll();
-    this.codex.closeAll();
+    void this.claude.closeAll();
+    void this.codex.closeAll();
     delete window.yami;
+  }
+
+  /** Writes the folders and documents of each module that are missing. */
+  private async enableModules(): Promise<void> {
+    for (const module of MODULES) {
+      try {
+        await enableModule(this.vault, module);
+      } catch (error) {
+        console.error(error);
+        new Notice(`Yami could not enable ${module.name}: ${(error as Error).message}`, 10_000);
+      }
+    }
   }
 
   private async newHelloSession(): Promise<string> {
@@ -107,18 +111,6 @@ export default class YamiPlugin extends Plugin {
         new Notice(`Yami: ${error.message}`, 10_000);
       },
     );
-  }
-
-  private async openTestView() {
-    const { workspace } = this.app;
-    let leaf = workspace.getLeavesOfType(TEST_VIEW)[0];
-    if (!leaf) {
-      const right = workspace.getRightLeaf(false);
-      if (!right) return;
-      leaf = right;
-      await leaf.setViewState({ type: TEST_VIEW, active: true });
-    }
-    await workspace.revealLeaf(leaf);
   }
 
   private sayHello() {

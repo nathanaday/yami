@@ -1,46 +1,46 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, statSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
-import { basename, delimiter, join } from "node:path";
+import path, { basename, delimiter, join } from "node:path";
 
 /** Folders that GUI apps often leave out of `PATH`. */
 function standardFolders(): string[] {
-  return [join(homedir(), ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
+  const home = homedir();
+  return [join(home, ".local", "bin"), join(home, ".npm-global", "bin"), join(home, ".bun", "bin"), join(home, ".volta", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
 }
 
 /**
- * Returns each executable file named `name` on `PATH` and in the standard
- * install folders, in search order. A GUI app such as Obsidian often starts
- * with a short `PATH` that omits these folders.
+ * Returns each executable file named `name` on the `PATH` of `env` and in the
+ * standard install folders, in search order.
  */
-export function findExecutables(name: string, extraFolders: string[] = []): string[] {
-  const file = process.platform === "win32" ? `${name}.exe` : name;
-  const folders = new Set([...(process.env.PATH ?? "").split(delimiter), ...standardFolders(), ...extraFolders]);
+export function findExecutables(name: string, env: Record<string, string | undefined> = process.env, extraFolders: string[] = []): string[] {
+  const files = process.platform === "win32" ? [`${name}.exe`, `${name}.cmd`, name] : [name];
+  const folders = new Set([...(env.PATH ?? "").split(delimiter), ...standardFolders(), ...extraFolders]);
   const found: string[] = [];
   for (const folder of folders) {
     if (!folder) continue;
-    const candidate = join(folder, file);
-    if (isExecutable(candidate)) found.push(candidate);
+    for (const file of files) {
+      const candidate = join(folder, file);
+      if (isExecutable(candidate)) found.push(candidate);
+    }
   }
   return found;
 }
 
-function isExecutable(path: string): boolean {
+/** Finds an executable, or throws with an install hint. */
+export function findExecutable(name: string, env: Record<string, string | undefined> = process.env, extraFolders: string[] = []): string {
+  const found = findExecutables(name, env, extraFolders)[0];
+  if (!found) throw new Error(`Could not find the '${name}' executable. Install it, or set executablePath to its full path.`);
+  return found;
+}
+
+function isExecutable(file: string): boolean {
   try {
-    accessSync(path, constants.X_OK);
-    return statSync(path).isFile();
+    accessSync(file, constants.X_OK);
+    return statSync(file).isFile();
   } catch {
     return false;
   }
-}
-
-/** The environment of the current process with `overrides` on top. */
-export function childEnv(overrides: Record<string, string> = {}): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value;
-  }
-  return { ...env, ...overrides };
 }
 
 /**
@@ -49,14 +49,17 @@ export function childEnv(overrides: Record<string, string> = {}): Record<string,
  * `node`, `npx`, and `uvx` when the host is a GUI app.
  */
 export async function harnessEnv(overrides: Record<string, string> = {}): Promise<Record<string, string>> {
-  const env = childEnv(overrides);
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
   const folders = [overrides.PATH, await loginShellPath(), process.env.PATH, standardFolders().join(delimiter)];
-  env.PATH = [...new Set(folders.flatMap((path) => (path ?? "").split(delimiter)).filter(Boolean))].join(delimiter);
-  return env;
+  env.PATH = [...new Set(folders.flatMap((entry) => (entry ?? "").split(delimiter)).filter(Boolean))].join(delimiter);
+  return { ...env, ...overrides, PATH: env.PATH };
 }
 
 const MARK = "__YAMI_PATH__";
-const SHELL_TIMEOUT_MS = 5_000;
+const SHELL_TIMEOUT_MS = 10_000;
 let shellPath: Promise<string | undefined> | undefined;
 
 /** Reads `PATH` from an interactive login shell, once for each process. */
@@ -73,4 +76,21 @@ export function loginShellPath(): Promise<string | undefined> {
     });
   });
   return shellPath;
+}
+
+/** Returns a function that shows a path relative to `cwd` when the path is inside it. */
+export function pathDisplay(cwd: string): (file: string) => string {
+  let real = cwd;
+  try {
+    real = realpathSync(cwd);
+  } catch {
+    // Keep the path as given.
+  }
+  return (file) => {
+    for (const root of [cwd, real]) {
+      const relative = path.relative(root, file);
+      if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) return relative;
+    }
+    return file;
+  };
 }

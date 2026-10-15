@@ -1,173 +1,153 @@
-import type {
-  PermissionDecision,
-  PermissionHandler,
-  PermissionRequest,
-  SessionEvent,
-  SessionListener,
-  TurnResult,
+import {
+  type AgentEvent,
+  type AgentEventListener,
+  type AgentSession,
+  type CommandOption,
+  type Harness,
+  type ModelOption,
+  type PermissionDecision,
+  type PermissionHandler,
+  type PermissionRequest,
+  SessionClosedError,
+  type SessionSettings,
+  type TurnResult,
 } from "./types.js";
 
-type ReadyEvent = Omit<Extract<SessionEvent, { type: "ready" }>, "type">;
-type Outcome = Omit<TurnResult, "status"> & { status: "success" | "error" };
+interface QueuedMessage {
+  text: string;
+  resolve(result: TurnResult): void;
+  reject(error: Error): void;
+}
 
 /**
- * One conversation with a harness. The base class runs one turn at a time,
- * delivers events, and closes the session. A subclass runs the turns: it
- * implements the abstract methods and reports through `ready`, `emit`,
- * `askPermission`, `endTurn`, and `finish`.
+ * Shared turn queue and event delivery. A turn becomes active inside `send`,
+ * so `interrupt` right after `send` stops that turn.
  */
-export abstract class Session {
-  private sessionId: string | undefined;
-  private isClosed = false;
-  private readonly listeners = new Set<SessionListener>();
-  private permissionHandler: PermissionHandler | undefined;
-  private readonly openPrompts = new Set<AbortController>();
-  private turn:
-    | { resolve(result: TurnResult): void; reject(error: Error): void; interrupted: boolean }
-    | undefined;
+export abstract class BaseSession implements AgentSession {
+  abstract readonly harness: Harness;
+  abstract readonly id: string;
 
-  /** Known after the `ready` event. */
-  get id(): string | undefined {
-    return this.sessionId;
-  }
+  private readonly listeners = new Set<AgentEventListener>();
+  private readonly queue: QueuedMessage[] = [];
+  private active: ActiveTurn | undefined;
+  private closeReason: string | undefined;
+  private isClosed = false;
 
   get closed(): boolean {
     return this.isClosed;
   }
 
-  /**
-   * Sends one prompt and resolves when the turn ends. A turn that the harness
-   * ends with an error resolves with `status: "error"`. The promise rejects
-   * only when the session cannot run the turn.
-   */
-  send(prompt: string): Promise<TurnResult> {
-    if (this.isClosed) return Promise.reject(new Error("The session is closed."));
-    if (this.turn) {
-      return Promise.reject(new Error("A turn is already running. Wait for it to end, or call interrupt()."));
-    }
-    return new Promise((resolve, reject) => {
-      this.turn = { resolve, reject, interrupted: false };
-      try {
-        this.startTurn(prompt);
-      } catch (error) {
-        this.turn = undefined;
-        reject(error);
-      }
-    });
-  }
-
-  /** Returns a function that removes the listener. */
-  subscribe(listener: SessionListener): () => void {
+  on(listener: AgentEventListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  /**
-   * Sets the handler for requests that `access` does not allow by itself.
-   * Without a handler, the session denies each request.
-   */
-  setPermissionHandler(handler: PermissionHandler | undefined): void {
-    this.permissionHandler = handler;
+  send(text: string): Promise<TurnResult> {
+    if (this.isClosed) return Promise.reject(new SessionClosedError(this.closeReason));
+    return new Promise((resolve, reject) => {
+      this.queue.push({ text, resolve, reject });
+      if (!this.active) this.startNext();
+    });
   }
 
-  /** Ends the current turn with status `interrupted`. The session stays open. */
   async interrupt(): Promise<void> {
-    if (!this.turn || this.isClosed) return;
-    this.turn.interrupted = true;
-    this.withdrawPrompts();
-    await this.stopTurn();
+    const turn = this.active;
+    if (!turn || turn.interruptRequested) return;
+    turn.interruptRequested = true;
+    turn.controller.abort();
+    await this.interruptTurn(turn);
   }
 
-  close(): void {
-    this.finish();
+  abstract close(): Promise<void>;
+  abstract models(): Promise<ModelOption[]>;
+  abstract commands(): Promise<CommandOption[]>;
+  abstract configure(settings: SessionSettings): Promise<void>;
+
+  /** Sends the message to the harness. The adapter calls `turn.finish` when the harness ends the turn. */
+  protected abstract startTurn(text: string, turn: ActiveTurn): Promise<void>;
+
+  protected abstract interruptTurn(turn: ActiveTurn): Promise<void>;
+
+  protected get currentTurn(): ActiveTurn | undefined {
+    return this.active;
   }
 
-  /** Starts a turn. The turn must end with `endTurn` or `finish`. */
-  protected abstract startTurn(prompt: string): void;
-  protected abstract stopTurn(): Promise<void>;
-  /** Releases the harness resources. Runs once, when the session closes. */
-  protected abstract dispose(): void;
-
-  /** Sets the session ID. Only the first call emits `ready`. */
-  protected ready(event: ReadyEvent): void {
-    if (this.sessionId) return;
-    this.sessionId = event.sessionId;
-    this.emit({ type: "ready", ...event });
-  }
-
-  /**
-   * Asks the permission handler, and denies when there is none, when no turn
-   * is running, or when the request is withdrawn. `signal` lets the harness
-   * withdraw the request.
-   */
-  protected async askPermission(request: PermissionRequest, signal?: AbortSignal): Promise<PermissionDecision> {
-    let decision: PermissionDecision = "deny";
-    const handler = this.permissionHandler;
-    if (handler && this.turn && !this.isClosed && !signal?.aborted) {
-      const prompt = new AbortController();
-      const withdraw = () => prompt.abort();
-      signal?.addEventListener("abort", withdraw);
-      this.openPrompts.add(prompt);
-      try {
-        decision = await Promise.race([
-          handler(request, prompt.signal),
-          new Promise<PermissionDecision>((resolve) => prompt.signal.addEventListener("abort", () => resolve("deny"))),
-        ]);
-      } catch {
-        decision = "deny";
-      } finally {
-        signal?.removeEventListener("abort", withdraw);
-        this.openPrompts.delete(prompt);
-      }
-      if (prompt.signal.aborted) decision = "deny";
-    }
-    this.emit({ type: "permission", request, decision });
-    return decision;
-  }
-
-  protected endTurn(outcome: Outcome): void {
-    const turn = this.turn;
-    if (!turn) return;
-    this.turn = undefined;
-    this.withdrawPrompts();
-    const result: TurnResult = { ...outcome, status: turn.interrupted ? "interrupted" : outcome.status };
-    this.emit({ type: "turn-end", result });
-    turn.resolve(result);
-  }
-
-  protected finish(error?: Error): void {
-    if (this.isClosed) return;
-    this.isClosed = true;
-    this.withdrawPrompts();
-    this.dispose();
-    this.turn?.reject(error ?? new Error("The session closed before the turn ended."));
-    this.turn = undefined;
-    this.emit({ type: "closed", error });
-  }
-
-  private withdrawPrompts(): void {
-    for (const prompt of this.openPrompts) prompt.abort();
-    this.openPrompts.clear();
-  }
-
-  protected emit(event: SessionEvent): void {
+  protected emit(event: AgentEvent): void {
+    if (event.type === "tool-start") event = { ...event, title: oneLine(event.title) };
     for (const listener of this.listeners) {
       try {
         listener(event);
       } catch (error) {
-        queueMicrotask(() => {
-          throw error;
-        });
+        console.error("yami: event listener threw", error);
       }
     }
   }
+
+  /** Closes the session once: ends the active turn, rejects queued messages and emits `closed`. */
+  protected markClosed(error?: string): void {
+    if (this.isClosed) return;
+    this.isClosed = true;
+    this.closeReason = error;
+    this.active?.finish({ status: error ? "failed" : "interrupted", text: "", error: error ?? "Session closed" });
+    this.rejectQueued();
+    this.emit({ type: "closed", error });
+  }
+
+  private startNext(): void {
+    const message = this.queue.shift();
+    if (!message) return;
+    const turn = new ActiveTurn();
+    const started = Date.now();
+    this.active = turn;
+    this.emit({ type: "turn-start", prompt: message.text });
+    this.startTurn(message.text, turn).catch((error: unknown) =>
+      turn.finish({ status: "failed", text: "", error: error instanceof Error ? error.message : String(error) }),
+    );
+    void turn.result.then((finished) => {
+      const result: TurnResult = { ...finished, usage: { ...finished.usage, durationMs: Date.now() - started } };
+      this.active = undefined;
+      this.emit({ type: "turn-end", result });
+      message.resolve(result);
+      if (this.isClosed) this.rejectQueued();
+      else this.startNext();
+    });
+  }
+
+  private rejectQueued(): void {
+    for (const message of this.queue.splice(0)) message.reject(new SessionClosedError(this.closeReason));
+  }
 }
 
-/** Returns the text of a tool result: a string, or a list of content blocks. */
-export function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block) => (block?.type === "text" ? block.text : `[${block?.type}]`))
-    .join("\n");
+export class ActiveTurn {
+  /** Aborts on interrupt and when the turn ends, so open permission prompts can close. */
+  readonly controller = new AbortController();
+  readonly result: Promise<TurnResult>;
+  interruptRequested = false;
+  private resolve!: (result: TurnResult) => void;
+
+  constructor() {
+    this.result = new Promise((resolve) => {
+      this.resolve = resolve;
+    });
+  }
+
+  finish(result: TurnResult): void {
+    this.controller.abort();
+    this.resolve(result);
+  }
+}
+
+/** Shortens text to one line of at most `max` characters. */
+export function oneLine(text: string, max = 100): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+export async function askPermission(handler: PermissionHandler | undefined, request: PermissionRequest): Promise<PermissionDecision> {
+  if (!handler) return "deny";
+  try {
+    return await handler({ ...request, title: oneLine(request.title) });
+  } catch {
+    return "deny";
+  }
 }

@@ -40,25 +40,21 @@ Open the developer console with **View → Toggle Developer Tools**. Then type:
 ```js
 const agent = yami.claude;              // or yami.codex
 await agent.connect();                  // shows the harness version and account
-agent.setPreferences({ effort: "low" });
-const session = agent.startSession();
-session.subscribe((event) => console.log(event));
+const session = await agent.startSession({ onPermission: async (request) => "allow" });
+session.on((event) => console.log(event));
 await session.send("Which notes are in this vault?");
 ```
 
-The agents read files in the vault without asking. Anything else, such as changing a note, needs a permission handler. A session in the console has none, so the agent's requests are denied. To let an agent change notes without asking, start a session with `agent.startSession({ access: "edit" })`, or set a handler with `session.setPermissionHandler(async (request) => "allow")`. To make an agent with other options, use `new yami.ClaudeAgent({ ... })` or `new yami.CodexAgent({ ... })`. For the full agent API, see [`yami/README.md`](../yami/README.md).
-
-The command **Open test view** opens a chat panel in the right sidebar. The panel asks you about each permission request, with **Allow**, **Allow for session**, and **Deny** buttons.
+Without `onPermission`, the agent's requests to change files or run commands are denied. For the full agent API, see [`yami/README.md`](../yami/README.md).
 
 The agents start processes, so the plugin works only on desktop.
 
 ## Try the hello module
 
-The hello module is the smallest Yami module: one policy, one promise, and one skill. Three commands drive it:
+The hello module is the smallest Yami module: one policy, one promise, and one skill. When the plugin loads, it writes the files of each module that are missing: `Yami.base`, `hello/sessions.base`, and the module's documents under `internal/hello/`. Files that exist stay as they are, so you can edit the bases and the documents. Two commands drive the module:
 
-1. **Hello: enable module** writes `Yami.base`, `hello/sessions.base`, and the module's documents under `internal/hello/`.
-2. **Hello: new session** creates `hello/Session <time>.md` and opens it. Its properties link the policy, the promise, and the skill, and `greeting` is the module's own field, which you can change.
-3. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs, and `internal/hello/logs/` has the full exchange.
+1. **Hello: new session** creates `hello/Session <time>.md` and opens it. Its properties link the policy, the promise, and the skill, and `greeting` is the module's own field, which you can change.
+2. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs, and `internal/hello/logs/` has the full exchange.
 
 A run does not ask for permissions. Requests that `edit` access does not allow are denied.
 

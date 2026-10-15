@@ -1,6 +1,7 @@
 export type { Properties, Vault } from "./vault.js";
 export {
   basename,
+  documentName,
   link,
   linksOf,
   linkTarget,

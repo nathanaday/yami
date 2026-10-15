@@ -94,12 +94,13 @@ export function sessionSchema(module: Module): Schema {
 
 /**
  * Writes the ledgers, the module document, and the module's documents. It
- * does not overwrite a module document that exists, so edits in the vault stay.
+ * writes only files that do not exist, so edits in the vault stay, and a host
+ * can call it on every start.
  */
 export async function enableModule(vault: Vault, module: Module): Promise<Layout> {
   const lay = layout(module);
-  await vault.write(VAULT_LEDGER, vaultLedger(vault));
-  await vault.write(lay.ledger, moduleLedger(vault, module.id, lay.sessions));
+  if (!(await vault.exists(VAULT_LEDGER))) await vault.write(VAULT_LEDGER, vaultLedger(vault));
+  if (!(await vault.exists(lay.ledger))) await vault.write(lay.ledger, moduleLedger(vault, module.id, lay.sessions));
   if (!(await vault.exists(lay.moduleDoc))) {
     await writeDocument(vault, {
       path: lay.moduleDoc,
@@ -127,10 +128,10 @@ export async function createSession(vault: Vault, module: Module, name: string, 
       type: "session",
       module: module.id,
       created: timestamp(),
-      articles: (defaults.articles ?? []).map(link),
-      policies: (defaults.policies ?? []).map(link),
-      promises: (defaults.promises ?? []).map(link),
-      skills: (defaults.skills ?? []).map(link),
+      articles: (defaults.articles ?? []).map((name) => link(`${lay.folders.articles}/${name}.md`)),
+      policies: (defaults.policies ?? []).map((name) => link(`${lay.folders.policies}/${name}.md`)),
+      promises: (defaults.promises ?? []).map((name) => link(`${lay.folders.promises}/${name}.md`)),
+      skills: (defaults.skills ?? []).map((name) => link(skillPath(lay, name))),
       ...fields,
     },
     sessionSchema(module),

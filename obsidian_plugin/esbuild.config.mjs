@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { builtinModules } from "node:module";
 import esbuild from "esbuild";
 
@@ -42,10 +43,28 @@ const claudeSdkInRenderer = {
   },
 };
 
+/**
+ * The MCP SDK validates JSON Schemas with ajv, which compiles each schema with
+ * `new Function`. Obsidian's review rejects code that generates code, so the
+ * bundle uses the SDK's interpreting validator instead.
+ */
+const mcpValidator = {
+  name: "mcp-validator",
+  setup(build) {
+    build.onResolve({ filter: /\/validation\/ajv-provider\.js$/ }, () => ({ path: "mcp-validator", namespace: "mcp-validator" }));
+    build.onLoad({ filter: /.*/, namespace: "mcp-validator" }, () => ({
+      loader: "js",
+      // The MCP SDK and the validator are dependencies of yami, so resolve from there.
+      resolveDir: fileURLToPath(new URL("./node_modules/yami/", import.meta.url)),
+      contents: `export { CfWorkerJsonSchemaValidator as AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker";`,
+    }));
+  },
+};
+
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
-  plugins: [claudeSdkInRenderer],
+  plugins: [claudeSdkInRenderer, mcpValidator],
   external: [
     "obsidian",
     "electron",

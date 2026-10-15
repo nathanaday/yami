@@ -63,7 +63,7 @@ yami/agent        the Agent and Session base classes, one adapter for each harne
 1. A layer imports only the layers below it.
 2. `yami/document` and `yami/module` do not import the Obsidian API. The `Vault` interface is the whole file system contract, and the plugin implements it. Tests implement it over the file system.
 3. `yami/agent` does not know about documents, modules, or the vault. Its types do not expose harness SDK types, so a host can hold an `Agent` or a `Session` without knowing the harness.
-4. The `Agent` and `Session` base classes hold what the harnesses share: preferences, session tracking, events, one turn at a time, interrupt, close, and permission requests. An adapter implements `connect`, `createSession`, `startTurn`, `stopTurn`, and `dispose`, and reports through `ready`, `emit`, `askPermission`, `endTurn`, and `finish`.
+4. The `Agent` and `BaseSession` classes hold what the harnesses share: preferences, session tracking, the turn queue, event delivery, interrupt, and close. An adapter implements `startTurn`, `interruptTurn`, `close`, `models`, `commands`, and `configure`, and reports through `emit`, `askPermission`, `turn.finish`, and `markClosed`. The session contract came from Duet, and Duet uses it from here.
 5. Each harness adapter is its own entry point (`yami/agent/claude`, `yami/agent/codex`), so a host bundles only the SDKs it imports.
 6. The plugin holds no agent logic. It implements `Vault`, registers commands, and renders views. A command calls one SDK function.
 
@@ -87,18 +87,19 @@ If none of these fit, the design needs a change to this document before the code
 There is one loop, `runSession` in `yami/src/module/run.ts`. Modules do not have their own.
 
 1. **Context.** The first prompt holds the session document, the module's session fields, and the content of every linked policy, promise, skill, and article. Later prompts hold only the verification feedback, because the harness session keeps the conversation.
-2. **Action.** One agent turn, with `edit` access and the vault as the working directory.
+2. **Action.** One agent turn, with `accept-edits` approval and the vault as the working directory.
 3. **Verification.** Yami runs the check of each promise and records the outcome in the session document and the log.
 
 The session ends `done` when every promise is met; `needs-attention` when the iterations run out or a promise has no check; `failed` when the harness ends a turn with an error. `needs-attention` is the state for a person to look at, and the ledgers show it. A later run continues the iteration count.
 
-## Access and permissions
+## Approval and permissions
 
-1. `access` sets what the agent does without asking: `read-only` reads files in the working directory; `edit` also changes them. Everything else is a permission request.
-2. Each harness enforces `access` in its own way, and the differences are in the `yami/agent` README. Code outside `yami/agent` does not depend on them.
+1. `approval` sets what the agent does without asking: `ask`, `accept-edits`, `plan`, `auto`, or `sandbox`. Everything else is a permission request. `access: read-only` is a hard limit: no changes, no commands that change files, and no requests.
+2. Each harness maps the setting in its own way, and the differences are in the `yami/agent` README. Code outside `yami/agent` does not depend on them.
 3. A session without a permission handler denies every request. The host decides whether to prompt, and how.
-4. Approvals go to the user, never to an automatic reviewer that a harness configuration selects.
+4. Approvals go to the user, never to an automatic reviewer that a harness configuration selects. An `allow-session` decision applies to the session only, never to the user's settings files.
 5. The user's own harness setup applies: settings, `CLAUDE.md` and `AGENTS.md`, skills, plugins, MCP servers, and permission rules. Isolation is an option (`settingSources` for Claude), not the default.
+6. A UI gets the same data from both harnesses: tool titles, diffs as details, relative paths, streaming deltas, and reasoning summaries. An adapter normalizes; a UI never special-cases a harness.
 
 ## Harness adapters
 
@@ -108,18 +109,17 @@ These facts cost days to learn. Keep them true, and read the `yami/agent` README
 2. A harness process gets the `PATH` of the user's login shell first. Obsidian starts with a short `PATH`.
 3. Claude has a stall watchdog. Codex has its own stream timeout.
 4. Codex stops its commands only when its server stops. An interrupt stops the server and resumes the thread on a new one.
-5. The Claude Agent SDK expects Node's timers, `AbortController`, and `import.meta`. In Obsidian's renderer the globals are Chromium's. The plugin's `esbuild.config.mjs` fixes all three, for the SDK's own files only.
+5. Both harnesses ignore an interrupt that arrives before the turn starts on their side. The adapters wait for the start, then interrupt.
+6. The Claude Agent SDK expects Node's timers, `AbortController`, and `import.meta`, and the MCP SDK compiles schemas with `new Function`. In Obsidian's renderer the globals are Chromium's, and Obsidian's review rejects generated code. The plugin's `esbuild.config.mjs` fixes all four, for the SDKs' own files only.
 
 ## Testing
 
 A change is done when these pass, and the report says which ran:
 
-1. **Loop and document logic:** tests with a scripted fake agent and a file system `Vault`. No harness, no API key, deterministic. Every state of the loop has a case.
-2. **Harness adapters:** runs against the real CLIs. Connect, a turn with a tool, memory across turns, interrupt, close, and no process left behind.
-3. **Plugin changes:** the bundled `main.js` loaded in Electron 33 (Obsidian's version) with Obsidian's short `PATH`. Plain Node cannot catch renderer bugs, and three of them have happened.
+1. **Unit tests** (`npm test` in `yami/`): the session queue, each adapter against a scripted harness (`test/fixtures/fake-codex.mjs`), and the loop and document logic with a fake agent and a file system `Vault`. No harness, no API key, deterministic. Every state of the loop has a case.
+2. **Live tests** (`npm run test:live`): the same scenarios against the real CLIs, for both harnesses. Connect, a turn with a tool, approvals, interrupt, a command stopped on interrupt, queued messages, resume, and no process left behind.
+3. **Plugin changes:** the bundled `main.js` loaded in Electron 33 (Obsidian's version) with Obsidian's short `PATH`. Plain Node cannot catch renderer bugs, and three of them have happened. This harness still lives in a scratch folder; moving it in, as a test that drives the real Obsidian app, is the next testing task.
 4. A guard in the build fails when a dependency changes shape, instead of a silent no-op.
-
-The Electron harness and the fake-agent tests are not in the repository yet; they live in a scratch folder. Moving them in is the next testing task.
 
 ## Documentation
 

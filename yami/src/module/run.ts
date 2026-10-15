@@ -1,7 +1,8 @@
 import type { Agent } from "../agent/agent.js";
-import type { PermissionHandler, SessionEvent } from "../agent/types.js";
+import type { AgentEvent, PermissionHandler } from "../agent/types.js";
 import {
   basename,
+  documentName,
   link,
   linksOf,
   parseDocument,
@@ -18,9 +19,9 @@ import { layout, readSession, skillPath, type Layout, type LinkedKind, type Modu
 export interface RunOptions {
   /** Turns the agent gets to meet every promise. Defaults to 3. */
   maxIterations?: number;
-  /** Answers the requests that `edit` access does not allow. Without one, they are denied. */
+  /** Answers the requests that the approval setting does not allow. Without one, they are denied. */
   permissions?: PermissionHandler;
-  onEvent?: (event: SessionEvent) => void;
+  onEvent?: (event: AgentEvent) => void;
 }
 
 export interface RunResult {
@@ -57,13 +58,14 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
     d.properties.harness = agent.harness;
   });
 
-  const session = agent.startSession({ cwd: vault.root, access: "edit", instructions: module.instructions });
-  session.setPermissionHandler(options.permissions);
-  session.subscribe((event) => {
-    options.onEvent?.(event);
-    if (event.type === "ready") void updateDocument(vault, path, (d) => (d.properties.harness_session = event.sessionId));
-    if (event.type === "permission") void log.append(`- permission ${event.decision}: ${event.request.kind} ${event.request.tool}`);
+  const session = await agent.startSession({
+    cwd: vault.root,
+    approval: "accept-edits",
+    instructions: module.instructions,
+    onPermission: options.permissions,
   });
+  session.on((event) => options.onEvent?.(event));
+  doc = await updateDocument(vault, path, (d) => (d.properties.harness_session = session.id));
 
   let state: SessionState = "needs-attention";
   let iteration = start;
@@ -73,14 +75,14 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
       iteration += 1;
       await log.append(`## Iteration ${iteration}\n\n### Prompt\n\n${prompt}\n`);
       const result = await session.send(prompt);
-      await log.append(`### Reply (${result.status})\n\n${result.text}\n${result.errors.map((e) => `\n> ${e}`).join("")}\n`);
-      if (result.status !== "success") {
+      await log.append(`### Reply (${result.status})\n\n${result.text}\n${result.error ? `\n> ${result.error}` : ""}\n`);
+      if (result.status !== "completed") {
         state = "failed";
-        await record(vault, path, iteration, `turn ${result.status}: ${result.errors.join("; ") || "no details"}`, undefined, state);
+        await record(vault, path, iteration, `turn ${result.status}: ${result.error ?? "no details"}`, undefined, state);
         break;
       }
       const verification = await verify(vault, name, doc, linked.promises);
-      await log.append(`### Verification\n\n${verification.results.map(({ promise, result }) => `- ${basename(promise.path)}: ${result.status}, ${result.detail}`).join("\n")}\n`);
+      await log.append(`### Verification\n\n${verification.results.map(({ promise, result }) => `- ${documentName(promise.path)}: ${result.status}, ${result.detail}`).join("\n")}\n`);
       const summary = `${verification.met.length} met, ${verification.unmet.length} unmet${verification.review.length ? `, ${verification.review.length} for review` : ""}`;
       if (verification.unmet.length === 0) {
         state = verification.review.length === 0 ? "done" : "needs-attention";
@@ -91,7 +93,7 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
       prompt = feedbackPrompt(verification);
     }
   } finally {
-    session.close();
+    await session.close();
   }
   return { path, state, iterations: iteration - start };
 }
@@ -151,7 +153,7 @@ function contextPrompt(module: Module, doc: Document, linked: Linked, path: stri
     .map((field) => `- ${field}: ${String(doc.properties[field] ?? "")}`)
     .join("\n");
   const section = (title: string, docs: Document[], render: (d: Document) => string) =>
-    docs.length ? `## ${title}\n\n${docs.map((d) => `### ${basename(d.path)}\n\n${render(d)}`).join("\n\n")}` : "";
+    docs.length ? `## ${title}\n\n${docs.map((d) => `### ${documentName(d.path)}\n\n${render(d)}`).join("\n\n")}` : "";
   const promise = (d: Document) =>
     Object.entries(d.properties)
       .filter(([key]) => !["type", "module"].includes(key))
@@ -175,7 +177,7 @@ function contextPrompt(module: Module, doc: Document, linked: Linked, path: stri
 function feedbackPrompt(verification: Verification): string {
   const lines = verification.results
     .filter(({ result }) => result.status !== "met")
-    .map(({ promise, result }) => `- ${basename(promise.path)}: ${result.status}, ${result.detail}`);
+    .map(({ promise, result }) => `- ${documentName(promise.path)}: ${result.status}, ${result.detail}`);
   return `Yami checked the promises after your last turn.\n\n${lines.join("\n")}\n\nMeet the unmet promises. Follow the policies.`;
 }
 
