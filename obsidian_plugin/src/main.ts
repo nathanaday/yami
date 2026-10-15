@@ -2,6 +2,7 @@ import { FileSystemAdapter, Notice, Plugin } from "obsidian";
 import { createYami } from "yami";
 import { ClaudeAgent } from "yami/agent/claude";
 import { CodexAgent } from "yami/agent/codex";
+import { TEST_VIEW, TestView } from "./test-view";
 
 declare global {
   interface Window {
@@ -32,6 +33,13 @@ export default class YamiPlugin extends Plugin {
     this.codex = new CodexAgent({ preferences: { cwd } });
     window.yami = { claude: this.claude, codex: this.codex, ClaudeAgent, CodexAgent };
 
+    this.registerView(TEST_VIEW, (leaf) => new TestView(leaf, { claude: this.claude, codex: this.codex }));
+    this.addCommand({
+      id: "open-test-view",
+      name: "Open test view",
+      callback: () => this.openTestView(),
+    });
+
     this.addRibbonIcon("hand", "HeelllooOOoOoOOOOoooo", () => this.sayHello());
 
     this.addCommand({
@@ -45,6 +53,18 @@ export default class YamiPlugin extends Plugin {
     this.claude.closeAll();
     this.codex.closeAll();
     delete window.yami;
+  }
+
+  private async openTestView() {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(TEST_VIEW)[0];
+    if (!leaf) {
+      const right = workspace.getRightLeaf(false);
+      if (!right) return;
+      leaf = right;
+      await leaf.setViewState({ type: TEST_VIEW, active: true });
+    }
+    await workspace.revealLeaf(leaf);
   }
 
   private sayHello() {
