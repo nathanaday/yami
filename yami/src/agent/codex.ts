@@ -2,16 +2,17 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
-import type { ThreadEvent, ThreadItem } from "@openai/codex-sdk";
 import { Agent } from "./agent.js";
+import type * as Codex from "./codex-protocol.js";
 import { childEnv, findExecutables } from "./executable.js";
+import { JsonRpcConnection } from "./jsonrpc.js";
 import { contentText, Session } from "./session.js";
-import type { AgentInfo, Preferences, Usage } from "./types.js";
+import type { AgentInfo, PermissionDecision, PermissionKind, Preferences, Usage } from "./types.js";
 
 export interface CodexPreferences extends Preferences {
-  /** Defaults to `disabled`. */
+  /** Defaults to the Codex configuration. */
   webSearch?: "disabled" | "cached" | "live";
-  /** Lets shell commands use the network. Applies only to `edit` access. Defaults to false. */
+  /** Lets shell commands use the network without asking. Applies to `edit` access. Defaults to the Codex configuration. */
   networkAccess?: boolean;
 }
 
@@ -24,32 +25,12 @@ export interface CodexAgentOptions {
   executable?: string;
   /** Variables added to the CLI environment, for example `CODEX_HOME`. */
   env?: Record<string, string>;
-  /**
-   * Raw `key=value` TOML entries, each sent as `--config`. They come after the
-   * settings of the agent, so they can change them.
-   */
+  /** Raw `key=value` TOML entries, each sent to `codex app-server` as `--config`. */
   config?: string[];
   preferences?: CodexPreferences;
 }
 
-/** Features that act outside the sandbox, or add tools from outside Codex. */
-const DISABLED_FEATURES = [
-  "apps",
-  "plugins",
-  "remote_plugin",
-  "plugin_sharing",
-  "browser_use",
-  "browser_use_external",
-  "computer_use",
-  "in_app_browser",
-  "image_generation",
-  "multi_agent",
-  "goals",
-  "tool_suggest",
-  "skill_mcp_dependency_install",
-  "hooks",
-  "workspace_dependencies",
-];
+const CLIENT = { name: "yami", version: "0.1.0" };
 
 export class CodexAgent extends Agent<CodexPreferences> {
   readonly harness = "codex";
@@ -62,22 +43,34 @@ export class CodexAgent extends Agent<CodexPreferences> {
 
   async connect(): Promise<AgentInfo> {
     const executable = this.requireExecutable();
-    const env = this.env(executable);
-    const version = await run(executable, ["--version"], env);
-    const status = await run(executable, ["login", "status"], env);
-    if (status.code !== 0) {
-      throw new Error(`Codex is not signed in. Run \`codex login\`. Codex said: ${status.output}`);
+    const version = await run(executable, ["--version"], this.env(executable));
+    const server = new AppServer(executable, this.serverArgs(), this.env(executable), {
+      notification: () => {},
+      request: async (method) => {
+        throw new Error(`Yami does not handle ${method}.`);
+      },
+    });
+    try {
+      await server.rpc.request("initialize", { clientInfo: CLIENT, capabilities: null });
+      server.rpc.notify("initialized");
+      const { account } = await server.rpc.request<Codex.Account>("account/read", { refreshToken: false });
+      if (!account) throw new Error("Codex is not signed in. Run `codex login`.");
+      return {
+        harness: this.harness,
+        version: version.output.replace(/^codex-cli\s+/, ""),
+        account:
+          account.type === "chatgpt" && "planType" in account
+            ? { login: "ChatGPT", email: account.email ?? undefined, subscription: account.planType }
+            : { login: account.type === "apiKey" ? "API key" : account.type },
+      };
+    } finally {
+      server.stop();
     }
-    return {
-      harness: this.harness,
-      version: version.output.replace(/^codex-cli\s+/, ""),
-      account: { login: status.output.match(/using (.+)$/m)?.[1] ?? status.output },
-    };
   }
 
   protected createSession(preferences: CodexPreferences): Session {
     const executable = this.requireExecutable();
-    return new CodexSession(executable, this.args(preferences), this.env(executable), preferences.model);
+    return new CodexSession(executable, this.serverArgs(), this.env(executable), threadParams(preferences));
   }
 
   private requireExecutable(): string {
@@ -94,223 +87,380 @@ export class CodexAgent extends Agent<CodexPreferences> {
     return env;
   }
 
-  private args(preferences: CodexPreferences): string[] {
-    const access = preferences.access ?? "read-only";
-    const config = [
-      `approval_policy="never"`,
-      `web_search=${toml(preferences.webSearch ?? "disabled")}`,
-      `sandbox_workspace_write.network_access=${preferences.networkAccess ?? false}`,
-      "sandbox_workspace_write.exclude_slash_tmp=true",
-      "sandbox_workspace_write.exclude_tmpdir_env_var=true",
-      ...DISABLED_FEATURES.map((feature) => `features.${feature}=false`),
-    ];
-    if (preferences.effort) config.push(`model_reasoning_effort=${toml(preferences.effort)}`);
-    if (preferences.instructions) config.push(`developer_instructions=${toml(preferences.instructions)}`);
-    config.push(...(this.options.config ?? []));
+  private serverArgs(): string[] {
+    return ["app-server", "--stdio", ...(this.options.config ?? []).flatMap((entry) => ["--config", entry])];
+  }
+}
 
-    const args = [
-      "exec",
-      "--json",
-      "--ignore-user-config",
-      "--ignore-rules",
-      "--skip-git-repo-check",
-      "--sandbox",
-      access === "edit" ? "workspace-write" : "read-only",
-    ];
-    if (preferences.cwd) args.push("--cd", preferences.cwd);
-    if (preferences.model) args.push("--model", preferences.model);
-    for (const entry of config) args.push("--config", entry);
-    return args;
+/**
+ * Approvals go to the user, not to an automatic reviewer that a user
+ * configuration can select. Writes to `/tmp` and `$TMPDIR` need approval too.
+ */
+function threadParams(preferences: CodexPreferences): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    "sandbox_workspace_write.exclude_slash_tmp": true,
+    "sandbox_workspace_write.exclude_tmpdir_env_var": true,
+  };
+  if (preferences.effort) config.model_reasoning_effort = preferences.effort;
+  if (preferences.webSearch) config.web_search = preferences.webSearch;
+  if (preferences.networkAccess !== undefined) config["sandbox_workspace_write.network_access"] = preferences.networkAccess;
+  return {
+    cwd: preferences.cwd ?? null,
+    model: preferences.model ?? null,
+    sandbox: preferences.access === "edit" ? "workspace-write" : "read-only",
+    approvalPolicy: "on-request",
+    approvalsReviewer: "user",
+    developerInstructions: preferences.instructions ?? null,
+    config,
+  };
+}
+
+/** One `codex app-server` process, with JSON-RPC on its stdio. */
+class AppServer {
+  readonly rpc: JsonRpcConnection;
+  readonly exited: Promise<Error>;
+  /** True after `stop()`, so that the exit is expected. */
+  stopped = false;
+  private readonly child: ChildProcess;
+  private stderr = "";
+
+  constructor(executable: string, args: string[], env: Record<string, string>, handlers: ConstructorParameters<typeof JsonRpcConnection>[1]) {
+    this.child = spawn(executable, args, { env, stdio: ["pipe", "pipe", "pipe"] });
+    this.child.stdin!.on("error", () => {});
+    this.child.stderr!.setEncoding("utf8").on("data", (chunk: string) => {
+      this.stderr = (this.stderr + chunk).slice(-4000);
+    });
+    this.rpc = new JsonRpcConnection((line) => this.child.stdin!.write(line), handlers);
+    createInterface({ input: this.child.stdout! }).on("line", (line) => this.rpc.receive(line.replace(ESCAPES, "")));
+    this.exited = new Promise<Error>((resolve) => {
+      this.child.once("error", (error) => resolve(error));
+      this.child.once("close", (code, signal) =>
+        resolve(new Error(`Codex app-server exited (${signal ?? `code ${code}`}). ${lastLine(this.stderr)}`.trim())),
+      );
+    }).then((error) => {
+      this.rpc.close(error);
+      return error;
+    });
+  }
+
+  /**
+   * Closes stdin, so that the server can stop its commands and exit. SIGINT and
+   * then SIGKILL follow if it does not exit.
+   */
+  stop(): void {
+    this.stopped = true;
+    const child = this.child;
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.stdin!.end();
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      return;
+    }
+    const interrupt = setTimeout(() => child.kill("SIGINT"), STOP_GRACE_MS);
+    const kill = setTimeout(() => child.kill("SIGKILL"), STOP_GRACE_MS + KILL_GRACE_MS);
+    child.once("close", () => {
+      clearTimeout(interrupt);
+      clearTimeout(kill);
+    });
   }
 }
 
 interface TurnState {
-  /** Codex numbers items again on each turn, so IDs get this prefix. */
-  prefix: string;
+  id?: string;
+  started: number;
   text: string;
   errors: string[];
-  failed: boolean;
   usage: Usage;
   calls: Set<string>;
+  items: Map<string, Codex.ThreadItem>;
+  interruptRequested: boolean;
 }
 
-/** Runs one `codex exec` process for each turn and resumes the thread by ID. */
+/**
+ * Keeps one `codex app-server` process and one thread open for the session.
+ * `turn/interrupt` ends a turn but leaves its commands running, and only a
+ * server that stops also stops its commands. So an interrupt stops the server,
+ * and the next turn resumes the thread on a new server.
+ */
 class CodexSession extends Session {
-  private child: ChildProcess | undefined;
-  private stopping = false;
-  private turns = 0;
+  private server!: AppServer;
+  private thread: Promise<string>;
+  private current: TurnState | undefined;
 
   constructor(
     private readonly executable: string,
     private readonly args: string[],
     private readonly env: Record<string, string>,
-    private readonly model: string | undefined,
+    private readonly params: Record<string, unknown>,
   ) {
     super();
+    this.thread = this.open();
+  }
+
+  /** Starts a server, then starts the thread, or resumes it when `threadId` is set. */
+  private open(threadId?: string): Promise<string> {
+    const server = new AppServer(this.executable, this.args, this.env, {
+      notification: (method, params) => {
+        if (server === this.server) this.notification(method, params as Record<string, unknown>);
+      },
+      request: (method, params) => this.request(method, params as Record<string, unknown>),
+    });
+    this.server = server;
+    void server.exited.then((error) => {
+      if (!server.stopped) this.finish(error);
+    });
+    const thread = (async () => {
+      await server.rpc.request("initialize", { clientInfo: CLIENT, capabilities: null });
+      server.rpc.notify("initialized");
+      if (threadId) {
+        await server.rpc.request("thread/resume", { ...this.params, threadId });
+        return threadId;
+      }
+      const response = await server.rpc.request<Codex.ThreadStartResponse>("thread/start", this.params);
+      this.ready({ sessionId: response.thread.id, model: response.model });
+      return response.thread.id;
+    })();
+    thread.catch((error: Error) => this.finish(error));
+    return thread;
   }
 
   protected startTurn(prompt: string): void {
-    void this.runTurn(prompt);
+    const turn: TurnState = {
+      started: Date.now(),
+      text: "",
+      errors: [],
+      usage: { inputTokens: 0, outputTokens: 0 },
+      calls: new Set(),
+      items: new Map(),
+      interruptRequested: false,
+    };
+    this.current = turn;
+    void (async () => {
+      try {
+        const threadId = await this.thread;
+        const response = await this.server.rpc.request<Codex.TurnStartResponse>("turn/start", {
+          threadId,
+          input: [{ type: "text", text: prompt, text_elements: [] }],
+        });
+        turn.id = response.turn.id;
+        if (turn.interruptRequested) await this.abort(turn);
+      } catch (error) {
+        turn.errors.push(error instanceof Error ? error.message : String(error));
+        this.endCurrent("error");
+      }
+    })();
   }
 
   protected async stopTurn(): Promise<void> {
-    this.stop();
+    const turn = this.current;
+    if (!turn) return;
+    turn.interruptRequested = true;
+    if (turn.id) await this.abort(turn);
   }
 
   protected dispose(): void {
-    this.stop();
+    const turn = this.current;
+    if (turn?.id) void this.server.rpc.request("turn/interrupt", { threadId: this.id, turnId: turn.id }).catch(() => {});
+    this.server.stop();
   }
 
-  /**
-   * On SIGINT, Codex ends the turn and stops the commands that it started.
-   * Each command runs in its own process group, so killing Codex alone, or its
-   * process group, leaves them running. SIGKILL follows if Codex does not exit.
-   */
-  private stop(): void {
-    const child = this.child;
-    if (!child || child.exitCode !== null || child.signalCode !== null) return;
-    this.stopping = true;
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    }
-    child.kill("SIGINT");
-    const timer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
-    child.once("close", () => clearTimeout(timer));
-  }
-
-  private async runTurn(prompt: string): Promise<void> {
-    const started = Date.now();
-    const turn: TurnState = {
-      prefix: `turn${++this.turns}/`,
-      text: "",
-      errors: [],
-      failed: false,
-      usage: { inputTokens: 0, outputTokens: 0 },
-      calls: new Set(),
-    };
+  /** Interrupts the turn, stops the server and its commands, and opens a new server for the thread. */
+  private async abort(turn: TurnState): Promise<void> {
+    const threadId = await this.thread;
     try {
-      const args = this.id ? [...this.args, "resume", this.id] : this.args;
-      const child = spawn(this.executable, args, {
-        env: this.env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      this.child = child;
-      this.stopping = false;
-      const exited = new Promise<{ code: number | null; signal: string | null; error?: Error }>((resolve) => {
-        child.once("error", (error) => resolve({ code: null, signal: null, error }));
-        child.once("close", (code, signal) => resolve({ code, signal }));
-      });
-      let stderr = "";
-      child.stderr!.setEncoding("utf8").on("data", (chunk: string) => {
-        stderr = (stderr + chunk).slice(-4000);
-      });
-      child.stdin!.on("error", () => {});
-      child.stdin!.end(prompt);
+      await this.server.rpc.request("turn/interrupt", { threadId, turnId: turn.id });
+    } catch {
+      // The turn has already ended, or the server has stopped.
+    }
+    this.server.stop();
+    this.endCurrent("error");
+    if (!this.closed) this.thread = this.open(threadId);
+  }
 
-      for await (const line of createInterface({ input: child.stdout! })) {
-        const event = parseEvent(line);
-        if (event) this.handle(event, turn);
+  private endCurrent(status: "success" | "error"): void {
+    const turn = this.current;
+    if (!turn) return;
+    this.current = undefined;
+    this.endTurn({
+      status,
+      text: turn.text,
+      errors: turn.errors,
+      usage: turn.usage,
+      durationMs: Date.now() - turn.started,
+    });
+  }
+
+  private notification(method: string, params: Record<string, unknown>): void {
+    const turn = this.current;
+    if (!turn || (params.threadId !== undefined && params.threadId !== this.id)) return;
+    switch (method) {
+      case "item/started": {
+        const { item } = params as unknown as Codex.ItemNotification;
+        turn.items.set(item.id, item);
+        this.call(item, turn);
+        return;
       }
-      const { code, signal, error } = await exited;
-      this.child = undefined;
-
-      if (error) turn.errors.push(error.message);
-      else if (this.stopping) {
-        // The stop was requested, so the exit status is expected.
-      } else if (signal) turn.errors.push(`Codex stopped on ${signal}.`);
-      else if (code !== 0 && !turn.failed) turn.errors.push(stderr.trim() || `Codex exited with code ${code}.`);
-      const ok = !turn.failed && !error && !signal && code === 0;
-      this.endTurn({ status: ok ? "success" : "error", ...this.outcome(turn, started) });
-    } catch (error) {
-      turn.errors.push(error instanceof Error ? error.message : String(error));
-      this.endTurn({ status: "error", ...this.outcome(turn, started) });
+      case "item/completed": {
+        const { item } = params as unknown as Codex.ItemNotification;
+        turn.items.set(item.id, item);
+        this.complete(item, turn);
+        return;
+      }
+      case "thread/tokenUsage/updated": {
+        const { last } = (params as unknown as Codex.TokenUsageNotification).tokenUsage;
+        turn.usage = {
+          inputTokens: turn.usage.inputTokens + last.inputTokens,
+          outputTokens: turn.usage.outputTokens + last.outputTokens,
+        };
+        return;
+      }
+      case "error": {
+        const { error, willRetry } = params as unknown as Codex.ErrorNotification;
+        if (!willRetry) turn.errors.push(error.message);
+        return;
+      }
+      case "turn/completed": {
+        const completed = (params as { turn: Codex.Turn }).turn;
+        if (turn.id && completed.id !== turn.id) return;
+        if (completed.error) turn.errors.push(completed.error.message);
+        this.endCurrent(completed.status === "completed" && !completed.error ? "success" : "error");
+        return;
+      }
     }
   }
 
-  private outcome(turn: TurnState, started: number) {
-    return { text: turn.text, errors: turn.errors, usage: turn.usage, durationMs: Date.now() - started };
-  }
-
-  private handle(event: ThreadEvent, turn: TurnState): void {
-    switch (event.type) {
-      case "thread.started":
-        this.ready({ sessionId: event.thread_id, model: this.model });
-        return;
-      case "item.started":
-        this.call(event.item, turn);
-        return;
-      case "item.completed":
-        this.complete(event.item, turn);
-        return;
-      case "turn.completed":
-        turn.usage = { inputTokens: event.usage.input_tokens, outputTokens: event.usage.output_tokens };
-        return;
-      case "turn.failed":
-        turn.failed = true;
-        turn.errors.push(event.error.message);
-        return;
-      case "error":
-        turn.failed = true;
-        turn.errors.push(event.message);
-        return;
+  /** Answers the requests that Codex sends to the client. */
+  private async request(method: string, params: Record<string, unknown>): Promise<unknown> {
+    switch (method) {
+      case "item/commandExecution/requestApproval": {
+        const request = params as unknown as Codex.CommandApprovalRequest;
+        const network = request.networkApprovalContext;
+        const decision = await this.askPermission({
+          kind: network ? "network" : "command",
+          tool: "shell",
+          input: network ? { host: network.host, command: request.command } : { command: request.command, cwd: request.cwd },
+          reason: request.reason ?? undefined,
+          canAllowForSession: true,
+        });
+        return { decision: approvalDecision(decision) };
+      }
+      case "item/fileChange/requestApproval": {
+        const request = params as unknown as Codex.FileChangeApprovalRequest;
+        const item = this.current?.items.get(request.itemId);
+        const decision = await this.askPermission({
+          kind: "edit",
+          tool: "apply_patch",
+          input: { changes: item?.type === "fileChange" ? changeList(item) : [], grantRoot: request.grantRoot ?? undefined },
+          reason: request.reason ?? undefined,
+          canAllowForSession: true,
+        });
+        return { decision: approvalDecision(decision) };
+      }
+      case "item/permissions/requestApproval": {
+        const { permissions, reason } = params as unknown as Codex.PermissionsApprovalRequest;
+        const kind: PermissionKind = permissions.network?.enabled
+          ? "network"
+          : permissions.fileSystem?.write?.length
+            ? "edit"
+            : "read";
+        const decision = await this.askPermission({
+          kind,
+          tool: "permissions",
+          input: permissions,
+          reason: reason ?? undefined,
+          canAllowForSession: true,
+        });
+        if (decision === "deny") return { permissions: {}, scope: "turn" };
+        const granted: Record<string, unknown> = {};
+        if (permissions.network) granted.network = permissions.network;
+        if (permissions.fileSystem) granted.fileSystem = permissions.fileSystem;
+        return { permissions: granted, scope: decision === "allow-for-session" ? "session" : "turn" };
+      }
+      case "mcpServer/elicitation/request": {
+        const request = params as unknown as Codex.ElicitationRequest;
+        const needsAnswers = request.mode === "url" || (request.requestedSchema?.required?.length ?? 0) > 0;
+        const decision = needsAnswers
+          ? "deny"
+          : await this.askPermission({
+              kind: "mcp",
+              tool: request.serverName,
+              input: request.requestedSchema,
+              reason: request.message,
+              canAllowForSession: false,
+            });
+        return decision === "deny"
+          ? { action: "decline", content: null, _meta: null }
+          : { action: "accept", content: {}, _meta: null };
+      }
+      case "item/tool/requestUserInput":
+        return { answers: {} };
+      default:
+        throw new Error(`Yami does not handle ${method}.`);
     }
   }
 
-  private call(item: ThreadItem, turn: TurnState): void {
+  private call(item: Codex.ThreadItem, turn: TurnState): void {
     const call = toolCall(item);
     if (!call || turn.calls.has(item.id)) return;
     turn.calls.add(item.id);
-    this.emit({ type: "tool-call", id: turn.prefix + item.id, ...call });
+    this.emit({ type: "tool-call", id: item.id, ...call });
   }
 
-  private complete(item: ThreadItem, turn: TurnState): void {
-    if (item.type === "agent_message") {
+  private complete(item: Codex.ThreadItem, turn: TurnState): void {
+    if (item.type === "agentMessage") {
       turn.text = item.text;
       this.emit({ type: "text", text: item.text });
-      return;
-    }
-    if (item.type === "error") {
-      turn.errors.push(item.message);
       return;
     }
     const result = toolResult(item);
     if (!result) return;
     this.call(item, turn);
-    this.emit({ type: "tool-result", id: turn.prefix + item.id, ...result });
+    this.emit({ type: "tool-result", id: item.id, ...result });
   }
 }
 
-function toolCall(item: ThreadItem): { name: string; input: unknown } | undefined {
+function approvalDecision(decision: PermissionDecision): string {
+  return decision === "allow" ? "accept" : decision === "allow-for-session" ? "acceptForSession" : "decline";
+}
+
+function changeList(item: Extract<Codex.ThreadItem, { type: "fileChange" }>) {
+  return item.changes.map((change) => ({ path: change.path, kind: change.kind.type }));
+}
+
+function toolCall(item: Codex.ThreadItem): { name: string; input: unknown } | undefined {
   switch (item.type) {
-    case "command_execution":
+    case "commandExecution":
       return { name: "shell", input: { command: item.command } };
-    case "file_change":
-      return { name: "apply_patch", input: { changes: item.changes } };
-    case "mcp_tool_call":
+    case "fileChange":
+      return { name: "apply_patch", input: { changes: changeList(item) } };
+    case "mcpToolCall":
       return { name: `${item.server}.${item.tool}`, input: item.arguments };
-    case "web_search":
+    case "dynamicToolCall":
+      return { name: item.namespace ? `${item.namespace}.${item.tool}` : item.tool, input: item.arguments };
+    case "webSearch":
       return { name: "web_search", input: { query: item.query } };
     default:
       return undefined;
   }
 }
 
-function toolResult(item: ThreadItem): { isError: boolean; output: string } | undefined {
+function toolResult(item: Codex.ThreadItem): { isError: boolean; output: string } | undefined {
   switch (item.type) {
-    case "command_execution":
-      return { isError: item.status === "failed" || (item.exit_code ?? 0) !== 0, output: item.aggregated_output };
-    case "file_change":
+    case "commandExecution":
       return {
-        isError: item.status === "failed",
-        output: item.changes.map((change) => `${change.kind} ${change.path}`).join("\n"),
+        isError: item.status === "failed" || item.status === "declined" || (item.exitCode ?? 0) !== 0,
+        output: item.aggregatedOutput ?? "",
       };
-    case "mcp_tool_call":
+    case "fileChange":
       return {
-        isError: item.status === "failed",
-        output: item.error?.message ?? contentText(item.result?.content),
+        isError: item.status === "failed" || item.status === "declined",
+        output: changeList(item).map((change) => `${change.kind} ${change.path}`).join("\n"),
       };
-    case "web_search":
+    case "mcpToolCall":
+      return { isError: item.status === "failed", output: item.error?.message ?? contentText(item.result?.content) };
+    case "dynamicToolCall":
+      return { isError: item.status === "failed" || item.success === false, output: contentText(item.contentItems) };
+    case "webSearch":
       return { isError: false, output: "" };
     default:
       return undefined;
@@ -320,21 +470,11 @@ function toolResult(item: ThreadItem): { isError: boolean; output: string } | un
 /** Terminal control sequences: CSI, OSC, and two-byte escapes. */
 const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]/g;
 
-function parseEvent(line: string): ThreadEvent | undefined {
-  const json = line.replace(ESCAPES, "").trim();
-  if (!json) return undefined;
-  try {
-    return JSON.parse(json) as ThreadEvent;
-  } catch {
-    return undefined;
-  }
-}
-
+const STOP_GRACE_MS = 2_000;
 const KILL_GRACE_MS = 3_000;
 
-/** JSON string syntax is valid TOML basic string syntax. */
-function toml(value: string): string {
-  return JSON.stringify(value);
+function lastLine(text: string): string {
+  return text.trim().split("\n").at(-1) ?? "";
 }
 
 function run(file: string, args: string[], env: Record<string, string>): Promise<{ code: number | null; output: string }> {

@@ -2,7 +2,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   query,
+  type CanUseTool,
   type Options,
+  type PermissionResult,
   type Query,
   type SDKMessage,
   type SDKUserMessage,
@@ -11,7 +13,7 @@ import {
 import { Agent } from "./agent.js";
 import { childEnv, findExecutables } from "./executable.js";
 import { contentText, Session } from "./session.js";
-import type { AgentInfo, Preferences } from "./types.js";
+import type { AgentInfo, PermissionKind, Preferences } from "./types.js";
 
 export interface ClaudePreferences extends Preferences {
   /** Cost limit for the session. The turn that passes it ends with status `error`. */
@@ -37,11 +39,6 @@ const STALL_MS = 60_000;
 /** After a stall, the time the CLI has to end the turn before the session closes. */
 const STALL_GRACE_MS = 10_000;
 const STALL_MESSAGE = "Claude sent no output for 60 s in the middle of a reply, so Yami stopped the turn.";
-
-const TOOLS = {
-  "read-only": ["Read", "Glob", "Grep"],
-  edit: ["Read", "Glob", "Grep", "Write", "Edit"],
-};
 
 export class ClaudeAgent extends Agent<ClaudePreferences> {
   readonly harness = "claude";
@@ -87,12 +84,8 @@ export class ClaudeAgent extends Agent<ClaudePreferences> {
       maxBudgetUsd: preferences.maxBudgetUsd,
       includePartialMessages: true,
       systemPrompt: { type: "preset", preset: "claude_code", append: preferences.instructions },
-      tools: TOOLS[access],
+      disallowedTools: ["AskUserQuestion"],
       permissionMode: access === "edit" ? "acceptEdits" : "default",
-      canUseTool: async (toolName) => ({
-        behavior: "deny",
-        message: `${toolName} is outside what ${access} access allows.`,
-      }),
       settingSources: this.options.settingSources ?? [],
       strictMcpConfig: true,
       pathToClaudeCodeExecutable: this.executable,
@@ -110,9 +103,33 @@ class ClaudeSession extends Session {
 
   constructor(options: Options) {
     super();
-    this.run = query({ prompt: this.input, options });
+    this.run = query({ prompt: this.input, options: { ...options, canUseTool: this.canUseTool } });
     void this.read();
   }
+
+  /** Claude Code calls this for each tool use that its permission mode does not allow by itself. */
+  private readonly canUseTool: CanUseTool = async (toolName, input, options): Promise<PermissionResult> => {
+    const suggestions = options.suggestions ?? [];
+    const decision = await this.askPermission(
+      {
+        kind: permissionKind(toolName),
+        tool: toolName,
+        input,
+        reason: options.title ?? options.decisionReason,
+        canAllowForSession: suggestions.length > 0,
+      },
+      options.signal,
+    );
+    if (decision === "deny") return { behavior: "deny", message: "The user denied this request." };
+    return {
+      behavior: "allow",
+      updatedInput: input,
+      updatedPermissions:
+        decision === "allow-for-session"
+          ? suggestions.map((suggestion) => ({ ...suggestion, destination: "session" as const }))
+          : undefined,
+    };
+  };
 
   protected startTurn(prompt: string): void {
     this.input.push({
@@ -207,6 +224,15 @@ class ClaudeSession extends Session {
     this.run.interrupt().catch(() => {});
     this.stallTimer = setTimeout(() => this.finish(new Error(STALL_MESSAGE)), STALL_GRACE_MS);
   }
+}
+
+function permissionKind(toolName: string): PermissionKind {
+  if (toolName.startsWith("mcp__")) return "mcp";
+  if (["Read", "Glob", "Grep", "LS", "NotebookRead"].includes(toolName)) return "read";
+  if (["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(toolName)) return "edit";
+  if (toolName === "Bash") return "command";
+  if (toolName === "WebFetch" || toolName === "WebSearch") return "network";
+  return "other";
 }
 
 /** The prompt stream of a session. It stays open until `end()`. */

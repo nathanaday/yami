@@ -1,5 +1,5 @@
 import { ItemView, MarkdownRenderer, type WorkspaceLeaf } from "obsidian";
-import type { Access, Agent, Session, SessionEvent } from "yami/agent";
+import type { Access, Agent, PermissionDecision, PermissionRequest, Session, SessionEvent } from "yami/agent";
 
 export const TEST_VIEW = "yami-test";
 
@@ -77,6 +77,7 @@ export class TestView extends ItemView {
 
   private start(agent: Agent, access: Access): Session {
     const session = agent.startSession({ access });
+    session.setPermissionHandler((request, signal) => this.ask(request, signal));
     session.subscribe((event) => {
       if (event.type === "closed" && this.session === session) this.session = undefined;
       this.render(event);
@@ -95,6 +96,8 @@ export class TestView extends ItemView {
         return this.line(`→ ${event.name} ${JSON.stringify(event.input)}`, "muted");
       case "tool-result":
         return this.line(`← ${event.output.slice(0, 300)}`, event.isError ? "error" : "muted");
+      case "permission":
+        return this.line(`${event.decision} · ${event.request.kind} · ${event.request.tool}`, "muted");
       case "turn-end": {
         const { status, durationMs, usage, costUsd, errors } = event.result;
         const cost = costUsd === undefined ? "" : ` · $${costUsd.toFixed(4)}`;
@@ -105,6 +108,32 @@ export class TestView extends ItemView {
       case "closed":
         return this.line(`session closed${event.error ? `: ${event.error.message}` : ""}`, event.error ? "error" : "muted");
     }
+  }
+
+  private ask(request: PermissionRequest, signal: AbortSignal): Promise<PermissionDecision> {
+    return new Promise((resolve) => {
+      const card = this.log.createDiv({
+        attr: { style: "border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 8px; margin: 6px 0" },
+      });
+      card.createDiv({ text: `Allow ${request.kind}: ${request.tool}?`, attr: { style: "font-weight: 600" } });
+      if (request.reason) card.createDiv({ text: request.reason });
+      card.createEl("pre", {
+        text: JSON.stringify(request.input, null, 2).slice(0, 1000),
+        attr: { style: "white-space: pre-wrap; font-size: var(--font-smaller)" },
+      });
+      const buttons = card.createDiv({ attr: { style: "display: flex; gap: 4px" } });
+      const decide = (decision: PermissionDecision) => {
+        card.remove();
+        resolve(decision);
+      };
+      buttons.createEl("button", { text: "Allow", cls: "mod-cta" }).onclick = () => decide("allow");
+      if (request.canAllowForSession) {
+        buttons.createEl("button", { text: "Allow for session" }).onclick = () => decide("allow-for-session");
+      }
+      buttons.createEl("button", { text: "Deny" }).onclick = () => decide("deny");
+      signal.addEventListener("abort", () => decide("deny"));
+      this.scroll();
+    });
   }
 
   private line(text: string, tone?: "muted" | "error") {

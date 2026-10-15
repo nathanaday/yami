@@ -46,7 +46,9 @@ session.subscribe((event) => console.log(event));
 await session.send("Which notes are in this vault?");
 ```
 
-The agents can read the vault and cannot change it. To let an agent change notes, start a session with `agent.startSession({ access: "edit" })`. To make an agent with other options, use `new yami.ClaudeAgent({ ... })` or `new yami.CodexAgent({ ... })`. For the full agent API, see [`yami/README.md`](../yami/README.md).
+The agents read files in the vault without asking. Anything else, such as changing a note, needs a permission handler. A session in the console has none, so the agent's requests are denied. To let an agent change notes without asking, start a session with `agent.startSession({ access: "edit" })`, or set a handler with `session.setPermissionHandler(async (request) => "allow")`. To make an agent with other options, use `new yami.ClaudeAgent({ ... })` or `new yami.CodexAgent({ ... })`. For the full agent API, see [`yami/README.md`](../yami/README.md).
+
+The command **Open test view** opens a chat panel in the right sidebar. The panel asks you about each permission request, with **Allow**, **Allow for session**, and **Deny** buttons.
 
 The agents start processes, so the plugin works only on desktop.
 

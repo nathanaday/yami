@@ -1,4 +1,11 @@
-import type { SessionEvent, SessionListener, TurnResult } from "./types.js";
+import type {
+  PermissionDecision,
+  PermissionHandler,
+  PermissionRequest,
+  SessionEvent,
+  SessionListener,
+  TurnResult,
+} from "./types.js";
 
 type ReadyEvent = Omit<Extract<SessionEvent, { type: "ready" }>, "type">;
 type Outcome = Omit<TurnResult, "status"> & { status: "success" | "error" };
@@ -7,12 +14,14 @@ type Outcome = Omit<TurnResult, "status"> & { status: "success" | "error" };
  * One conversation with a harness. The base class runs one turn at a time,
  * delivers events, and closes the session. A subclass runs the turns: it
  * implements the abstract methods and reports through `ready`, `emit`,
- * `endTurn`, and `finish`.
+ * `askPermission`, `endTurn`, and `finish`.
  */
 export abstract class Session {
   private sessionId: string | undefined;
   private isClosed = false;
   private readonly listeners = new Set<SessionListener>();
+  private permissionHandler: PermissionHandler | undefined;
+  private readonly openPrompts = new Set<AbortController>();
   private turn:
     | { resolve(result: TurnResult): void; reject(error: Error): void; interrupted: boolean }
     | undefined;
@@ -53,10 +62,19 @@ export abstract class Session {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Sets the handler for requests that `access` does not allow by itself.
+   * Without a handler, the session denies each request.
+   */
+  setPermissionHandler(handler: PermissionHandler | undefined): void {
+    this.permissionHandler = handler;
+  }
+
   /** Ends the current turn with status `interrupted`. The session stays open. */
   async interrupt(): Promise<void> {
     if (!this.turn || this.isClosed) return;
     this.turn.interrupted = true;
+    this.withdrawPrompts();
     await this.stopTurn();
   }
 
@@ -77,10 +95,41 @@ export abstract class Session {
     this.emit({ type: "ready", ...event });
   }
 
+  /**
+   * Asks the permission handler, and denies when there is none, when no turn
+   * is running, or when the request is withdrawn. `signal` lets the harness
+   * withdraw the request.
+   */
+  protected async askPermission(request: PermissionRequest, signal?: AbortSignal): Promise<PermissionDecision> {
+    let decision: PermissionDecision = "deny";
+    const handler = this.permissionHandler;
+    if (handler && this.turn && !this.isClosed && !signal?.aborted) {
+      const prompt = new AbortController();
+      const withdraw = () => prompt.abort();
+      signal?.addEventListener("abort", withdraw);
+      this.openPrompts.add(prompt);
+      try {
+        decision = await Promise.race([
+          handler(request, prompt.signal),
+          new Promise<PermissionDecision>((resolve) => prompt.signal.addEventListener("abort", () => resolve("deny"))),
+        ]);
+      } catch {
+        decision = "deny";
+      } finally {
+        signal?.removeEventListener("abort", withdraw);
+        this.openPrompts.delete(prompt);
+      }
+      if (prompt.signal.aborted) decision = "deny";
+    }
+    this.emit({ type: "permission", request, decision });
+    return decision;
+  }
+
   protected endTurn(outcome: Outcome): void {
     const turn = this.turn;
     if (!turn) return;
     this.turn = undefined;
+    this.withdrawPrompts();
     const result: TurnResult = { ...outcome, status: turn.interrupted ? "interrupted" : outcome.status };
     this.emit({ type: "turn-end", result });
     turn.resolve(result);
@@ -89,10 +138,16 @@ export abstract class Session {
   protected finish(error?: Error): void {
     if (this.isClosed) return;
     this.isClosed = true;
+    this.withdrawPrompts();
     this.dispose();
     this.turn?.reject(error ?? new Error("The session closed before the turn ended."));
     this.turn = undefined;
     this.emit({ type: "closed", error });
+  }
+
+  private withdrawPrompts(): void {
+    for (const prompt of this.openPrompts) prompt.abort();
+    this.openPrompts.clear();
   }
 
   protected emit(event: SessionEvent): void {
