@@ -32,6 +32,12 @@ export interface ClaudeAgentOptions {
   preferences?: ClaudePreferences;
 }
 
+/** With no stream event for this long inside a content block, the reply has stalled. */
+const STALL_MS = 60_000;
+/** After a stall, the time the CLI has to end the turn before the session closes. */
+const STALL_GRACE_MS = 10_000;
+const STALL_MESSAGE = "Claude sent no output for 60 s in the middle of a reply, so Yami stopped the turn.";
+
 const TOOLS = {
   "read-only": ["Read", "Glob", "Grep"],
   edit: ["Read", "Glob", "Grep", "Write", "Edit"],
@@ -79,6 +85,7 @@ export class ClaudeAgent extends Agent<ClaudePreferences> {
       model: preferences.model,
       effort: preferences.effort,
       maxBudgetUsd: preferences.maxBudgetUsd,
+      includePartialMessages: true,
       systemPrompt: { type: "preset", preset: "claude_code", append: preferences.instructions },
       tools: TOOLS[access],
       permissionMode: access === "edit" ? "acceptEdits" : "default",
@@ -98,6 +105,8 @@ export class ClaudeAgent extends Agent<ClaudePreferences> {
 class ClaudeSession extends Session {
   private readonly input = new InputQueue();
   private readonly run: Query;
+  private stallTimer: ReturnType<typeof setTimeout> | undefined;
+  private stalled = false;
 
   constructor(options: Options) {
     super();
@@ -118,6 +127,7 @@ class ClaudeSession extends Session {
   }
 
   protected dispose(): void {
+    clearTimeout(this.stallTimer);
     this.input.end();
     this.run.close();
   }
@@ -137,6 +147,9 @@ class ClaudeSession extends Session {
         if (message.subtype === "init") {
           this.ready({ sessionId: message.session_id, model: message.model, tools: message.tools });
         }
+        return;
+      case "stream_event":
+        this.watch(message.event.type);
         return;
       case "assistant":
         if (message.parent_tool_use_id) return;
@@ -158,12 +171,15 @@ class ClaudeSession extends Session {
         }
         return;
       case "result": {
+        this.watch("message_stop");
         const success = message.subtype === "success";
+        const errors = success ? (message.is_error ? [message.result] : []) : [...message.errors];
+        if (this.stalled) errors.push(STALL_MESSAGE);
         const usage = message.usage;
         this.endTurn({
-          status: success && !message.is_error ? "success" : "error",
+          status: success && !message.is_error && !this.stalled ? "success" : "error",
           text: success ? message.result : "",
-          errors: success ? [] : message.errors,
+          errors,
           usage: {
             inputTokens: usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
             outputTokens: usage.output_tokens,
@@ -171,9 +187,25 @@ class ClaudeSession extends Session {
           costUsd: message.total_cost_usd,
           durationMs: message.duration_ms,
         });
+        this.stalled = false;
         return;
       }
     }
+  }
+
+  /**
+   * Times the gaps between stream events while a content block streams. Time
+   * to the first token, tool runs, and waits between messages are not timed.
+   */
+  private watch(eventType: string): void {
+    clearTimeout(this.stallTimer);
+    this.stallTimer = eventType.startsWith("content_block") ? setTimeout(() => this.stall(), STALL_MS) : undefined;
+  }
+
+  private stall(): void {
+    this.stalled = true;
+    this.run.interrupt().catch(() => {});
+    this.stallTimer = setTimeout(() => this.finish(new Error(STALL_MESSAGE)), STALL_GRACE_MS);
   }
 }
 

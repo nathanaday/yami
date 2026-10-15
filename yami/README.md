@@ -67,15 +67,22 @@ Claude has no shell. Codex always has a shell, and its sandbox limits what the s
 The adapter uses the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview).
 
 - **One process for each session.** The session keeps one Claude Code process open and sends each prompt to it.
+- **Stall watchdog.** If a reply stops in the middle of a content block for 60 s, the session interrupts the turn, and the turn ends with an error. If the CLI does not respond within 10 s more, the session closes with the error. The watchdog does not time the wait for the first token, tool runs, or waits between messages.
 - **Your Claude Code setup does not apply.** The adapter loads no settings files and no MCP servers, including claude.ai connectors. To load settings files, set `settingSources: ["user"]`.
 - **Sign-in.** The CLI uses your Claude Code sign-in. To use a different account, set `env: { CLAUDE_CONFIG_DIR: "/Users/you/.claude-work" }`, or set `ANTHROPIC_API_KEY`.
 - **Executable.** The adapter runs the first `claude` CLI that it finds on `PATH`, in `~/.local/bin`, in `~/.claude/local`, in `/opt/homebrew/bin`, or in `/usr/local/bin`. GUI apps often start with a short `PATH`, so the search includes the standard folders. If the adapter finds no CLI, it uses the binary in the SDK package. That binary is not available in a bundled host such as the Obsidian plugin.
+- **Bundling for an Electron renderer.** A host such as Obsidian needs three changes in its bundler. The Obsidian plugin's `esbuild.config.mjs` has all three, and they apply only to the SDK's own files.
+  1. Define `import.meta.url`. The SDK calls `createRequire(import.meta.url)` on load, and a CJS bundle has no `import.meta`.
+  2. Give the SDK a version of `events.setMaxListeners` that skips Chromium `AbortSignal` objects. In a renderer, the global `AbortController` is Chromium's, and Node rejects its signals.
+  3. Give the SDK Node's timers. In a renderer, `setTimeout` is Chromium's and returns a number, and the SDK calls `.unref()` on the result when it stops a CLI process.
 
 ### Codex harness
 
 The adapter runs `codex exec --json` directly, and resumes the thread by ID on each turn. It does not use the [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk) at runtime, because the SDK cannot pass `--ignore-user-config` or `--ignore-rules`. The adapter imports only the SDK event types, which define the output of `codex exec --json`.
 
-- **One process for each turn.** The session starts `codex exec` for each prompt. `interrupt()` stops that process.
+- **One process for each turn.** The session starts `codex exec` for each prompt. `interrupt()` and `close()` send SIGINT, and Codex then stops the commands that it started. If Codex does not exit within 3 s, it gets SIGKILL. Each Codex command runs in its own process group, so SIGTERM to Codex, or to its process group, leaves the commands running.
+- **Stalls.** Codex has its own stream idle timeout and retries (`stream_idle_timeout_ms`), so the adapter has no watchdog.
+- **Output.** The adapter removes terminal control sequences from each output line before it parses the line as JSON.
 - **Your Codex setup does not apply.** The adapter ignores `~/.codex/config.toml` and your execpolicy rules. It also turns off each Codex feature that acts outside the sandbox or adds tools from outside Codex: apps, plugins, browser use, computer use, image generation, hooks, and others. To change a setting, add a raw TOML entry to `config`, for example `config: ['web_search="live"']`. These entries come last, so they can also undo the isolation.
 - **No Git check.** The adapter runs Codex with `--skip-git-repo-check`, because most vaults are not Git repositories. The sandbox still applies.
 - **Sign-in.** The CLI uses your Codex sign-in. `connect()` runs `codex login status` and throws an error if you are not signed in. To use a different account, set `env: { CODEX_HOME: "/Users/you/.codex-work" }`.

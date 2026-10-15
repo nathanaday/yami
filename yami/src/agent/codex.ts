@@ -137,6 +137,7 @@ interface TurnState {
 /** Runs one `codex exec` process for each turn and resumes the thread by ID. */
 class CodexSession extends Session {
   private child: ChildProcess | undefined;
+  private stopping = false;
   private turns = 0;
 
   constructor(
@@ -153,11 +154,29 @@ class CodexSession extends Session {
   }
 
   protected async stopTurn(): Promise<void> {
-    this.child?.kill();
+    this.stop();
   }
 
   protected dispose(): void {
-    this.child?.kill();
+    this.stop();
+  }
+
+  /**
+   * On SIGINT, Codex ends the turn and stops the commands that it started.
+   * Each command runs in its own process group, so killing Codex alone, or its
+   * process group, leaves them running. SIGKILL follows if Codex does not exit.
+   */
+  private stop(): void {
+    const child = this.child;
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    this.stopping = true;
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      return;
+    }
+    child.kill("SIGINT");
+    const timer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+    child.once("close", () => clearTimeout(timer));
   }
 
   private async runTurn(prompt: string): Promise<void> {
@@ -172,8 +191,12 @@ class CodexSession extends Session {
     };
     try {
       const args = this.id ? [...this.args, "resume", this.id] : this.args;
-      const child = spawn(this.executable, args, { env: this.env, stdio: ["pipe", "pipe", "pipe"] });
+      const child = spawn(this.executable, args, {
+        env: this.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
       this.child = child;
+      this.stopping = false;
       const exited = new Promise<{ code: number | null; signal: string | null; error?: Error }>((resolve) => {
         child.once("error", (error) => resolve({ code: null, signal: null, error }));
         child.once("close", (code, signal) => resolve({ code, signal }));
@@ -193,7 +216,9 @@ class CodexSession extends Session {
       this.child = undefined;
 
       if (error) turn.errors.push(error.message);
-      else if (signal) turn.errors.push(`Codex stopped on ${signal}.`);
+      else if (this.stopping) {
+        // The stop was requested, so the exit status is expected.
+      } else if (signal) turn.errors.push(`Codex stopped on ${signal}.`);
       else if (code !== 0 && !turn.failed) turn.errors.push(stderr.trim() || `Codex exited with code ${code}.`);
       const ok = !turn.failed && !error && !signal && code === 0;
       this.endTurn({ status: ok ? "success" : "error", ...this.outcome(turn, started) });
@@ -292,14 +317,20 @@ function toolResult(item: ThreadItem): { isError: boolean; output: string } | un
   }
 }
 
+/** Terminal control sequences: CSI, OSC, and two-byte escapes. */
+const ESCAPES = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-_]/g;
+
 function parseEvent(line: string): ThreadEvent | undefined {
-  if (!line.trim()) return undefined;
+  const json = line.replace(ESCAPES, "").trim();
+  if (!json) return undefined;
   try {
-    return JSON.parse(line) as ThreadEvent;
+    return JSON.parse(json) as ThreadEvent;
   } catch {
     return undefined;
   }
 }
+
+const KILL_GRACE_MS = 3_000;
 
 /** JSON string syntax is valid TOML basic string syntax. */
 function toml(value: string): string {
