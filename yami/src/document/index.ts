@@ -15,6 +15,7 @@ export {
   type Document,
 } from "./document.js";
 export {
+  CONVERSATION,
   DOCUMENT_TYPES,
   MODULE,
   POLICY,

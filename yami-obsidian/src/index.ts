@@ -1,0 +1,15 @@
+export { activity, type ConversationAgent, Presence, vaultRoot } from "./agents.js";
+export type { ConversationStatus, NewConversationOptions, TurnEnd } from "./api.js";
+export { AgentPeer, type AgentIdentity } from "./collab/agent-peer.js";
+export { bindingPlugin, EditorBinding, presenceAnnotation, syncAnnotation } from "./collab/binding.js";
+export { CollabHub, type DiskWriter, type HubObserver, installCollab, uninstallCollab } from "./collab/hub.js";
+export { presenceExtensions } from "./collab/presence.js";
+export { LiveRegion } from "./collab/region.js";
+export { DISK_ORIGIN, LOCAL_ORIGIN, type NoteView, type PresenceState, SharedNote } from "./collab/shared-note.js";
+export { applyOps, deltaOps, diffOps, normalizeNewlines, shiftOps, type TextOp } from "./collab/text-ops.js";
+export { Composer } from "./conversation/composer.js";
+export { ConversationController, LOCAL_COMMANDS, type LocalCommand, type PendingRequest } from "./conversation/controller.js";
+export { ConversationManager, type ConversationOptions, type CreateOptions } from "./conversation/manager.js";
+export { type PermissionContext, PermissionPrompts } from "./prompts/permission-modal.js";
+export { type QuestionForm, renderQuestions } from "./prompts/question-form.js";
+export { ObsidianVault } from "./vault.js";

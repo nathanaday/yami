@@ -5,15 +5,19 @@
   "description": "A hello world Obsidian plugin.",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc --noEmit && node esbuild.config.mjs production"
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "test:obsidian": "vitest run test/obsidian"
   },
   "devDependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "esbuild": "^0.28.2",
     "obsidian": "^1.14.4",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "playwright-core": "^1.63.0",
+    "vitest": "^5.0.4"
   },
   "dependencies": {
-    "yami": "file:../yami"
+    "yami": "file:../yami",
+    "yami-obsidian": "file:../yami-obsidian"
   }
 }

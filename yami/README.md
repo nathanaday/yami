@@ -7,7 +7,10 @@ Shared Yami logic, in four modules. The design policy is in [`design.md`](../des
 | `yami/agent` | Starts a harness, Claude Code or Codex, and runs conversations with it. |
 | `yami/document` | Reads and writes the vault documents that Yami defines, and generates the ledgers. |
 | `yami/module` | Defines modules, creates session documents, and runs the agent loop on them. |
+| `yami/conversation` | The conversation note format: properties, the user and agent blocks, and the turn transcript. |
 | `yami/modules/hello` | The smallest module, as the reference. |
+
+The Obsidian layer, `yami-obsidian`, builds on these: the vault adapter, shared documents, and the conversation view.
 
 ## How Yami organizes work
 
@@ -24,6 +27,7 @@ Every document that Yami writes has a `type` property, and links are the identit
 | `policy` | Rules that a session must follow. The body is the rule text. |
 | `promise` | A deliverable: what, where, and how Yami checks it. |
 | `skill` | A skill in the standard `SKILL.md` form. |
+| `conversation` | A conversation with an agent: the messages, the replies, and the tool calls. |
 | article | Any note. Its content becomes context for the agent. |
 
 A module's documents are installed into the vault, so users can read and edit them. The layout of a module with the id `hello`:
@@ -52,6 +56,16 @@ The ledgers are Obsidian bases: live views over the properties of the session do
 The schemas of the built-in types are `MODULE`, `SESSION`, `POLICY`, and `PROMISE`. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form.
 
 `vaultLedger` and `moduleLedger` return the text of the two bases.
+
+## `yami/conversation`
+
+A conversation note has `type: conversation`, the `agent`, the `model`, `effort`, and `approval` in use, the harness `session` for resuming, a `status` of `active` or `ended`, and `module`, a link to the module session that the conversation runs, when it runs one. The body is Markdown:
+
+- A user message is a `> [!user]` callout.
+- The agent's thinking and tool calls between pieces of text go into one collapsed `> [!activity]-` callout, with a summary as its title, for example "Thought for 6s · Read 2 files".
+- The agent's text is plain Markdown.
+
+`newConversation` writes the properties, `userBlock` the user callout, and `renderTurn` a turn. `TurnTranscript` folds the events of an agent session into the view that `renderTurn` takes. While a turn runs, `renderTurn` only appends, so a host can type the text out. `nameFrom(message)` names a note after its first message.
 
 ## `yami/module`
 
@@ -231,6 +245,16 @@ The adapter runs `codex app-server --stdio` and speaks its JSON-RPC protocol. `s
 The schemas of the built-in types are `MODULE`, `SESSION`, `POLICY`, and `PROMISE`. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form.
 
 `vaultLedger` and `moduleLedger` return the text of the two bases.
+
+## `yami/conversation`
+
+A conversation note has `type: conversation`, the `agent`, the `model`, `effort`, and `approval` in use, the harness `session` for resuming, a `status` of `active` or `ended`, and `module`, a link to the module session that the conversation runs, when it runs one. The body is Markdown:
+
+- A user message is a `> [!user]` callout.
+- The agent's thinking and tool calls between pieces of text go into one collapsed `> [!activity]-` callout, with a summary as its title, for example "Thought for 6s · Read 2 files".
+- The agent's text is plain Markdown.
+
+`newConversation` writes the properties, `userBlock` the user callout, and `renderTurn` a turn. `TurnTranscript` folds the events of an agent session into the view that `renderTurn` takes. While a turn runs, `renderTurn` only appends, so a host can type the text out. `nameFrom(message)` names a note after its first message.
 
 ## `yami/module`
 

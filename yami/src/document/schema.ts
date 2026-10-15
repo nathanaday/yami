@@ -12,7 +12,7 @@ export interface Field {
 
 export type Schema = Record<string, Field>;
 
-export const DOCUMENT_TYPES = ["module", "session", "policy", "promise", "skill"] as const;
+export const DOCUMENT_TYPES = ["module", "session", "policy", "promise", "skill", "conversation"] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 export const SESSION_STATES = ["open", "running", "done", "failed", "needs-attention"] as const;
@@ -43,6 +43,21 @@ export const SESSION: Schema = {
   skills: links,
   met: links,
   unmet: links,
+};
+
+export const CONVERSATION: Schema = {
+  type: typed("conversation"),
+  /** The name of the agent, as the host registered it. */
+  agent: { type: "text", required: true },
+  model: { type: "text" },
+  effort: { type: "text" },
+  approval: { type: "text", values: ["ask", "accept-edits", "plan", "auto", "sandbox"] },
+  /** The harness session, for resuming. */
+  session: { type: "text" },
+  status: { type: "text", values: ["active", "ended"], default: "active" },
+  created: { type: "date" },
+  /** The module session document that this conversation runs. */
+  module: { type: "link" },
 };
 
 export const POLICY: Schema = {

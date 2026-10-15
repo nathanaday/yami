@@ -23,7 +23,7 @@ Yami replaces Almagest. Almagest implemented each feature (ingest, changes, chec
 
 ## Entities
 
-1. Every document that Yami writes has a `type` property: `module`, `session`, `policy`, `promise`, or `skill`. The schema of each type is in `yami/src/document/schema.ts`, and nowhere else.
+1. Every document that Yami writes has a `type` property: `module`, `session`, `policy`, `promise`, `skill`, or `conversation`. The schema of each type is in `yami/src/document/schema.ts`, and nowhere else.
 2. Links are the identity of documents. Yami generates no IDs. A session refers to its policies, promises, skills, and articles as `[[links]]` in its properties.
 3. A session is one document. It is the front page of the work: its properties hold the state, the links, and the module's own fields; its body holds the deliverables checklist and the progress. There is no other record of a session's state. The full exchange goes to a log in the module's internal folder.
 4. A module declares its session fields as a schema, in the same form as the core schemas. Core field names (`type`, `module`, `state`, `created`, `iteration`, `harness`, `harness_session`, `articles`, `policies`, `promises`, `skills`, `met`, `unmet`) are reserved.
@@ -34,9 +34,10 @@ Yami replaces Almagest. Almagest implemented each feature (ingest, changes, chec
 
 ```
 Yami.base                   vault ledger: every module, and every session grouped by module
+conversations/              every conversation with an agent, one note each
 <module>/                   user-facing: the session documents, one file each
   sessions.base             module ledger
-internal/<module>/          what the module needs: module doc, policies, promises, skills, logs
+internal/<module>/          what the module needs: module doc, policies, promises, skills
 ```
 
 1. The module folder holds session documents and `sessions.base`, and nothing else.
@@ -53,19 +54,22 @@ internal/<module>/          what the module needs: module doc, policies, promise
 ## Layers
 
 ```
-obsidian_plugin   commands, views, the Vault adapter
+obsidian_plugin   a plugin: commands and settings, nothing else
+yami-obsidian     the Obsidian layer: the Vault adapter, shared documents, conversation notes, prompts
 yami/modules/*    modules: data, no logic
 yami/module       the Module type, enable, create, the loop, the checks
+yami/conversation the conversation note format and the turn transcript
 yami/document     documents, schemas, links, bases, the Vault interface
 yami/agent        the Agent and Session base classes, one adapter for each harness
 ```
 
 1. A layer imports only the layers below it.
-2. `yami/document` and `yami/module` do not import the Obsidian API. The `Vault` interface is the whole file system contract, and the plugin implements it. Tests implement it over the file system.
+2. `yami` does not import the Obsidian API. The `Vault` interface is the whole file system contract; `yami-obsidian` implements it over the Obsidian API, and tests implement it over the file system.
 3. `yami/agent` does not know about documents, modules, or the vault. Its types do not expose harness SDK types, so a host can hold an `Agent` or a `Session` without knowing the harness.
 4. The `Agent` and `BaseSession` classes hold what the harnesses share: preferences, session tracking, the turn queue, event delivery, interrupt, and close. An adapter implements `startTurn`, `interruptTurn`, `close`, `models`, `commands`, and `configure`, and reports through `emit`, `askPermission`, `turn.finish`, and `markClosed`. The session contract came from Duet, and Duet uses it from here.
 5. Each harness adapter is its own entry point (`yami/agent/claude`, `yami/agent/codex`), so a host bundles only the SDKs it imports.
-6. The plugin holds no agent logic. It implements `Vault`, registers commands, and renders views. A command calls one SDK function.
+6. `yami-obsidian` is the one place that uses the Obsidian API. Every Yami plugin, the test bed and Duet, uses it, so agents behave the same in all of them: one shared-document hub for the window, one conversation view, one set of prompts.
+7. A plugin holds no agent logic. It registers its agents, installs the Obsidian layer, and registers commands. A command calls one SDK function.
 
 ## Modules
 
@@ -81,6 +85,12 @@ A new feature is a module when it can be expressed as these parts. Before adding
 6. Is it a view? Then it is a base, or a section of the session document.
 
 If none of these fit, the design needs a change to this document before the code.
+
+## Conversations and shared documents
+
+1. Every conversation with an agent is a conversation note in `conversations/`, whatever started it: a person, a module session, or another plugin. The note is the record.
+2. While an agent works in the vault, every note that it changes is a shared document. The agent's changes merge with the user's typing, show the agent's cursor, and can be undone as one step for each turn. No agent writes a note that is open in an editor behind the user's back.
+3. One Obsidian window has one hub. A plugin that bundles its own hub would double-bind every editor, so plugins share the hub through `installCollab`.
 
 ## The loop
 
@@ -118,7 +128,7 @@ A change is done when these pass, and the report says which ran:
 
 1. **Unit tests** (`npm test` in `yami/`): the session queue, each adapter against a scripted harness (`test/fixtures/fake-codex.mjs`), and the loop and document logic with a fake agent and a file system `Vault`. No harness, no API key, deterministic. Every state of the loop has a case.
 2. **Live tests** (`npm run test:live`): the same scenarios against the real CLIs, for both harnesses. Connect, a turn with a tool, approvals, interrupt, a command stopped on interrupt, queued messages, resume, and no process left behind.
-3. **Plugin changes:** the bundled `main.js` loaded in Electron 33 (Obsidian's version) with Obsidian's short `PATH`. Plain Node cannot catch renderer bugs, and three of them have happened. This harness still lives in a scratch folder; moving it in, as a test that drives the real Obsidian app, is the next testing task.
+3. **Obsidian layer and plugin changes:** `npm run test:obsidian` in `obsidian_plugin/` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents through its debugging port. Plain Node cannot catch renderer bugs, and three of them have happened. `npm test` in `yami-obsidian/` covers the shared-document logic without Obsidian.
 4. A guard in the build fails when a dependency changes shape, instead of a silent no-op.
 
 ## Documentation

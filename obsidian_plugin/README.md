@@ -26,37 +26,26 @@ A hello world Obsidian plugin. It adds a ribbon icon and a "Say hello" command. 
 
 4. In Obsidian, open **Settings → Community plugins** and turn on **Yami**. To load your changes, turn the plugin off and on again, or run the command **Reload app without saving**.
 
-## Try the agents
+## Conversations
 
-The plugin makes two agents for the vault folder, and puts them on `window.yami`:
+Run **New conversation** from the ribbon, or **New conversation with claude** or **with codex** from the command palette. You get a note in `conversations/` with a message box at the bottom. Press Enter to send. The note records the conversation: your messages, the agent's replies, and its tool calls in collapsed sections. The note gets its name from your first message.
 
-- `yami.claude` uses [Claude Code](https://code.claude.com).
-- `yami.codex` uses [Codex](https://developers.openai.com/codex).
+Before the agent changes a file or runs a command, the request shows above the message box. Press `Y` to allow it once, `A` to allow it for the rest of the conversation, or `N` to deny it. The buttons under the message box change the model, the effort, and when the agent asks first. When the agent changes a note that is open, you see its cursor there, and its changes merge with what you type.
 
-Install the harness that you want to use, and sign in to it first. The agents use your own setup for that harness: your `CLAUDE.md` and `AGENTS.md` files, skills, plugins, MCP servers, and permission rules. They also use the setup in the vault, for example skills in `.claude/skills` and `.agents/skills`.
+Commands: **End this conversation**, **Stop the agent in this conversation**, **Focus the message box**, and **Undo the agent's last changes in this note**.
 
-Open the developer console with **View → Toggle Developer Tools**. Then type:
-
-```js
-const agent = yami.claude;              // or yami.codex
-await agent.connect();                  // shows the harness version and account
-const session = await agent.startSession({ onPermission: async (request) => "allow" });
-session.on((event) => console.log(event));
-await session.send("Which notes are in this vault?");
-```
-
-Without `onPermission`, the agent's requests to change files or run commands are denied. For the full agent API, see [`yami/README.md`](../yami/README.md).
-
-The agents start processes, so the plugin works only on desktop.
+The agents use your own setup for their harness: your `CLAUDE.md` and `AGENTS.md` files, skills, plugins, MCP servers, and permission rules. `window.yami` holds the agents and the conversation manager for the developer console.
 
 ## Try the hello module
 
 The hello module is the smallest Yami module: one policy, one promise, and one skill. When the plugin loads, it writes the files of each module that are missing: `Yami.base`, `hello/sessions.base`, and the module's documents under `internal/hello/`. Files that exist stay as they are, so you can edit the bases and the documents. Two commands drive the module:
 
 1. **Hello: new session** creates `hello/Session <time>.md` and opens it. Its properties link the policy, the promise, and the skill, and `greeting` is the module's own field, which you can change.
-2. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs, and `internal/hello/logs/` has the full exchange.
+2. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs.
 
-A run does not ask for permissions. Requests that `edit` access does not allow are denied.
+## Tests
+
+`npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the module install, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, and a hello session. Your own Obsidian and vaults are not touched. Build the plugin first.
 
 ## Build a release
 

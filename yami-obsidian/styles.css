@@ -1,0 +1,760 @@
+.yami-permission-note {
+  margin: -0.4em 0 0.6em;
+  color: #a9d6c4;
+  font-size: var(--font-ui-small);
+  opacity: 0.85;
+}
+
+.yami-permission-title {
+  margin: 0;
+  font-family: var(--font-monospace);
+  overflow-wrap: anywhere;
+}
+
+.yami-permission-detail {
+  max-height: 16rem;
+  margin: 0.9em 0 0;
+  padding: 0.6em 0;
+  overflow: auto;
+  border-radius: var(--radius-s);
+  background: rgb(0 0 0 / 0.22);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.yami-line {
+  display: block;
+  padding: 0 0.9em;
+}
+
+.yami-line.is-add {
+  background: rgb(120 230 180 / 0.12);
+  color: #a6f2cd;
+}
+
+.yami-line.is-remove {
+  background: rgb(240 140 120 / 0.12);
+  color: #f6bcae;
+}
+
+.yami-line.is-hunk {
+  color: #a9d6c4;
+  opacity: 0.7;
+}
+
+.yami-permission-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
+.yami-permission-choices button {
+  display: inline-flex;
+  gap: 0.55em;
+  border: 1px solid rgb(255 255 255 / 0.22);
+  background: rgb(255 255 255 / 0.06);
+  box-shadow: none;
+  color: var(--yami-glass-text);
+}
+
+.yami-permission-choices button:hover {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.yami-permission-choices button.mod-cta {
+  border-color: transparent;
+  background: var(--yami-glass-text);
+  color: #083d2f;
+}
+
+.yami-permission-choices kbd {
+  padding: 0 0.3em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: none;
+  font-size: 0.75em;
+  opacity: 0.6;
+}
+
+/* Agent presence: caret, name flag, selection, fresh text, edge pill. */
+
+.yami-presence {
+  pointer-events: none;
+  contain: size style;
+}
+
+.yami-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--yami-agent);
+  transition:
+    transform 110ms cubic-bezier(0.2, 0.7, 0.3, 1),
+    height 110ms ease;
+  will-change: transform;
+}
+
+.yami-caret::after {
+  content: '';
+  position: absolute;
+  inset: -1px -2px;
+  border-radius: 2px;
+  background: var(--yami-agent);
+  opacity: 0.18;
+  animation: yami-caret-glow 1.6s ease-in-out infinite;
+}
+
+.yami-caret-flag {
+  position: absolute;
+  bottom: 100%;
+  left: -1px;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  max-width: 22em;
+  margin-bottom: 3px;
+  padding: 1px 7px 2px;
+  border-radius: 6px 6px 6px 1px;
+  background: var(--yami-agent);
+  box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--yami-agent) 60%, transparent);
+  color: white;
+  font-family: var(--font-interface);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  animation: yami-flag-in 160ms ease-out;
+}
+
+.yami-caret.is-near-top .yami-caret-flag {
+  top: 100%;
+  bottom: auto;
+  margin-top: 3px;
+  margin-bottom: 0;
+  border-radius: 1px 6px 6px 6px;
+}
+
+.yami-caret-status {
+  overflow: hidden;
+  font-weight: 450;
+  opacity: 0.85;
+  text-overflow: ellipsis;
+}
+
+.yami-caret:not(.has-status) .yami-caret-status {
+  display: none;
+}
+
+.yami-agent-selection {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--yami-agent) 26%, transparent);
+}
+
+.yami-fresh {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--yami-agent) 20%, transparent);
+}
+
+.yami-fresh.is-fading {
+  animation: yami-fade 1s ease-out forwards;
+}
+
+.yami-edge {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  display: none;
+  padding: 3px 12px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--yami-agent);
+  box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--yami-agent) 70%, transparent);
+  color: white;
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.yami-edge.is-shown {
+  display: block;
+  animation: yami-flag-in 160ms ease-out;
+}
+
+.yami-edge[data-edge='top'] {
+  top: 10px;
+}
+
+.yami-edge[data-edge='bottom'] {
+  bottom: 14px;
+}
+
+@keyframes yami-caret-glow {
+  50% {
+    opacity: 0.04;
+  }
+}
+
+@keyframes yami-flag-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.yami-edge.is-shown {
+  animation-name: yami-edge-in;
+}
+
+@keyframes yami-edge-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+}
+
+@keyframes yami-fade {
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yami-caret {
+    transition: none;
+  }
+  .yami-caret::after {
+    animation: none;
+  }
+}
+
+.yami-caret.is-near-right .yami-caret-flag {
+  right: -1px;
+  left: auto;
+  border-radius: 6px 6px 1px 6px;
+}
+
+.yami-caret.is-near-right.is-near-top .yami-caret-flag {
+  border-radius: 6px 1px 6px 6px;
+}
+
+/* Conversation notes: a chat layout for the record. */
+
+.yami-conversation {
+  --yami-bubble: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+}
+
+.yami-conversation .callout[data-callout='user'] {
+  --callout-icon: user-round;
+  width: fit-content;
+  max-width: min(82%, 38rem);
+  margin: 1.4em 0 1em auto;
+  padding: 0.55em 1em 0.6em;
+  border: 0;
+  border-radius: 18px 18px 5px 18px;
+  background: var(--yami-bubble);
+  mix-blend-mode: normal;
+}
+
+.yami-conversation .callout[data-callout='user'] > .callout-title {
+  display: none;
+}
+
+.yami-conversation .callout[data-callout='user'] > .callout-content > :first-child {
+  margin-top: 0;
+}
+
+.yami-conversation .callout[data-callout='user'] > .callout-content > :last-child {
+  margin-bottom: 0;
+}
+
+.yami-conversation .cm-embed-block.cm-callout:has(.callout[data-callout='user']) {
+  display: flex;
+}
+
+.callout[data-callout='activity'] {
+  --callout-color: 128, 128, 128;
+  --callout-icon: sparkles;
+}
+
+.yami-conversation .callout[data-callout='activity'] {
+  margin: 0.4em 0 0.8em;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--font-ui-small);
+}
+
+.yami-conversation .callout[data-callout='activity'] > .callout-title {
+  gap: 0.45em;
+  width: fit-content;
+  padding: 0.15em 0.6em 0.15em 0.4em;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-weight: var(--font-normal);
+}
+
+.yami-conversation .callout[data-callout='activity'] > .callout-title:hover {
+  background: var(--background-modifier-hover);
+}
+
+.yami-conversation .callout[data-callout='activity'] .callout-icon {
+  color: var(--text-faint);
+}
+
+.yami-conversation .callout[data-callout='activity'] > .callout-content {
+  margin: 0.3em 0 0 0.9em;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 2px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.yami-conversation .callout[data-callout='activity'] pre {
+  max-height: 18em;
+  font-size: var(--font-smallest);
+}
+
+/* The message box. */
+
+.yami-has-composer .view-content {
+  position: relative;
+}
+
+.yami-has-composer .markdown-source-view.mod-cm6 .cm-sizer,
+.yami-has-composer .markdown-preview-sizer {
+  padding-bottom: calc(var(--yami-composer-height, 140px) + 48px) !important;
+}
+
+.yami-composer {
+  --yami-agent: var(--interactive-accent);
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px var(--size-4-4) 34px;
+  background: linear-gradient(to bottom, transparent, var(--background-primary) 28px);
+  pointer-events: none;
+}
+
+.yami-composer > * {
+  width: min(var(--file-line-width), 100%);
+  pointer-events: auto;
+}
+
+.yami-composer-card {
+  position: relative;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 16px;
+  background: var(--background-primary);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.04),
+    0 8px 28px -12px rgb(0 0 0 / 0.22);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.yami-composer-card:focus-within {
+  border-color: color-mix(in srgb, var(--yami-agent) 55%, var(--background-modifier-border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--yami-agent) 14%, transparent),
+    0 8px 28px -12px rgb(0 0 0 / 0.22);
+}
+
+.yami-composer.is-ended .yami-composer-card {
+  display: none;
+}
+
+textarea.yami-input {
+  display: block;
+  width: 100%;
+  height: var(--yami-input-height, auto);
+  min-height: 2.6em;
+  max-height: 220px;
+  padding: 12px 16px 2px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+  line-height: 1.5;
+  resize: none;
+}
+
+textarea.yami-input:focus,
+textarea.yami-input:hover {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.yami-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px 8px;
+}
+
+button.yami-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 9px 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+
+button.yami-chip:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+button.yami-chip.is-hidden {
+  display: none;
+}
+
+.yami-chip-icon,
+.yami-chip-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.yami-icon-button.clickable-icon {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.yami-composer-status {
+  overflow: hidden;
+  flex: 1;
+  padding: 0 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yami-composer.is-working .yami-composer-status::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--yami-agent);
+  vertical-align: 1px;
+  animation: yami-pulse 1.2s ease-in-out infinite;
+}
+
+button.yami-send {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--yami-agent);
+  box-shadow: none;
+  color: white;
+  cursor: pointer;
+  transition:
+    transform 100ms ease,
+    opacity 140ms ease;
+}
+
+button.yami-send:hover:not(:disabled) {
+  transform: scale(1.06);
+}
+
+button.yami-send:disabled {
+  background: var(--background-modifier-border);
+  color: var(--text-faint);
+  cursor: default;
+}
+
+button.yami-send svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
+}
+
+button.yami-send.is-stop svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+
+.yami-suggest {
+  display: none;
+  overflow-y: auto;
+  max-height: 280px;
+  padding: 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-l);
+}
+
+.yami-suggest.is-shown {
+  display: block;
+  animation: yami-flag-in 120ms ease-out;
+}
+
+.yami-suggest-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.yami-suggest-item.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.yami-suggest-label {
+  flex: none;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+
+.yami-suggest-detail {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yami-approval {
+  display: none;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--yami-agent) 45%, var(--background-modifier-border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--yami-agent) 7%, var(--background-primary));
+  box-shadow: var(--shadow-l);
+}
+
+.yami-composer.has-approval .yami-approval {
+  display: block;
+  animation: yami-flag-in 160ms ease-out;
+}
+
+.yami-approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--font-semibold);
+}
+
+.yami-approval-icon {
+  display: inline-flex;
+  color: var(--yami-agent);
+}
+
+.yami-approval-subject {
+  margin: 4px 0 0 26px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+.yami-approval-detail {
+  max-height: 14rem;
+  margin: 10px 0 0;
+  padding: 6px 0;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.yami-approval-detail .yami-line.is-add {
+  background: rgb(46 160 67 / 0.15);
+  color: var(--text-normal);
+}
+
+.yami-approval-detail .yami-line.is-remove {
+  background: rgb(248 81 73 / 0.15);
+  color: var(--text-normal);
+}
+
+.yami-approval-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.yami-approval-choices button {
+  display: inline-flex;
+  gap: 0.5em;
+  align-items: center;
+  font-size: var(--font-ui-small);
+}
+
+.yami-approval-choices button.mod-cta {
+  background: var(--yami-agent);
+  color: white;
+}
+
+.yami-approval-choices kbd {
+  padding: 0 0.35em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: none;
+  font-size: 0.75em;
+  opacity: 0.6;
+}
+
+/* The agent's questions, in the composer and in the dialog. Colors follow the surrounding text. */
+.yami-questions {
+  margin: 0;
+}
+
+.yami-question {
+  max-height: min(24rem, 45vh);
+  margin: 10px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+}
+
+.yami-questions [hidden] {
+  display: none;
+}
+
+.yami-question-progress {
+  align-self: center;
+  margin-left: auto;
+  font-size: var(--font-ui-smaller);
+  opacity: 0.7;
+}
+
+.yami-question-text {
+  margin-bottom: 6px;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+
+.yami-question-header {
+  margin-right: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-medium);
+}
+
+.yami-question-option {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 8px;
+  cursor: var(--cursor);
+}
+
+.yami-question-option:has(input:checked) {
+  border-color: color-mix(in srgb, currentColor 55%, transparent);
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.yami-question-option input[type='radio'],
+.yami-question-option input[type='checkbox'] {
+  flex: none;
+  margin: 3px 0 0;
+}
+
+.yami-question-option-text {
+  min-width: 0;
+}
+
+.yami-question-description {
+  font-size: var(--font-ui-smaller);
+  opacity: 0.75;
+}
+
+.yami-question-option.is-other {
+  align-items: center;
+}
+
+.yami-question-other {
+  flex: 1;
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: inherit;
+}
+
+.yami-question-other:focus {
+  box-shadow: none;
+}
+
+.yami-questions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.yami-ended {
+  display: none;
+}
+
+.yami-composer.is-ended .yami-ended {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: fit-content;
+  padding: 6px 8px 6px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.yami-ended button {
+  height: 26px;
+  border-radius: 999px;
+  font-size: var(--font-ui-smaller);
+}
+
+/* In Live Preview a conversation reads as a chat. The composer shows the model and mode; reading view keeps the properties. */
+.markdown-source-view.yami-conversation .metadata-container,
+.markdown-source-view.yami-conversation.show-properties .metadata-container {
+  display: none !important;
+}

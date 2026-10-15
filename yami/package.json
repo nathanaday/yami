@@ -34,6 +34,10 @@
     "./modules/hello": {
       "types": "./dist/modules/hello.d.ts",
       "default": "./dist/modules/hello.js"
+    },
+    "./conversation": {
+      "types": "./dist/conversation/index.d.ts",
+      "default": "./dist/conversation/index.js"
     }
   },
   "files": [

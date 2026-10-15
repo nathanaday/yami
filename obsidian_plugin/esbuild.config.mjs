@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { copyFile, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { builtinModules } from "node:module";
 import esbuild from "esbuild";
@@ -84,6 +84,9 @@ const context = await esbuild.context({
   minify: production,
   outfile: "main.js",
 });
+
+// The stylesheet of the Obsidian layer ships next to main.js.
+await copyFile(fileURLToPath(new URL("./node_modules/yami-obsidian/styles.css", import.meta.url)), "styles.css");
 
 if (production) {
   await context.rebuild();
