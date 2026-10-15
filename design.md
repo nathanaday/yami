@@ -55,7 +55,7 @@ internal/<module>/          what the module needs: module doc, policies, promise
 
 ```
 obsidian_plugin   a plugin: commands and settings, nothing else
-yami-obsidian     the Obsidian layer: the Vault adapter, shared documents, conversation notes, prompts
+yami/obsidian     the Obsidian layer: the Vault adapter, shared documents, conversation notes, prompts
 yami/modules/*    modules: data, no logic
 yami/module       the Module type, enable, create, the loop, the checks
 yami/conversation the conversation note format and the turn transcript
@@ -64,12 +64,13 @@ yami/agent        the Agent and Session base classes, one adapter for each harne
 ```
 
 1. A layer imports only the layers below it.
-2. `yami` does not import the Obsidian API. The `Vault` interface is the whole file system contract; `yami-obsidian` implements it over the Obsidian API, and tests implement it over the file system.
+2. `yami/obsidian` is the one module that uses the Obsidian API, CodeMirror, and the DOM. The modules below it are plain TypeScript. The `Vault` interface is their whole file system contract; `yami/obsidian` implements it over the Obsidian API, and tests implement it over the file system. The build enforces this rule with `yami/tsconfig.core.json`.
 3. `yami/agent` does not know about documents, modules, or the vault. Its types do not expose harness SDK types, so a host can hold an `Agent` or a `Session` without knowing the harness.
 4. The `Agent` and `BaseSession` classes hold what the harnesses share: preferences, session tracking, the turn queue, event delivery, interrupt, and close. An adapter implements `startTurn`, `interruptTurn`, `close`, `models`, `commands`, and `configure`, and reports through `emit`, `askPermission`, `turn.finish`, and `markClosed`. The session contract came from Duet, and Duet uses it from here.
 5. Each harness adapter is its own entry point (`yami/agent/claude`, `yami/agent/codex`), so a host bundles only the SDKs it imports.
-6. `yami-obsidian` is the one place that uses the Obsidian API. Every Yami plugin, the test bed and Duet, uses it, so agents behave the same in all of them: one shared-document hub for the window, one conversation view, one set of prompts.
+6. Every Yami plugin, the test bed and Duet, uses `yami/obsidian`, so agents behave the same in all of them: one shared-document hub for the window, one conversation view, one set of prompts.
 7. A plugin holds no agent logic. It registers its agents, installs the Obsidian layer, and registers commands. A command calls one SDK function.
+8. Yami needs Obsidian, and the Obsidian layer is part of the library. It stays in one module so that a later build can leave it out: a plain TypeScript build of the modules below it, with no Obsidian. That build is future work. Until then, put code that needs Obsidian in `yami/obsidian` and nowhere else. Some files in it do not need Obsidian, for example `collab/text-ops.ts`. The plain build can move them below.
 
 ## Modules
 
@@ -129,7 +130,7 @@ A change is done when these pass, and the report says which ran:
 
 1. **Unit tests** (`npm test` in `yami/`): the session queue, each adapter against a scripted harness (`test/fixtures/fake-codex.mjs`), and the loop and document logic with a fake agent and a file system `Vault`. No harness, no API key, deterministic. Every state of the loop has a case.
 2. **Live tests** (`npm run test:live`): the same scenarios against the real CLIs, for both harnesses. Connect, a turn with a tool, approvals, interrupt, a command stopped on interrupt, queued messages, resume, and no process left behind.
-3. **Obsidian layer and plugin changes:** `npm run test:obsidian` in `obsidian_plugin/` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents through its debugging port. Plain Node cannot catch renderer bugs, and three of them have happened. `npm test` in `yami-obsidian/` covers the shared-document logic without Obsidian.
+3. **Obsidian layer and plugin changes:** `npm run test:obsidian` in `obsidian_plugin/` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents through its debugging port. Plain Node cannot catch renderer bugs, and three of them have happened. `npm test` in `yami/` also covers the shared documents and the conversation manager over a fake Obsidian app.
 4. A guard in the build fails when a dependency changes shape, instead of a silent no-op.
 
 ## Documentation
@@ -144,6 +145,6 @@ A change is done when these pass, and the report says which ran:
 2. Do not store what a base can compute.
 3. Do not put logic in a module object.
 4. Do not call a harness SDK outside its adapter.
-5. Do not use the Obsidian API outside `obsidian_plugin`.
+5. Do not use the Obsidian API, CodeMirror, or the DOM outside `yami/obsidian` and the plugins.
 6. Do not generate IDs for documents.
 7. Do not build a UI for a feature before the SDK function behind it exists and has a test.

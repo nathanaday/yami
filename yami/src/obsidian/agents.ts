@@ -1,5 +1,5 @@
 import { type App, FileSystemAdapter } from "obsidian";
-import type { Agent, AgentEvent } from "yami/agent";
+import type { Agent, AgentEvent } from "../agent/index.js";
 import { AgentPeer, type AgentIdentity } from "./collab/agent-peer.js";
 import type { SharedNote } from "./collab/shared-note.js";
 

@@ -3,7 +3,7 @@
   "name": "Yami",
   "version": "0.1.0",
   "minAppVersion": "1.0.0",
-  "description": "A hello world plugin.",
+  "description": "Conversations with Claude Code and Codex in your notes, and Yami modules.",
   "author": "nathanaday",
   "isDesktopOnly": true
 }

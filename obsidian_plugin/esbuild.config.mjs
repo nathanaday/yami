@@ -86,7 +86,7 @@ const context = await esbuild.context({
 });
 
 // The stylesheet of the Obsidian layer ships next to main.js.
-await copyFile(fileURLToPath(new URL("./node_modules/yami-obsidian/styles.css", import.meta.url)), "styles.css");
+await copyFile(fileURLToPath(new URL("./node_modules/yami/src/obsidian/styles.css", import.meta.url)), "styles.css");
 
 if (production) {
   await context.rebuild();

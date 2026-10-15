@@ -1,5 +1,5 @@
 import { type App, Modal } from "obsidian";
-import type { PermissionDecision, PermissionRequest, QuestionAnswers, QuestionRequest } from "yami/agent";
+import type { PermissionDecision, PermissionRequest, QuestionAnswers, QuestionRequest } from "../../agent/index.js";
 import { renderQuestions } from "./question-form.js";
 
 export interface PermissionContext {

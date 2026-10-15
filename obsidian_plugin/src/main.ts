@@ -16,7 +16,7 @@ import {
   PermissionPrompts,
   uninstallCollab,
   vaultRoot,
-} from "yami-obsidian";
+} from "yami/obsidian";
 
 const MODULES = [hello];
 const CONVERSATION_FOLDER = "conversations";

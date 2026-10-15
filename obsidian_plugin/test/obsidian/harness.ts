@@ -29,7 +29,7 @@ export interface LaunchOptions {
  * with the built plugin installed and enabled. The user's own Obsidian and vaults are not touched.
  */
 export async function launchObsidian({ vault: source = "test/fixtures/sample-vault" }: LaunchOptions = {}): Promise<ObsidianInstance> {
-  const root = await mkdtemp(path.join(tmpdir(), "yami-obsidian-"));
+  const root = await mkdtemp(path.join(tmpdir(), "yami-plugin-"));
   const vault = path.join(root, "vault");
   const profile = path.join(root, "profile");
   const pluginDir = path.join(vault, `.obsidian/plugins/${PLUGIN_ID}`);

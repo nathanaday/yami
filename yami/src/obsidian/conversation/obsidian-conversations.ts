@@ -1,4 +1,4 @@
-import type { Conversation, Conversations, OpenConversation } from "yami/conversation";
+import type { Conversation, Conversations, OpenConversation } from "../../conversation/index.js";
 import type { ConversationAgent } from "../agents.js";
 import type { ConversationManager } from "./manager.js";
 

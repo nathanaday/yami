@@ -1,5 +1,5 @@
 import { normalizePath, parseYaml, stringifyYaml, type App } from "obsidian";
-import type { Properties, Vault } from "yami/document";
+import type { Properties, Vault } from "../document/index.js";
 
 /** The Yami vault interface over the Obsidian API. */
 export class ObsidianVault implements Vault {

@@ -21,8 +21,8 @@ vi.mock("obsidian", () => {
   return { TFile, MarkdownView, Notice, normalizePath };
 });
 
-vi.mock("../../src/agents.js", async (actual) => ({
-  ...(await actual<typeof import("../../src/agents.js")>()),
+vi.mock("../../../src/obsidian/agents.js", async (actual) => ({
+  ...(await actual<typeof import("../../../src/obsidian/agents.js")>()),
   Presence: class {
     peer() {
       return { beginTurn() {}, setCursor() {} };
@@ -32,7 +32,7 @@ vi.mock("../../src/agents.js", async (actual) => ({
   },
 }));
 
-vi.mock("../../src/collab/region.js", () => ({
+vi.mock("../../../src/obsidian/collab/region.js", () => ({
   LiveRegion: class {
     set() {}
     settled() {
@@ -42,7 +42,7 @@ vi.mock("../../src/collab/region.js", () => ({
   },
 }));
 
-vi.mock("../../src/conversation/composer.js", () => ({
+vi.mock("../../../src/obsidian/conversation/composer.js", () => ({
   Composer: class {
     constructor(_app: unknown, _view: unknown, readonly controller: { attach(holder: object): Promise<void> }) {
       void controller.attach(this);
@@ -53,11 +53,11 @@ vi.mock("../../src/conversation/composer.js", () => ({
 }));
 
 import { MarkdownView, TFile } from "obsidian";
-import { Agent, type AgentEvent, type AgentInfo, type AgentSession, type SessionOptions, type TurnResult } from "yami/agent";
-import type { ConversationAgent } from "../../src/agents.js";
-import type { TurnEnd } from "../../src/api.js";
-import { applyOps } from "../../src/collab/text-ops.js";
-import { ConversationManager } from "../../src/conversation/manager.js";
+import { Agent, type AgentEvent, type AgentInfo, type AgentSession, type SessionOptions, type TurnResult } from "../../../src/agent/index.js";
+import type { ConversationAgent } from "../../../src/obsidian/agents.js";
+import type { TurnEnd } from "../../../src/obsidian/api.js";
+import { applyOps } from "../../../src/obsidian/collab/text-ops.js";
+import { ConversationManager } from "../../../src/obsidian/conversation/manager.js";
 
 // The mocks take the arguments that the tests need, not those of Obsidian's classes.
 const FakeFile = TFile as unknown as new (path: string) => TFile;

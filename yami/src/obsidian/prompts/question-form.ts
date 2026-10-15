@@ -1,4 +1,4 @@
-import type { Question, QuestionAnswers } from "yami/agent";
+import type { Question, QuestionAnswers } from "../../agent/index.js";
 
 export interface QuestionForm {
   /** Moves focus to the first choice of the question on screen. */

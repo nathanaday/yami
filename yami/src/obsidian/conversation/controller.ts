@@ -12,8 +12,8 @@ import type {
   QuestionRequest,
   SessionSettings,
   TurnStatus,
-} from "yami/agent";
-import { availablePath, frontmatterEdit, isUnnamed, nameFrom, renderTurn, TurnTranscript, userBlock } from "yami/conversation";
+} from "../../agent/index.js";
+import { availablePath, frontmatterEdit, isUnnamed, nameFrom, renderTurn, TurnTranscript, userBlock } from "../../conversation/index.js";
 import { activity, type ConversationAgent, Presence } from "../agents.js";
 import type { TurnEnd } from "../api.js";
 import type { CollabHub, DiskWriter } from "../collab/hub.js";

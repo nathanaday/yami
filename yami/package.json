@@ -2,7 +2,7 @@
   "name": "yami",
   "version": "0.1.0",
   "private": true,
-  "description": "Shared Yami logic.",
+  "description": "Yami: the agent harnesses, the documents, the modules, and the Obsidian layer.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,13 +38,19 @@
     "./conversation": {
       "types": "./dist/conversation/index.d.ts",
       "default": "./dist/conversation/index.js"
-    }
+    },
+    "./obsidian": {
+      "types": "./dist/obsidian/index.d.ts",
+      "default": "./dist/obsidian/index.js"
+    },
+    "./obsidian/styles.css": "./src/obsidian/styles.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "src/obsidian/styles.css"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.core.json && tsc",
     "dev": "tsc --watch",
     "prepare": "npm run build",
     "test": "vitest run test/unit",
@@ -52,7 +58,10 @@
   },
   "devDependencies": {
     "@cfworker/json-schema": "^4.1.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
     "@types/node": "^26.6.5",
+    "obsidian": "^1.14.4",
     "typescript": "^7.0.2",
     "vitest": "^5.0.4",
     "yaml": "^2.9.1"
@@ -60,6 +69,10 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.300",
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "diff-match-patch-es": "^2.0.1",
+    "monkey-around": "^3.0.0",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33",
     "zod": "^4.6.7"
   }
 }

@@ -1,6 +1,6 @@
 # yami
 
-Shared Yami logic, in four modules. The design policy is in [`design.md`](../design.md).
+The Yami library. The design policy is in [`design.md`](../design.md).
 
 | Module | What it does |
 | --- | --- |
@@ -9,8 +9,9 @@ Shared Yami logic, in four modules. The design policy is in [`design.md`](../des
 | `yami/module` | Defines modules, creates session documents, and runs the agent loop on them. |
 | `yami/conversation` | The conversation note format: properties, the user and agent blocks, and the turn transcript. |
 | `yami/modules/hello` | The smallest module, as the reference. |
+| `yami/obsidian` | The Obsidian layer: the vault adapter, shared documents, conversation notes, and the approval prompts. |
 
-The Obsidian layer, `yami-obsidian`, builds on these: the vault adapter, shared documents, and the conversation view.
+`yami/obsidian` is the one module that uses the Obsidian API, CodeMirror, and the DOM. The other modules are plain TypeScript, and the build checks that they stay so.
 
 ## How Yami organizes work
 
@@ -50,7 +51,7 @@ The ledgers are Obsidian bases: live views over the properties of the session do
 
 ## `yami/document`
 
-`Vault` is the host's access to the vault: `read`, `write`, `exists`, `list`, and the parsing and writing of properties. The Obsidian plugin implements it over the Obsidian API, and tests implement it over the file system. The SDK does not use the Obsidian API.
+`Vault` is the host's access to the vault: `read`, `write`, `exists`, `list`, and the parsing and writing of properties. `ObsidianVault` in `yami/obsidian` implements it over the Obsidian API, and tests implement it over the file system.
 
 `readDocument`, `writeDocument`, and `updateDocument` handle a document as `{ path, properties, body }`. `replaceSection` replaces one `## heading` section of a body. `link`, `linkTarget`, `linksOf`, and `resolveLink` handle `[[links]]` in properties.
 
@@ -88,7 +89,7 @@ export const hello: Module = {
 
 - `enableModule(vault, module)` writes the ledgers, the module document, and the module's documents. It writes only files that do not exist, so edits in the vault stay, and a host calls it on every start.
 - `createSession(vault, module, name, fields)` writes `hello/<name>.md` with the module's defaults as links, and `fields` as the module's own properties.
-- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `yami-obsidian` provides one with the message box, so a person can watch a run and answer its approvals.
+- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `ObsidianConversations` in `yami/obsidian` provides one with the message box, so a person can watch a run and answer its approvals.
 
 ### The agent loop
 
@@ -234,184 +235,58 @@ The adapter runs `codex app-server --stdio` and speaks its JSON-RPC protocol. `s
 - **Sign-in.** The CLI uses your Codex sign-in. `connect()` reads the account through `account/read` and throws an error if you are not signed in. To use a different account, set `env: { CODEX_HOME: "/Users/you/.codex-work" }`.
 - **Executable.** The adapter searches for `codex` in the same folders as the Claude adapter. The npm package installs a launcher script that needs Node on `PATH`, and Obsidian does not have Node on `PATH`. So for an npm install, the adapter runs the native binary in the package. To set the path, use `executable`.
 
-### Tests
+## `yami/obsidian`
 
-- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, and the module loop with a fake agent and a file system vault.
-- `npm run test:live` runs the same scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, and resume.
+The Obsidian layer. It holds what needs the Obsidian API: the vault adapter, shared documents, conversation notes, and the approval prompts. Every Yami plugin uses it, so agents behave the same in all of them.
 
-## `yami/document`
-
-`Vault` is the host's access to the vault: `read`, `write`, `exists`, `list`, and the parsing and writing of properties. The Obsidian plugin implements it over the Obsidian API, and tests implement it over the file system. The SDK does not use the Obsidian API.
-
-`readDocument`, `writeDocument`, and `updateDocument` handle a document as `{ path, properties, body }`. `replaceSection` replaces one `## heading` section of a body. `link`, `linkTarget`, `linksOf`, and `resolveLink` handle `[[links]]` in properties.
-
-The schemas of the built-in types are `MODULE`, `SESSION`, `POLICY`, and `PROMISE`. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form.
-
-`vaultLedger` and `moduleLedger` return the text of the two bases.
-
-## `yami/conversation`
-
-A conversation note has `type: conversation`, the `agent`, the `model`, `effort`, and `approval` in use, the harness `session` for resuming, a `status` of `active` or `ended`, and `module`, a link to the module session that the conversation runs, when it runs one. The body is Markdown:
-
-- A user message is a `> [!user]` callout.
-- The agent's thinking and tool calls between pieces of text go into one collapsed `> [!activity]-` callout, with a summary as its title, for example "Thought for 6s · Read 2 files".
-- The agent's text is plain Markdown.
-
-`newConversation` writes the properties, `userBlock` the user callout, and `renderTurn` a turn. `TurnTranscript` folds the events of an agent session into the view that `renderTurn` takes. While a turn runs, `renderTurn` only appends, so a host can type the text out. `nameFrom(message)` names a note after its first message.
-
-## `yami/module`
-
-A module is a plain object:
+The code came from [Duet](https://github.com/nathanaday/obsidian-duet), and Duet uses it from here.
 
 ```ts
-export const hello: Module = {
-  id: "hello",
-  name: "Hello world",
-  schema: { greeting: { type: "text", default: "Hello" } },
-  documents: [
-    policy("Always say hello", "Begin every reply with the session's greeting."),
-    promise("Greeting note", { check: "exists", path: "greetings/{{session}}.md" }, "Create this note."),
-    skill("greeting", "How to greet by name.", "# Greeting\n\n…"),
-  ],
-  defaults: { policies: ["Always say hello"], promises: ["Greeting note"], skills: ["greeting"] },
-};
-```
+import { ConversationManager, installCollab, ObsidianVault, PermissionPrompts, uninstallCollab, vaultRoot } from "yami/obsidian";
 
-- `enableModule(vault, module)` writes the ledgers, the module document, and the module's documents. It writes only files that do not exist, so edits in the vault stay, and a host calls it on every start.
-- `createSession(vault, module, name, fields)` writes `hello/<name>.md` with the module's defaults as links, and `fields` as the module's own properties.
-- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `yami-obsidian` provides one with the message box, so a person can watch a run and answer its approvals.
-
-### The agent loop
-
-Each iteration is one agent turn and one verification.
-
-1. **Context.** The first prompt holds the session document, the session properties, and the content of every linked policy, promise, skill, and article. The skills are inlined for now; loading them through each harness comes later.
-2. **Action.** One turn on a harness session with `edit` access and the vault as the working directory.
-3. **Verification.** Yami runs the `check` of each promise, and updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document. If a promise is unmet, the next prompt says which, and why.
-
-The exchange goes to a conversation note in `conversations/`, linked from the session document as `conversation`, with the session document linked back as `module`. The note records the prompts, the agent's replies, and its tool calls, and a person can continue it after the run.
-
-The session ends `done` when every promise is met. It ends `needs-attention` when the iterations run out (`maxIterations`, default 3) or when a promise has no check, so a person decides. It ends `failed` when the harness ends a turn with an error. A later run continues the iteration count.
-
-### Promises and checks
-
-A promise names a `check` and gives it properties. `{{session}}` in a value is the session name, and `{{field}}` is a session property.
-
-| `check` | Properties | Met when |
-| --- | --- | --- |
-| `exists` | `path` | The file exists. |
-| `contains` | `path`, `text` | The file exists and contains the text. |
-| none | | Never by Yami. The session ends `needs-attention` for a person to decide. |
-
-New checks register in `checks`.
-
-## `yami/agent`
-
-The agent module connects to an agent harness, keeps the user's preferences, and starts sessions. It supports two harnesses: Claude Code and Codex.
-
-```ts
-import { ClaudeAgent } from "yami/agent/claude";
-import { CodexAgent } from "yami/agent/codex";
-
-const agent = new ClaudeAgent({ preferences: { cwd: "/path/to/vault" } });
-// or: new CodexAgent({ preferences: { cwd: "/path/to/vault" } })
-
-await agent.connect();
-// { harness: "claude", version: "2.1.299", account: { login, email, organization, subscription } }
-
-agent.setPreferences({ effort: "low" });
-
-const session = agent.startSession();
-session.subscribe((event) => console.log(event));
-const result = await session.send("Which notes mention rice?");
-// { status: "success", text: "...", errors: [], usage: { inputTokens, outputTokens }, costUsd, durationMs }
-```
-
-Each harness has its own entry point, so a host bundles only the harness SDKs that it imports. `yami/agent` contains the base classes and the shared types.
-
-### Parts
-
-| Part | What it does |
-| --- | --- |
-| `Agent` | Base class. Holds the preferences of one harness. `startSession()` uses the current preferences, and `closeAll()` stops each session that the agent started. |
-| `Session` | Base class. One conversation. `send()` runs one turn and resolves with a `TurnResult`. `setPermissionHandler()` sets who answers permission requests. |
-| `ClaudeAgent`, `CodexAgent` | The harness adapters. Each one makes its own `Session` subclass. |
-| `Preferences` | `cwd`, `model`, `effort`, `instructions`, and `access`. `instructions` is added to the harness system prompt. |
-| `SessionEvent` | `ready`, `text`, `tool-call`, `tool-result`, `permission`, `turn-end`, and `closed`. |
-
-A host can hold an `Agent` and a `Session` without knowing the harness. The shared types do not use harness SDK types.
-
-Each adapter takes two kinds of settings:
-
-| | Shared | Claude only | Codex only |
-| --- | --- | --- | --- |
-| Constructor options, fixed for the agent | `executable`, `env`, `preferences` | `settingSources` | `config` |
-| Preferences, can change for each session | `cwd`, `model`, `effort`, `instructions`, `access` | `maxBudgetUsd` | `webSearch`, `networkAccess` |
-
-### Turns
-
-A session runs one turn at a time. If a turn is running, `send()` rejects. `interrupt()` ends the current turn with status `interrupted`, and the session stays open. `send()` rejects only when the session cannot run the turn, for example after `close()`. When the harness ends a turn with an error, `send()` resolves with status `error`.
-
-`TurnResult.costUsd` is set only by Claude. Codex reports tokens but not cost.
-
-### Access and permissions
-
-`access` sets what the agent can do without asking. For everything else, the harness sends a permission request to the session's permission handler.
-
-| `access` | Runs without asking |
-| --- | --- |
-| `read-only` (default) | Reading files in `cwd`. |
-| `edit` | Reading and changing files in `cwd`. |
-
-Each harness has its own rules for what needs a request:
-
-| | Claude | Codex |
-| --- | --- | --- |
-| Reads outside `cwd` | Asks. | Runs without asking. The sandbox allows reads everywhere. |
-| Changes in `cwd` with `read-only` | Asks. | Asks. |
-| Changes outside `cwd` | Asks. | Asks, or fails in the sandbox when the model does not request approval. `/tmp` and `$TMPDIR` count as outside `cwd`. |
-| Commands, network, and MCP tools | Asks, unless Claude Code's own permission rules allow the call. | Commands run in the sandbox without asking. Commands that need more access ask. |
-
-```ts
-session.setPermissionHandler(async (request, signal) => {
-  // request: { kind: "read" | "edit" | "command" | "network" | "mcp" | "other", tool, input, reason?, canAllowForSession }
-  return "allow"; // or "allow-for-session", or "deny"
+// In Plugin.onload:
+const vault = new ObsidianVault(this.app, vaultRoot(this.app));
+const hub = installCollab(this.app, this);
+const conversations = new ConversationManager(this.app, hub, new PermissionPrompts(this.app), {
+  agents: () => [{ name: "claude", color: "#d97757", agent: claudeAgent }],
+  folder: () => "conversations",
+  animate: () => true,
+  idleMinutes: () => 15,
+  onActivity: () => {},
 });
+conversations.install(this);
+
+// In Plugin.onunload:
+await conversations.destroy();
+uninstallCollab(hub);
 ```
 
-- **No handler.** The session denies each request.
-- **`allow-for-session`.** The harness allows similar requests for the rest of the session, without asking. Each harness decides what is similar. Claude applies the rule that Claude Code suggests, for example reads in one folder. Codex remembers the approval for the same command or files. The decision is not saved in settings files.
-- **Withdrawn requests.** When a turn ends, `interrupt()` runs, or the session closes, each open request is withdrawn. The signal aborts, and the request counts as denied.
-- **Events.** Each decision is also sent as a `permission` event.
+The plugin must ship `yami/obsidian/styles.css` as the `styles.css` next to its `main.js`.
 
-### Environment
+### Shared documents (`obsidian/collab/`)
 
-GUI apps such as Obsidian start with a short `PATH`, so the hooks and MCP servers of your setup would not find commands such as `node`, `npx`, or `uvx`. Each harness process gets the `PATH` of your login shell first, then the `PATH` of the host process, then `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`. The adapter reads the login shell `PATH` once for each process, with `$SHELL -ilc`, and waits up to 5 s. A `PATH` in the `env` option comes before all of these.
+While an agent works with a note, the note is a shared document: a Yjs `Y.Doc` with one `Y.Text`. The user and each agent are peers of this document. They exchange Yjs updates in memory; there is no network, and the markdown file stays the only thing on disk.
 
-### Claude harness
+- `CollabHub` owns the shared notes. `acquire(file, holder)` shares a note until `release`. While an agent writes files with its own tools (`addWriter`), every note open in an editor is shared, so a change on disk merges with unsaved typing instead of replacing it. The hub patches `MarkdownView.setViewData` and `Vault.modify` while it is installed, so one Obsidian window has one hub: `installCollab` makes it, and a second plugin gets the same one.
+- `SharedNote` remembers the document state that matches the file on disk. When another program changes the file, the note forks the document at that state, replays the change on the fork, and merges the fork. Text that the user typed after the last save stays, also inside a range that the agent rewrote.
+- `EditorBinding` keeps a CodeMirror editor and a shared note in sync. Changes from the note reach the editor with `addToHistory: false`, so Cmd+Z undoes only the user's own typing.
+- `AgentPeer` is one agent in one note. Its edits carry the peer as the Yjs origin, so editors highlight them and `agentUndo` can revert one turn. It publishes a cursor and a status through the Yjs awareness protocol, and types its edits when the note is visible.
+- `LiveRegion` is a range that an agent writes as its own output, such as a reply. Appended text is typed a few characters at a time.
+- `presenceExtensions` draw the agent's caret, name flag, selection, fresh-text highlight, and the edge pill that scrolls to the agent.
 
-The adapter uses the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview).
+### Conversation notes (`obsidian/conversation/`)
 
-- **One process for each session.** The session keeps one Claude Code process open and sends each prompt to it.
-- **Tools.** The agent has the standard Claude Code tools except `AskUserQuestion`, because a session cannot answer questions yet. `access` sets the permission mode: `default` for `read-only`, and `acceptEdits` for `edit`.
-- **Stall watchdog.** If a reply stops in the middle of a content block for 60 s, the session interrupts the turn, and the turn ends with an error. If the CLI does not respond within 10 s more, the session closes with the error. The watchdog does not time the wait for the first token, tool runs, or waits between messages.
-- **Your Claude Code setup applies.** By default the adapter loads the `user`, `project`, and `local` settings: `~/.claude`, and `.claude/` and `CLAUDE.md` in `cwd`. These bring your `CLAUDE.md` files, skills, plugins, hooks, MCP servers, claude.ai connectors, and permission rules. To load fewer, set `settingSources`. Without `user`, the session loads no MCP servers. An explicit `access` still sets the permission mode, whatever the settings say.
-- **Sign-in.** The CLI uses your Claude Code sign-in. To use a different account, set `env: { CLAUDE_CONFIG_DIR: "/Users/you/.claude-work" }`, or set `ANTHROPIC_API_KEY`.
-- **Executable.** The adapter runs the first `claude` CLI that it finds on `PATH`, in `~/.local/bin`, in `~/.claude/local`, in `/opt/homebrew/bin`, or in `/usr/local/bin`. GUI apps often start with a short `PATH`, so the search includes the standard folders. If the adapter finds no CLI, it uses the binary in the SDK package. That binary is not available in a bundled host such as the Obsidian plugin.
-- **Bundling for an Electron renderer.** A host such as Obsidian needs three changes in its bundler. The Obsidian plugin's `esbuild.config.mjs` has all three, and they apply only to the SDK's own files.
-  1. Define `import.meta.url`. The SDK calls `createRequire(import.meta.url)` on load, and a CJS bundle has no `import.meta`.
-  2. Give the SDK a version of `events.setMaxListeners` that skips Chromium `AbortSignal` objects. In a renderer, the global `AbortController` is Chromium's, and Node rejects its signals.
-  3. Give the SDK Node's timers. In a renderer, `setTimeout` is Chromium's and returns a number, and the SDK calls `.unref()` on the result when it stops a CLI process.
+A conversation note is a document with `type: conversation`; the format is in `yami/conversation`. `ConversationManager` gives each open conversation note a `Composer`, the message box at the bottom of the note, and creates new conversations in the `folder`. `ConversationController` runs one note: its agent session, the transcript in the note, queued messages, approval requests, and the agent's questions.
 
-### Codex harness
+- `create(agent)` makes a note with a placeholder name and opens it. The first message names the note.
+- `start({ message, agent?, title?, folder?, open?, module? })` creates a note and sends the first message, for a module or another plugin. `status(path)` and `onTurnEnd(path, listener)` follow it.
+- The composer shows approval requests and questions above the message box, with `Y`, `A`, and `N` keys. With no composer open, `PermissionPrompts` shows a dialog.
+- `/model`, `/effort`, `/mode`, `/new`, and `/end` are local commands. Other `/` commands come from the harness. `[[` suggests notes.
+- The agent process closes after `idleMinutes` without a composer; the next message resumes the session from the `session` property.
 
-The adapter runs `codex app-server --stdio` and speaks its JSON-RPC protocol. `codex exec` cannot send approval requests to the client, so the adapter does not use it. The protocol is experimental. `src/agent/codex-protocol.ts` has the parts that the adapter uses, from Codex CLI 0.160.0.
+## Build and tests
 
-- **One server and one thread for each session.** The session sends each prompt as a turn on the same thread.
-- **Interrupt.** `turn/interrupt` ends a turn, but the commands of the turn keep running until their server stops. So `interrupt()` interrupts the turn, stops the server and its commands, and the next turn resumes the thread on a new server. `close()` also stops the server. A server first gets 2 s to exit after its stdin closes, then SIGINT, and then SIGKILL after 3 s more.
-- **Approvals.** The adapter sets the approval policy to `on-request`, and sends approvals to the user, not to the automatic reviewer that a Codex configuration can select. Command, file change, and permission requests go to the permission handler. An MCP confirmation without form fields also goes to the handler. The adapter declines MCP forms and URL requests, and gives empty answers to `request_user_input`.
-- **Your Codex setup applies.** The server loads `~/.codex/config.toml`, its MCP servers, plugins, and rules. `app-server` has no flag to ignore them. To change a setting, add a raw TOML entry to `config`, for example `config: ['web_search="live"']`.
-- **Stalls.** Codex has its own stream idle timeout and retries (`stream_idle_timeout_ms`), so the adapter has no watchdog.
-- **Output.** The adapter removes terminal control sequences from each output line before it parses the line as JSON.
-- **Sign-in.** The CLI uses your Codex sign-in. `connect()` reads the account through `account/read` and throws an error if you are not signed in. To use a different account, set `env: { CODEX_HOME: "/Users/you/.codex-work" }`.
-- **Executable.** The adapter searches for `codex` in the same folders as the Claude adapter. The npm package installs a launcher script that needs Node on `PATH`, and Obsidian does not have Node on `PATH`. So for an npm install, the adapter runs the native binary in the package. To set the path, use `executable`.
+- `npm run build` first type-checks every module except `yami/obsidian` with `tsconfig.core.json`. That check has no DOM types, and it maps `obsidian` and `@codemirror/*` to an empty module, so a core file that uses them, or imports a file of `yami/obsidian`, fails the build. Then `tsc` builds the whole library.
+- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the module loop with a fake agent and a file system vault, and in `test/unit/obsidian/` the shared documents and the conversation manager over a fake Obsidian app.
+- `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, and resume.
+- The plugin's `npm run test:obsidian` drives the real Obsidian app with `yami/obsidian`.

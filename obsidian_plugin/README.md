@@ -1,6 +1,6 @@
 # Yami
 
-A hello world Obsidian plugin. It adds a ribbon icon and a "Say hello" command. Both show the greeting from `yami` in a notice.
+The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conversations with Claude Code and Codex in your notes, and the sessions of Yami modules. The Obsidian layer, `yami/obsidian`, does the work; the plugin registers the agents and the commands.
 
 ## Develop
 

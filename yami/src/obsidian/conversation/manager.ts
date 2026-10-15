@@ -1,6 +1,6 @@
 import { type App, MarkdownView, normalizePath, Notice, type Plugin, TFile } from "obsidian";
-import type { ApprovalSetting } from "yami/agent";
-import { availablePath, nameFrom, newConversation, noteName, stamp, unnamed } from "yami/conversation";
+import type { ApprovalSetting } from "../../agent/index.js";
+import { availablePath, nameFrom, newConversation, noteName, stamp, unnamed } from "../../conversation/index.js";
 import type { ConversationAgent } from "../agents.js";
 import type { ConversationStatus, NewConversationOptions, TurnEnd } from "../api.js";
 import type { CollabHub } from "../collab/hub.js";

@@ -3,13 +3,13 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("obsidian", () => ({}));
 
 import type { TFile } from "obsidian";
-import type { AgentEvent } from "yami/agent";
-import { renderTurn, TurnTranscript, userBlock } from "yami/conversation";
+import type { AgentEvent } from "../../../src/agent/index.js";
+import { renderTurn, TurnTranscript, userBlock } from "../../../src/conversation/index.js";
 import * as Y from "yjs";
-import { AgentPeer } from "../../src/collab/agent-peer.js";
-import { LiveRegion } from "../../src/collab/region.js";
-import { LOCAL_ORIGIN, SharedNote } from "../../src/collab/shared-note.js";
-import { applyOps, diffOps } from "../../src/collab/text-ops.js";
+import { AgentPeer } from "../../../src/obsidian/collab/agent-peer.js";
+import { LiveRegion } from "../../../src/obsidian/collab/region.js";
+import { LOCAL_ORIGIN, SharedNote } from "../../../src/obsidian/collab/shared-note.js";
+import { applyOps, diffOps } from "../../../src/obsidian/collab/text-ops.js";
 
 beforeAll(() => {
   (globalThis as { window?: unknown }).window = globalThis;

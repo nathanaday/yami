@@ -1,6 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import { type App, type MarkdownView, Menu, prepareFuzzySearch, Scope, setIcon, setTooltip, type TFile } from "obsidian";
-import type { ApprovalSetting, PermissionDecision } from "yami/agent";
+import type { ApprovalSetting, PermissionDecision } from "../../agent/index.js";
 import { renderQuestions } from "../prompts/question-form.js";
 import { type ConversationController, LOCAL_COMMANDS, type PendingRequest } from "./controller.js";
 

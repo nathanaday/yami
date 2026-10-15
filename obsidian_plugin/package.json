@@ -1,8 +1,8 @@
 {
-  "name": "yami-obsidian",
+  "name": "yami-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "A hello world Obsidian plugin.",
+  "description": "The Yami Obsidian plugin: conversations with Claude Code and Codex, and Yami modules.",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit && node esbuild.config.mjs production",
@@ -17,7 +17,6 @@
     "vitest": "^5.0.4"
   },
   "dependencies": {
-    "yami": "file:../yami",
-    "yami-obsidian": "file:../yami-obsidian"
+    "yami": "file:../yami"
   }
 }

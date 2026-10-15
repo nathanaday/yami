@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "noEmit": true,
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.core.tsbuildinfo",
+    "paths": {
+      "obsidian": ["./test/no-obsidian.d.ts"],
+      "@codemirror/*": ["./test/no-obsidian.d.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["src/obsidian"]
+}
