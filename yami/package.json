@@ -22,6 +22,18 @@
     "./agent/codex": {
       "types": "./dist/agent/codex.d.ts",
       "default": "./dist/agent/codex.js"
+    },
+    "./document": {
+      "types": "./dist/document/index.d.ts",
+      "default": "./dist/document/index.js"
+    },
+    "./module": {
+      "types": "./dist/module/index.d.ts",
+      "default": "./dist/module/index.js"
+    },
+    "./modules/hello": {
+      "types": "./dist/modules/hello.d.ts",
+      "default": "./dist/modules/hello.js"
     }
   },
   "files": [

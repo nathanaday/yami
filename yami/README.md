@@ -1,6 +1,101 @@
 # yami
 
-Shared Yami logic.
+Shared Yami logic, in four modules:
+
+| Module | What it does |
+| --- | --- |
+| `yami/agent` | Connects to an agent harness, keeps preferences, and runs sessions. |
+| `yami/document` | Reads and writes the vault documents that Yami defines, and generates the ledgers. |
+| `yami/module` | Defines modules, creates session documents, and runs the agent loop on them. |
+| `yami/modules/hello` | The smallest module, as the reference. |
+
+## How Yami organizes work
+
+- A **vault** is the Obsidian vault.
+- A **module** is one agent workflow in the vault, for example the wiki or the journal.
+- A **session** is one run of a module, and one markdown document. The document is the front page of the work: what the session must deliver, what it must follow, and how far it is.
+
+Every document that Yami writes has a `type` property, and links are the identity of documents.
+
+| `type` | What it is |
+| --- | --- |
+| `module` | One note for each enabled module. |
+| `session` | The session document. Core fields, plus the module's own fields. |
+| `policy` | Rules that a session must follow. The body is the rule text. |
+| `promise` | A deliverable: what, where, and how Yami checks it. |
+| `skill` | A skill in the standard `SKILL.md` form. |
+| article | Any note. Its content becomes context for the agent. |
+
+A module's documents are installed into the vault, so users can read and edit them. The layout of a module with the id `hello`:
+
+```
+Yami.base                        vault ledger: every module, and every session grouped by module
+hello/                           the sessions, one document each
+  sessions.base                  module ledger: the sessions of this module
+  cheerful.md
+internal/hello/                  what the module needs, out of the way of the sessions
+  hello.md                       type: module
+  policies/Always say hello.md
+  promises/Greeting note.md
+  skills/greeting/SKILL.md
+  logs/cheerful.md               the full prompts, replies, and verifications of each run
+```
+
+The ledgers are Obsidian bases: live views over the properties of the session documents. Yami writes each base once, and keeps the properties of the session documents current.
+
+## `yami/document`
+
+`Vault` is the host's access to the vault: `read`, `write`, `exists`, `list`, and the parsing and writing of properties. The Obsidian plugin implements it over the Obsidian API, and tests implement it over the file system. The SDK does not use the Obsidian API.
+
+`readDocument`, `writeDocument`, and `updateDocument` handle a document as `{ path, properties, body }`. `replaceSection` replaces one `## heading` section of a body. `link`, `linkTarget`, `linksOf`, and `resolveLink` handle `[[links]]` in properties.
+
+The schemas of the built-in types are `MODULE`, `SESSION`, `POLICY`, and `PROMISE`. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form.
+
+`vaultLedger` and `moduleLedger` return the text of the two bases.
+
+## `yami/module`
+
+A module is a plain object:
+
+```ts
+export const hello: Module = {
+  id: "hello",
+  name: "Hello world",
+  schema: { greeting: { type: "text", default: "Hello" } },
+  documents: [
+    policy("Always say hello", "Begin every reply with the session's greeting."),
+    promise("Greeting note", { check: "exists", path: "greetings/{{session}}.md" }, "Create this note."),
+    skill("greeting", "How to greet by name.", "# Greeting\n\n…"),
+  ],
+  defaults: { policies: ["Always say hello"], promises: ["Greeting note"], skills: ["greeting"] },
+};
+```
+
+- `enableModule(vault, module)` writes the ledgers, the module document, and the module's documents. It keeps a document that exists, so edits in the vault stay.
+- `createSession(vault, module, name, fields)` writes `hello/<name>.md` with the module's defaults as links, and `fields` as the module's own properties.
+- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state.
+
+### The agent loop
+
+Each iteration is one agent turn and one verification.
+
+1. **Context.** The first prompt holds the session document, the session properties, and the content of every linked policy, promise, skill, and article. The skills are inlined for now; loading them through each harness comes later.
+2. **Action.** One turn on a harness session with `edit` access and the vault as the working directory.
+3. **Verification.** Yami runs the `check` of each promise, updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document, and writes the full exchange to the log. If a promise is unmet, the next prompt says which, and why.
+
+The session ends `done` when every promise is met. It ends `needs-attention` when the iterations run out (`maxIterations`, default 3) or when a promise has no check, so a person decides. It ends `failed` when the harness ends a turn with an error. A later run continues the iteration count.
+
+### Promises and checks
+
+A promise names a `check` and gives it properties. `{{session}}` in a value is the session name, and `{{field}}` is a session property.
+
+| `check` | Properties | Met when |
+| --- | --- | --- |
+| `exists` | `path` | The file exists. |
+| `contains` | `path`, `text` | The file exists and contains the text. |
+| none | | Never by Yami. The session ends `needs-attention` for a person to decide. |
+
+New checks register in `checks`.
 
 ## `yami/agent`
 

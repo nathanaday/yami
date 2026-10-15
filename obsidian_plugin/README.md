@@ -52,6 +52,16 @@ The command **Open test view** opens a chat panel in the right sidebar. The pane
 
 The agents start processes, so the plugin works only on desktop.
 
+## Try the hello module
+
+The hello module is the smallest Yami module: one policy, one promise, and one skill. Three commands drive it:
+
+1. **Hello: enable module** writes `Yami.base`, `hello/sessions.base`, and the module's documents under `internal/hello/`.
+2. **Hello: new session** creates `hello/Session <time>.md` and opens it. Its properties link the policy, the promise, and the skill, and `greeting` is the module's own field, which you can change.
+3. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs, and `internal/hello/logs/` has the full exchange.
+
+A run does not ask for permissions. Requests that `edit` access does not allow are denied.
+
 ## Build a release
 
 ```sh

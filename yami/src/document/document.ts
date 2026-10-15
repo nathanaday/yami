@@ -1,0 +1,79 @@
+import type { Properties, Vault } from "./vault.js";
+
+export interface Document {
+  path: string;
+  properties: Properties;
+  body: string;
+}
+
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+
+export function parseDocument(vault: Vault, path: string, text: string): Document {
+  const match = text.match(FRONTMATTER);
+  if (!match) return { path, properties: {}, body: text };
+  return { path, properties: vault.parseProperties(match[1]) ?? {}, body: text.slice(match[0].length) };
+}
+
+export function serializeDocument(vault: Vault, doc: Document): string {
+  const yaml = vault.stringifyProperties(doc.properties).replace(/\n+$/, "");
+  return `---\n${yaml}\n---\n${doc.body}`;
+}
+
+export async function readDocument(vault: Vault, path: string): Promise<Document> {
+  return parseDocument(vault, path, await vault.read(path));
+}
+
+export function writeDocument(vault: Vault, doc: Document): Promise<void> {
+  return vault.write(doc.path, serializeDocument(vault, doc));
+}
+
+/** Reads a document, applies `change` to it, and writes it back. */
+export async function updateDocument(vault: Vault, path: string, change: (doc: Document) => void): Promise<Document> {
+  const doc = await readDocument(vault, path);
+  change(doc);
+  await writeDocument(vault, doc);
+  return doc;
+}
+
+/** The file name without its folder and `.md`. */
+export function basename(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
+}
+
+export function link(path: string): string {
+  return `[[${basename(path)}]]`;
+}
+
+/** The target name of a link: `[[Name|alias]]` gives `Name`. A plain name passes through. */
+export function linkTarget(value: string): string {
+  return value.replace(/^\[\[|\]\]$/g, "").split(/[|#]/)[0].trim();
+}
+
+/** The link targets in a property that holds one link or a list of links. */
+export function linksOf(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  return values.filter((item): item is string => typeof item === "string" && item !== "").map(linkTarget);
+}
+
+/** Finds the file named `name`, searching `folders` in order and then the whole vault. */
+export async function resolveLink(vault: Vault, name: string, folders: string[]): Promise<string | undefined> {
+  const file = name.endsWith(".md") ? name : `${name}.md`;
+  for (const folder of [...folders, ""]) {
+    const found = (await vault.list(folder)).find((path) => path === file || path.endsWith(`/${file}`));
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** Replaces the `## heading` section of a body, or appends it. The content has no heading. */
+export function replaceSection(body: string, heading: string, content: string): string {
+  const section = `## ${heading}\n${content.replace(/\n+$/, "")}\n`;
+  const lines = body.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
+  if (start === -1) return `${body.replace(/\n+$/, "")}\n\n${section}`;
+  let end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+  if (end === -1) end = lines.length;
+  const before = lines.slice(0, start).join("\n");
+  const after = lines.slice(end).join("\n");
+  return `${before}${before ? "\n" : ""}${section}${after ? `\n${after}` : ""}`;
+}
