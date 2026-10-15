@@ -1,6 +1,6 @@
 # yami
 
-Shared Yami logic, in four modules:
+Shared Yami logic, in four modules. The design policy is in [`design.md`](../design.md).
 
 | Module | What it does |
 | --- | --- |
