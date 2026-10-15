@@ -11,7 +11,7 @@ import {
   type SettingSource,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Agent } from "./agent.js";
-import { childEnv, findExecutables } from "./executable.js";
+import { findExecutables, harnessEnv } from "./executable.js";
 import { contentText, Session } from "./session.js";
 import type { AgentInfo, PermissionKind, Preferences } from "./types.js";
 
@@ -29,7 +29,11 @@ export interface ClaudeAgentOptions {
   executable?: string;
   /** Variables added to the CLI environment, for example `CLAUDE_CONFIG_DIR`. */
   env?: Record<string, string>;
-  /** Claude Code settings files to load. Defaults to none. */
+  /**
+   * Claude Code settings to load: `user` (`~/.claude`), `project` (`.claude/`
+   * and `CLAUDE.md` in `cwd`), and `local`. Defaults to all three. Without
+   * `user`, the session loads no MCP servers.
+   */
   settingSources?: SettingSource[];
   preferences?: ClaudePreferences;
 }
@@ -52,7 +56,7 @@ export class ClaudeAgent extends Agent<ClaudePreferences> {
 
   async connect(): Promise<AgentInfo> {
     const input = new InputQueue();
-    const run = query({ prompt: input, options: this.toOptions(this.preferences) });
+    const run = query({ prompt: input, options: await this.toOptions(this.preferences) });
     try {
       const init = await run.initializationResult();
       return {
@@ -75,8 +79,9 @@ export class ClaudeAgent extends Agent<ClaudePreferences> {
     return new ClaudeSession(this.toOptions(preferences));
   }
 
-  private toOptions(preferences: ClaudePreferences): Options {
+  private async toOptions(preferences: ClaudePreferences): Promise<Options> {
     const access = preferences.access ?? "read-only";
+    const settingSources = this.options.settingSources ?? ["user", "project", "local"];
     return {
       cwd: preferences.cwd,
       model: preferences.model,
@@ -86,25 +91,34 @@ export class ClaudeAgent extends Agent<ClaudePreferences> {
       systemPrompt: { type: "preset", preset: "claude_code", append: preferences.instructions },
       disallowedTools: ["AskUserQuestion"],
       permissionMode: access === "edit" ? "acceptEdits" : "default",
-      settingSources: this.options.settingSources ?? [],
-      strictMcpConfig: true,
+      settingSources,
+      strictMcpConfig: !settingSources.includes("user"),
       pathToClaudeCodeExecutable: this.executable,
-      env: childEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: "yami", ...this.options.env }),
+      env: await harnessEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: "yami", ...this.options.env }),
     };
   }
 }
 
-/** Keeps one Claude Code process open and sends each prompt to it. */
+/**
+ * Keeps one Claude Code process open and sends each prompt to it. The process
+ * starts when the options are ready; prompts sent before then wait in the input.
+ */
 class ClaudeSession extends Session {
   private readonly input = new InputQueue();
-  private readonly run: Query;
+  private run: Query | undefined;
+  private readonly started: Promise<void>;
   private stallTimer: ReturnType<typeof setTimeout> | undefined;
   private stalled = false;
 
-  constructor(options: Options) {
+  constructor(options: Promise<Options>) {
     super();
-    this.run = query({ prompt: this.input, options: { ...options, canUseTool: this.canUseTool } });
-    void this.read();
+    this.started = options.then((resolved) => {
+      if (this.closed) return;
+      const run = query({ prompt: this.input, options: { ...resolved, canUseTool: this.canUseTool } });
+      this.run = run;
+      void this.read(run);
+    });
+    this.started.catch((error: Error) => this.finish(error));
   }
 
   /** Claude Code calls this for each tool use that its permission mode does not allow by itself. */
@@ -140,18 +154,19 @@ class ClaudeSession extends Session {
   }
 
   protected async stopTurn(): Promise<void> {
-    await this.run.interrupt();
+    await this.started;
+    await this.run?.interrupt();
   }
 
   protected dispose(): void {
     clearTimeout(this.stallTimer);
     this.input.end();
-    this.run.close();
+    this.run?.close();
   }
 
-  private async read(): Promise<void> {
+  private async read(run: Query): Promise<void> {
     try {
-      for await (const message of this.run) this.handle(message);
+      for await (const message of run) this.handle(message);
       this.finish();
     } catch (error) {
       this.finish(error instanceof Error ? error : new Error(String(error)));
@@ -221,7 +236,7 @@ class ClaudeSession extends Session {
 
   private stall(): void {
     this.stalled = true;
-    this.run.interrupt().catch(() => {});
+    this.run?.interrupt().catch(() => {});
     this.stallTimer = setTimeout(() => this.finish(new Error(STALL_MESSAGE)), STALL_GRACE_MS);
   }
 }

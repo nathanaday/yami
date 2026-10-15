@@ -81,6 +81,10 @@ session.setPermissionHandler(async (request, signal) => {
 - **Withdrawn requests.** When a turn ends, `interrupt()` runs, or the session closes, each open request is withdrawn. The signal aborts, and the request counts as denied.
 - **Events.** Each decision is also sent as a `permission` event.
 
+### Environment
+
+GUI apps such as Obsidian start with a short `PATH`, so the hooks and MCP servers of your setup would not find commands such as `node`, `npx`, or `uvx`. Each harness process gets the `PATH` of your login shell first, then the `PATH` of the host process, then `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin`. The adapter reads the login shell `PATH` once for each process, with `$SHELL -ilc`, and waits up to 5 s. A `PATH` in the `env` option comes before all of these.
+
 ### Claude harness
 
 The adapter uses the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview).
@@ -88,7 +92,7 @@ The adapter uses the [Claude Agent SDK](https://platform.claude.com/docs/en/agen
 - **One process for each session.** The session keeps one Claude Code process open and sends each prompt to it.
 - **Tools.** The agent has the standard Claude Code tools except `AskUserQuestion`, because a session cannot answer questions yet. `access` sets the permission mode: `default` for `read-only`, and `acceptEdits` for `edit`.
 - **Stall watchdog.** If a reply stops in the middle of a content block for 60 s, the session interrupts the turn, and the turn ends with an error. If the CLI does not respond within 10 s more, the session closes with the error. The watchdog does not time the wait for the first token, tool runs, or waits between messages.
-- **Your Claude Code setup does not apply yet.** The adapter loads no settings files and no MCP servers, including claude.ai connectors. To load settings files, set `settingSources: ["user"]`.
+- **Your Claude Code setup applies.** By default the adapter loads the `user`, `project`, and `local` settings: `~/.claude`, and `.claude/` and `CLAUDE.md` in `cwd`. These bring your `CLAUDE.md` files, skills, plugins, hooks, MCP servers, claude.ai connectors, and permission rules. To load fewer, set `settingSources`. Without `user`, the session loads no MCP servers. An explicit `access` still sets the permission mode, whatever the settings say.
 - **Sign-in.** The CLI uses your Claude Code sign-in. To use a different account, set `env: { CLAUDE_CONFIG_DIR: "/Users/you/.claude-work" }`, or set `ANTHROPIC_API_KEY`.
 - **Executable.** The adapter runs the first `claude` CLI that it finds on `PATH`, in `~/.local/bin`, in `~/.claude/local`, in `/opt/homebrew/bin`, or in `/usr/local/bin`. GUI apps often start with a short `PATH`, so the search includes the standard folders. If the adapter finds no CLI, it uses the binary in the SDK package. That binary is not available in a bundled host such as the Obsidian plugin.
 - **Bundling for an Electron renderer.** A host such as Obsidian needs three changes in its bundler. The Obsidian plugin's `esbuild.config.mjs` has all three, and they apply only to the SDK's own files.

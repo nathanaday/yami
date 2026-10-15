@@ -4,7 +4,7 @@ import { delimiter, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { Agent } from "./agent.js";
 import type * as Codex from "./codex-protocol.js";
-import { childEnv, findExecutables } from "./executable.js";
+import { findExecutables, harnessEnv } from "./executable.js";
 import { JsonRpcConnection } from "./jsonrpc.js";
 import { contentText, Session } from "./session.js";
 import type { AgentInfo, PermissionDecision, PermissionKind, Preferences, Usage } from "./types.js";
@@ -43,8 +43,9 @@ export class CodexAgent extends Agent<CodexPreferences> {
 
   async connect(): Promise<AgentInfo> {
     const executable = this.requireExecutable();
-    const version = await run(executable, ["--version"], this.env(executable));
-    const server = new AppServer(executable, this.serverArgs(), this.env(executable), {
+    const env = await this.env(executable);
+    const version = await run(executable, ["--version"], env);
+    const server = new AppServer(executable, this.serverArgs(), env, {
       notification: () => {},
       request: async (method) => {
         throw new Error(`Yami does not handle ${method}.`);
@@ -80,8 +81,8 @@ export class CodexAgent extends Agent<CodexPreferences> {
     return this.executable;
   }
 
-  private env(executable: string): Record<string, string> {
-    const env = childEnv(this.options.env);
+  private async env(executable: string): Promise<Record<string, string>> {
+    const env = await harnessEnv(this.options.env);
     const pathDir = join(dirname(dirname(executable)), "codex-path");
     if (existsSync(pathDir)) env.PATH = [pathDir, env.PATH].filter(Boolean).join(delimiter);
     return env;
@@ -183,14 +184,15 @@ interface TurnState {
  * and the next turn resumes the thread on a new server.
  */
 class CodexSession extends Session {
-  private server!: AppServer;
-  private thread: Promise<string>;
+  private server: AppServer | undefined;
+  /** The server and the thread ID, when the thread is ready. */
+  private thread: Promise<{ server: AppServer; threadId: string }>;
   private current: TurnState | undefined;
 
   constructor(
     private readonly executable: string,
     private readonly args: string[],
-    private readonly env: Record<string, string>,
+    private readonly env: Promise<Record<string, string>>,
     private readonly params: Record<string, unknown>,
   ) {
     super();
@@ -198,27 +200,29 @@ class CodexSession extends Session {
   }
 
   /** Starts a server, then starts the thread, or resumes it when `threadId` is set. */
-  private open(threadId?: string): Promise<string> {
-    const server = new AppServer(this.executable, this.args, this.env, {
-      notification: (method, params) => {
-        if (server === this.server) this.notification(method, params as Record<string, unknown>);
-      },
-      request: (method, params) => this.request(method, params as Record<string, unknown>),
-    });
-    this.server = server;
-    void server.exited.then((error) => {
-      if (!server.stopped) this.finish(error);
-    });
+  private open(threadId?: string): Promise<{ server: AppServer; threadId: string }> {
     const thread = (async () => {
+      const env = await this.env;
+      if (this.closed) throw new Error("The session is closed.");
+      const server = new AppServer(this.executable, this.args, env, {
+        notification: (method, params) => {
+          if (server === this.server) this.notification(method, params as Record<string, unknown>);
+        },
+        request: (method, params) => this.request(method, params as Record<string, unknown>),
+      });
+      this.server = server;
+      void server.exited.then((error) => {
+        if (!server.stopped) this.finish(error);
+      });
       await server.rpc.request("initialize", { clientInfo: CLIENT, capabilities: null });
       server.rpc.notify("initialized");
       if (threadId) {
         await server.rpc.request("thread/resume", { ...this.params, threadId });
-        return threadId;
+        return { server, threadId };
       }
       const response = await server.rpc.request<Codex.ThreadStartResponse>("thread/start", this.params);
       this.ready({ sessionId: response.thread.id, model: response.model });
-      return response.thread.id;
+      return { server, threadId: response.thread.id };
     })();
     thread.catch((error: Error) => this.finish(error));
     return thread;
@@ -237,8 +241,8 @@ class CodexSession extends Session {
     this.current = turn;
     void (async () => {
       try {
-        const threadId = await this.thread;
-        const response = await this.server.rpc.request<Codex.TurnStartResponse>("turn/start", {
+        const { server, threadId } = await this.thread;
+        const response = await server.rpc.request<Codex.TurnStartResponse>("turn/start", {
           threadId,
           input: [{ type: "text", text: prompt, text_elements: [] }],
         });
@@ -260,19 +264,19 @@ class CodexSession extends Session {
 
   protected dispose(): void {
     const turn = this.current;
-    if (turn?.id) void this.server.rpc.request("turn/interrupt", { threadId: this.id, turnId: turn.id }).catch(() => {});
-    this.server.stop();
+    if (turn?.id) void this.server?.rpc.request("turn/interrupt", { threadId: this.id, turnId: turn.id }).catch(() => {});
+    this.server?.stop();
   }
 
   /** Interrupts the turn, stops the server and its commands, and opens a new server for the thread. */
   private async abort(turn: TurnState): Promise<void> {
-    const threadId = await this.thread;
+    const { server, threadId } = await this.thread;
     try {
-      await this.server.rpc.request("turn/interrupt", { threadId, turnId: turn.id });
+      await server.rpc.request("turn/interrupt", { threadId, turnId: turn.id });
     } catch {
       // The turn has already ended, or the server has stopped.
     }
-    this.server.stop();
+    server.stop();
     this.endCurrent("error");
     if (!this.closed) this.thread = this.open(threadId);
   }

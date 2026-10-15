@@ -33,7 +33,7 @@ The plugin makes two agents for the vault folder, and puts them on `window.yami`
 - `yami.claude` uses [Claude Code](https://code.claude.com).
 - `yami.codex` uses [Codex](https://developers.openai.com/codex).
 
-Install the harness that you want to use, and sign in to it first.
+Install the harness that you want to use, and sign in to it first. The agents use your own setup for that harness: your `CLAUDE.md` and `AGENTS.md` files, skills, plugins, MCP servers, and permission rules. They also use the setup in the vault, for example skills in `.claude/skills` and `.agents/skills`.
 
 Open the developer console with **View → Toggle Developer Tools**. Then type:
 
