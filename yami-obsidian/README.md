@@ -49,5 +49,5 @@ A conversation note is a document with `type: conversation`; the format is in `y
 
 ## Tests
 
-- `npm test` runs the collab tests: diffs, disk merges, agent edits against an older version, typing, presence, live regions, and whole conversation turns in a shared note.
+- `npm test` runs the collab tests (diffs, disk merges, agent edits against an older version, typing, presence, live regions, and whole conversation turns in a shared note) and the conversation manager tests (new notes, the `start` API, statuses, turn-end listeners, renames, and a failed start) over a fake Obsidian app and a fake agent.
 - The plugin's `npm run test:obsidian` drives the real Obsidian app with these parts.
