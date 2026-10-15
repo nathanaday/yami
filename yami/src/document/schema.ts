@@ -36,7 +36,8 @@ export const SESSION: Schema = {
   created: { type: "date" },
   iteration: { type: "number", default: 0 },
   harness: { type: "text" },
-  harness_session: { type: "text" },
+  /** The conversation note that records the runs. */
+  conversation: { type: "link" },
   articles: links,
   policies: links,
   promises: links,

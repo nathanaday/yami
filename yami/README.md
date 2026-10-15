@@ -42,7 +42,8 @@ internal/hello/                  what the module needs, out of the way of the se
   policies/Always say hello.md
   promises/Greeting note.md
   skills/greeting/SKILL.md
-  logs/cheerful.md               the full prompts, replies, and verifications of each run
+conversations/
+  hello cheerful.md              the conversation note that records the runs of the session
 ```
 
 The ledgers are Obsidian bases: live views over the properties of the session documents. Yami writes each base once, and keeps the properties of the session documents current.
@@ -87,7 +88,7 @@ export const hello: Module = {
 
 - `enableModule(vault, module)` writes the ledgers, the module document, and the module's documents. It writes only files that do not exist, so edits in the vault stay, and a host calls it on every start.
 - `createSession(vault, module, name, fields)` writes `hello/<name>.md` with the module's defaults as links, and `fields` as the module's own properties.
-- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state.
+- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `yami-obsidian` provides one with the message box, so a person can watch a run and answer its approvals.
 
 ### The agent loop
 
@@ -95,7 +96,9 @@ Each iteration is one agent turn and one verification.
 
 1. **Context.** The first prompt holds the session document, the session properties, and the content of every linked policy, promise, skill, and article. The skills are inlined for now; loading them through each harness comes later.
 2. **Action.** One turn on a harness session with `edit` access and the vault as the working directory.
-3. **Verification.** Yami runs the `check` of each promise, updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document, and writes the full exchange to the log. If a promise is unmet, the next prompt says which, and why.
+3. **Verification.** Yami runs the `check` of each promise, and updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document. If a promise is unmet, the next prompt says which, and why.
+
+The exchange goes to a conversation note in `conversations/`, linked from the session document as `conversation`, with the session document linked back as `module`. The note records the prompts, the agent's replies, and its tool calls, and a person can continue it after the run.
 
 The session ends `done` when every promise is met. It ends `needs-attention` when the iterations run out (`maxIterations`, default 3) or when a promise has no check, so a person decides. It ends `failed` when the harness ends a turn with an error. A later run continues the iteration count.
 
@@ -276,7 +279,7 @@ export const hello: Module = {
 
 - `enableModule(vault, module)` writes the ledgers, the module document, and the module's documents. It writes only files that do not exist, so edits in the vault stay, and a host calls it on every start.
 - `createSession(vault, module, name, fields)` writes `hello/<name>.md` with the module's defaults as links, and `fields` as the module's own properties.
-- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state.
+- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `yami-obsidian` provides one with the message box, so a person can watch a run and answer its approvals.
 
 ### The agent loop
 
@@ -284,7 +287,9 @@ Each iteration is one agent turn and one verification.
 
 1. **Context.** The first prompt holds the session document, the session properties, and the content of every linked policy, promise, skill, and article. The skills are inlined for now; loading them through each harness comes later.
 2. **Action.** One turn on a harness session with `edit` access and the vault as the working directory.
-3. **Verification.** Yami runs the `check` of each promise, updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document, and writes the full exchange to the log. If a promise is unmet, the next prompt says which, and why.
+3. **Verification.** Yami runs the `check` of each promise, and updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document. If a promise is unmet, the next prompt says which, and why.
+
+The exchange goes to a conversation note in `conversations/`, linked from the session document as `conversation`, with the session document linked back as `module`. The note records the prompts, the agent's replies, and its tool calls, and a person can continue it after the run.
 
 The session ends `done` when every promise is met. It ends `needs-attention` when the iterations run out (`maxIterations`, default 3) or when a promise has no check, so a person decides. It ends `failed` when the harness ends a turn with an error. A later run continues the iteration count.
 

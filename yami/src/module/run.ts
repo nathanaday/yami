@@ -1,5 +1,5 @@
 import type { Agent } from "../agent/agent.js";
-import type { AgentEvent, PermissionHandler } from "../agent/types.js";
+import { type Conversations, FileConversations } from "../conversation/conversations.js";
 import {
   basename,
   documentName,
@@ -19,15 +19,16 @@ import { layout, readSession, skillPath, type Layout, type LinkedKind, type Modu
 export interface RunOptions {
   /** Turns the agent gets to meet every promise. Defaults to 3. */
   maxIterations?: number;
-  /** Answers the requests that the approval setting does not allow. Without one, they are denied. */
-  permissions?: PermissionHandler;
-  onEvent?: (event: AgentEvent) => void;
+  /** Where the conversation note comes from. Defaults to notes written straight to the vault, with approvals denied. */
+  conversations?: Conversations;
 }
 
 export interface RunResult {
   path: string;
   state: SessionState;
   iterations: number;
+  /** The conversation note that records the run. */
+  conversation: string;
 }
 
 type Linked = Record<LinkedKind, Document[]>;
@@ -42,30 +43,29 @@ interface Verification {
 /**
  * Runs the agent loop on a session document until every promise is met, the
  * iterations run out, or the harness fails. Each iteration is one agent turn
- * and one verification, and the document shows the state after each one.
+ * and one verification, and the document shows the state after each one. The
+ * exchange goes to a conversation note, linked from the document.
  */
 export async function runSession(vault: Vault, agent: Agent, module: Module, path: string, options: RunOptions = {}): Promise<RunResult> {
   const lay = layout(module);
   const name = basename(path);
   let doc = await readSession(vault, module, path);
   const linked = await loadLinked(vault, lay, doc);
-  const log = new Log(vault, `${lay.logs}/${name}.md`);
   const start = Number(doc.properties.iteration ?? 0);
   const last = start + (options.maxIterations ?? 3);
 
+  const conversations = options.conversations ?? new FileConversations(vault);
+  const conversation = await conversations.open({
+    agent,
+    name: `${module.id} ${name}`,
+    module: path,
+    approval: "accept-edits",
+  });
   doc = await updateDocument(vault, path, (d) => {
     d.properties.state = "running";
     d.properties.harness = agent.harness;
+    d.properties.conversation = link(conversation.path);
   });
-
-  const session = await agent.startSession({
-    cwd: vault.root,
-    approval: "accept-edits",
-    instructions: module.instructions,
-    onPermission: options.permissions,
-  });
-  session.on((event) => options.onEvent?.(event));
-  doc = await updateDocument(vault, path, (d) => (d.properties.harness_session = session.id));
 
   let state: SessionState = "needs-attention";
   let iteration = start;
@@ -73,16 +73,13 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
     let prompt = contextPrompt(module, doc, linked, path);
     while (iteration < last) {
       iteration += 1;
-      await log.append(`## Iteration ${iteration}\n\n### Prompt\n\n${prompt}\n`);
-      const result = await session.send(prompt);
-      await log.append(`### Reply (${result.status})\n\n${result.text}\n${result.error ? `\n> ${result.error}` : ""}\n`);
+      const result = await conversation.send(prompt);
       if (result.status !== "completed") {
         state = "failed";
         await record(vault, path, iteration, `turn ${result.status}: ${result.error ?? "no details"}`, undefined, state);
         break;
       }
       const verification = await verify(vault, name, doc, linked.promises);
-      await log.append(`### Verification\n\n${verification.results.map(({ promise, result }) => `- ${documentName(promise.path)}: ${result.status}, ${result.detail}`).join("\n")}\n`);
       const summary = `${verification.met.length} met, ${verification.unmet.length} unmet${verification.review.length ? `, ${verification.review.length} for review` : ""}`;
       if (verification.unmet.length === 0) {
         state = verification.review.length === 0 ? "done" : "needs-attention";
@@ -93,9 +90,9 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
       prompt = feedbackPrompt(verification);
     }
   } finally {
-    await session.close();
+    await conversation.close();
   }
-  return { path, state, iterations: iteration - start };
+  return { path, state, iterations: iteration - start, conversation: conversation.path };
 }
 
 async function loadLinked(vault: Vault, lay: Layout, doc: Document): Promise<Linked> {
@@ -163,6 +160,7 @@ function contextPrompt(module: Module, doc: Document, linked: Linked, path: stri
     `You are running the Yami session "${basename(path)}" of the module "${module.name}".\n` +
       `The working directory is the vault. Paths are relative to it. The session document is ${path}; Yami maintains its properties and its Deliverables and Progress sections, so do not edit that file.\n` +
       `Follow every policy. The session ends when every promise is met. After each of your turns, Yami checks the promises and tells you what is still unmet.`,
+    module.instructions,
     fields && `## Session properties\n\n${fields}`,
     `## Session\n\n${doc.body.trim()}`,
     section("Policies", linked.policies, (d) => d.body.trim()),
@@ -179,17 +177,4 @@ function feedbackPrompt(verification: Verification): string {
     .filter(({ result }) => result.status !== "met")
     .map(({ promise, result }) => `- ${documentName(promise.path)}: ${result.status}, ${result.detail}`);
   return `Yami checked the promises after your last turn.\n\n${lines.join("\n")}\n\nMeet the unmet promises. Follow the policies.`;
-}
-
-/** The iteration log of a session, in the module's internal folder. */
-class Log {
-  constructor(
-    private readonly vault: Vault,
-    private readonly path: string,
-  ) {}
-
-  async append(text: string): Promise<void> {
-    const current = (await this.vault.exists(this.path)) ? await this.vault.read(this.path) : "";
-    await this.vault.write(this.path, `${current}${text}\n`);
-  }
 }

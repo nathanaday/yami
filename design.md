@@ -25,8 +25,8 @@ Yami replaces Almagest. Almagest implemented each feature (ingest, changes, chec
 
 1. Every document that Yami writes has a `type` property: `module`, `session`, `policy`, `promise`, `skill`, or `conversation`. The schema of each type is in `yami/src/document/schema.ts`, and nowhere else.
 2. Links are the identity of documents. Yami generates no IDs. A session refers to its policies, promises, skills, and articles as `[[links]]` in its properties.
-3. A session is one document. It is the front page of the work: its properties hold the state, the links, and the module's own fields; its body holds the deliverables checklist and the progress. There is no other record of a session's state. The full exchange goes to a log in the module's internal folder.
-4. A module declares its session fields as a schema, in the same form as the core schemas. Core field names (`type`, `module`, `state`, `created`, `iteration`, `harness`, `harness_session`, `articles`, `policies`, `promises`, `skills`, `met`, `unmet`) are reserved.
+3. A session is one document. It is the front page of the work: its properties hold the state, the links, and the module's own fields; its body holds the deliverables checklist and the progress. There is no other record of a session's state. The exchange with the agent goes to a conversation note, linked from the document.
+4. A module declares its session fields as a schema, in the same form as the core schemas. Core field names (`type`, `module`, `state`, `created`, `iteration`, `harness`, `conversation`, `articles`, `policies`, `promises`, `skills`, `met`, `unmet`) are reserved.
 5. A module installs its documents into the vault, and never overwrites a document that exists. Users read and edit them in Obsidian.
 6. A module sets defaults for the links of a new session. A session can link to different documents, and the loop uses the session's links, not the module's defaults.
 
@@ -98,7 +98,7 @@ There is one loop, `runSession` in `yami/src/module/run.ts`. Modules do not have
 
 1. **Context.** The first prompt holds the session document, the module's session fields, and the content of every linked policy, promise, skill, and article. Later prompts hold only the verification feedback, because the harness session keeps the conversation.
 2. **Action.** One agent turn, with `accept-edits` approval and the vault as the working directory.
-3. **Verification.** Yami runs the check of each promise and records the outcome in the session document and the log.
+3. **Verification.** Yami runs the check of each promise and records the outcome in the session document. The exchange is a conversation note, linked from the document, so a person can watch a run in Obsidian, answer its approvals, and continue it.
 
 The session ends `done` when every promise is met; `needs-attention` when the iterations run out or a promise has no check; `failed` when the harness ends a turn with an error. `needs-attention` is the state for a person to look at, and the ledgers show it. A later run continues the iteration count.
 

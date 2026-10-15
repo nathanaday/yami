@@ -1,4 +1,5 @@
 import { type App, MarkdownView, normalizePath, type Plugin, TFile } from "obsidian";
+import type { ApprovalSetting } from "yami/agent";
 import { availablePath, nameFrom, newConversation, noteName, stamp, unnamed } from "yami/conversation";
 import type { ConversationAgent } from "../agents.js";
 import type { ConversationStatus, NewConversationOptions, TurnEnd } from "../api.js";
@@ -25,6 +26,8 @@ export interface CreateOptions {
   open?: "current" | "tab" | false;
   /** The module session document that this conversation runs, as a vault path. */
   module?: string;
+  /** When the agent asks before it acts, for this conversation. Default: the agent's preference. */
+  approval?: ApprovalSetting;
 }
 
 /** How long to wait for the metadata cache to read a new note. */
@@ -67,6 +70,11 @@ export class ConversationManager {
     return this.controllers.get(file);
   }
 
+  /** The controller of a conversation note, made when there is none. */
+  conversation(file: TFile): ConversationController {
+    return this.controllerFor(file);
+  }
+
   /** Creates a conversation note and opens it, with the cursor in the composer. */
   async create(agent: ConversationAgent, options: CreateOptions = {}): Promise<TFile> {
     const folder = normalizePath((options.folder ?? this.options.folder()) || "/");
@@ -81,6 +89,7 @@ export class ConversationManager {
         status: "active",
         created: stamp(new Date(), "YYYY-MM-DD HH:mm"),
         module: options.module ? `[[${options.module.replace(/\.md$/, "")}]]` : undefined,
+        approval: options.approval,
       }),
     );
     // A controller reads its agent from the note's properties.

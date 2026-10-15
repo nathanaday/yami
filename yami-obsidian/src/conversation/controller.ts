@@ -338,7 +338,7 @@ export class ConversationController {
         }, 1500);
       }
       turn.region.set(this.turnText(turn));
-      if (event.type === "turn-end") void this.finishTurn(turn, event.result.status, event.result.error);
+      if (event.type === "turn-end") void this.finishTurn(turn, event.result.status, event.result.error, event.result.text);
     }
     if (event.type === "closed") {
       this.session = undefined;
@@ -354,7 +354,7 @@ export class ConversationController {
     return text ? `${text}\n` : "";
   }
 
-  private async finishTurn(turn: Turn, status: TurnStatus, error?: string): Promise<void> {
+  private async finishTurn(turn: Turn, status: TurnStatus, error?: string, text?: string): Promise<void> {
     if (this.turn !== turn) return;
     this.turn = undefined;
     turn.region.set(this.turnText(turn));
@@ -372,7 +372,7 @@ export class ConversationController {
     // The next message starts before listeners hear of the end, so they see the conversation still working.
     const next = this.queue.shift();
     const running = next ? this.run(next) : undefined;
-    this.turnEnded(status, error);
+    this.turnEnded(status, error, text);
     if (running) await running;
     else if (!this.holders.size) {
       this.releaseNote();
@@ -380,8 +380,8 @@ export class ConversationController {
     }
   }
 
-  private turnEnded(status: TurnStatus, error?: string): void {
-    this.options.onTurnEnd({ path: this.file.path, status, ...(error && { error }) });
+  private turnEnded(status: TurnStatus, error?: string, text?: string): void {
+    this.options.onTurnEnd({ path: this.file.path, status, ...(text && { text }), ...(error && { error }) });
   }
 
   private releaseNote(): void {
@@ -449,7 +449,8 @@ export class ConversationController {
     }
   }
 
-  private async closeSession(): Promise<void> {
+  /** Closes the agent session. The next message resumes it from the note. */
+  async closeSession(): Promise<void> {
     const session = this.session ?? (await this.starting?.catch(() => undefined));
     this.session = undefined;
     // A resumed session hears the path again; the note can be renamed while it is closed.

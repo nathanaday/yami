@@ -143,11 +143,18 @@ describe("runSession", () => {
     expect(doc).toContain("iteration 2: 1 met, 0 unmet");
     expect(doc).toContain("- [x] [[internal/hello/promises/Greeting note|Greeting note]]");
     expect(doc).toContain("state: done");
-    expect(doc).toContain("harness_session: fake-session");
+    expect(doc).toContain('conversation: "[[conversations/hello second|hello second]]"');
     expect(doc).toContain("\n\n## Deliverables\n");
-    const log = await vault.read("internal/hello/logs/second.md");
-    expect(log).toContain("## Iteration 2");
-    expect(log).toContain("### Verification");
+    const record = await vault.read(result.conversation);
+    expect(result.conversation).toBe("conversations/hello second.md");
+    expect(record).toMatch(/^---\ntype: conversation\nagent: claude\n/);
+    expect(record).toContain("session: fake-session");
+    expect(record).toContain('module: "[[hello/second|second]]"');
+    expect(record).toContain("> [!user]\n> You are running the Yami session");
+    expect(record).toContain("> [!user]\n> Yami checked the promises");
+    expect(record.match(/> \[!user\]/g)).toHaveLength(2);
+    expect(record.trim().endsWith("ok")).toBe(true);
+    expect(await vault.exists("internal/hello/logs/second.md")).toBe(false);
   });
 
   it("needs attention when the iterations run out", async () => {

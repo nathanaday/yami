@@ -11,6 +11,7 @@ import {
   type ConversationAgent,
   ConversationManager,
   installCollab,
+  ObsidianConversations,
   ObsidianVault,
   PermissionPrompts,
   uninstallCollab,
@@ -174,7 +175,7 @@ export default class YamiPlugin extends Plugin {
 
   private async runHelloSession(agent: Agent, path: string): Promise<string> {
     new Notice(`Running ${path} with ${agent.harness}…`);
-    const result = await runSession(this.vault, agent, hello, path);
+    const result = await runSession(this.vault, agent, hello, path, { conversations: new ObsidianConversations(this.conversations, () => this.agents) });
     return `${path}: ${result.state} after ${result.iterations} iteration(s).`;
   }
 

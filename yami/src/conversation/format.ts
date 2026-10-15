@@ -15,6 +15,7 @@ export interface ConversationProperties {
   model?: string;
   effort?: string;
   session?: string;
+  approval?: string;
   status: "active" | "ended";
   created: string;
   /** The module session that this conversation runs, as a link. */
@@ -28,6 +29,8 @@ export function newConversation(properties: ConversationProperties): string {
     `agent: ${properties.agent}`,
     ...(properties.model ? [`model: ${properties.model}`] : []),
     ...(properties.effort ? [`effort: ${properties.effort}`] : []),
+    ...(properties.approval ? [`approval: ${properties.approval}`] : []),
+    ...(properties.session ? [`session: ${properties.session}`] : []),
     ...(properties.module ? [`module: "${properties.module}"`] : []),
     `status: ${properties.status}`,
     `created: ${properties.created}`,

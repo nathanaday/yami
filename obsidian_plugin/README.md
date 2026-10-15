@@ -41,7 +41,7 @@ The agents use your own setup for their harness: your `CLAUDE.md` and `AGENTS.md
 The hello module is the smallest Yami module: one policy, one promise, and one skill. When the plugin loads, it writes the files of each module that are missing: `Yami.base`, `hello/sessions.base`, and the module's documents under `internal/hello/`. Files that exist stay as they are, so you can edit the bases and the documents. Two commands drive the module:
 
 1. **Hello: new session** creates `hello/Session <time>.md` and opens it. Its properties link the policy, the promise, and the skill, and `greeting` is the module's own field, which you can change.
-2. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs.
+2. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs, and links the conversation note in `conversations/` that records the run. Open that note to watch the agent, answer its approvals, or continue the conversation.
 
 ## Tests
 

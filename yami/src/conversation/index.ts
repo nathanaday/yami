@@ -20,3 +20,11 @@ export {
   type TurnView,
 } from "./format.js";
 export { TurnTranscript } from "./transcript.js";
+export {
+  CONVERSATION_FOLDER,
+  FileConversations,
+  type Conversation,
+  type Conversations,
+  type ConversationTurn,
+  type OpenConversation,
+} from "./conversations.js";

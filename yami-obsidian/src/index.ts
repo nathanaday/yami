@@ -10,6 +10,7 @@ export { applyOps, deltaOps, diffOps, normalizeNewlines, shiftOps, type TextOp }
 export { Composer } from "./conversation/composer.js";
 export { ConversationController, LOCAL_COMMANDS, type LocalCommand, type PendingRequest } from "./conversation/controller.js";
 export { ConversationManager, type ConversationOptions, type CreateOptions } from "./conversation/manager.js";
+export { ObsidianConversations } from "./conversation/obsidian-conversations.js";
 export { type PermissionContext, PermissionPrompts } from "./prompts/permission-modal.js";
 export { type QuestionForm, renderQuestions } from "./prompts/question-form.js";
 export { ObsidianVault } from "./vault.js";

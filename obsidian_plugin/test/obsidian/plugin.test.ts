@@ -186,7 +186,7 @@ describe("Yami in Obsidian", () => {
     expect(result).toEqual({
       path: "Agents/From another plugin.md",
       working: "working",
-      turn: { path: "Agents/From another plugin.md", status: "completed" },
+      turn: { path: "Agents/From another plugin.md", status: "completed", text: expect.stringMatching(/plum/i) },
       after: "active",
       active: "Agents/From another plugin.md",
     });
@@ -203,5 +203,10 @@ describe("Yami in Obsidian", () => {
     const doc = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
     expect(doc).toContain("state: done");
     expect(doc).toMatch(/- \[x\] \[\[internal\/hello\/promises\/Greeting note\|Greeting note\]\]/);
+    const conversation = doc.match(/\nconversation: "\[\[(conversations\/[^|\]]+)\|/)?.[1];
+    expect(conversation).toBeTruthy();
+    const record = await obsidian.waitForNote(`${conversation}.md`, (text) => text.includes("> [!user]"), 10_000);
+    expect(record).toMatch(/^---\ntype: conversation\nagent: claude\n/);
+    expect(record).toContain(`module: "[[${session.replace(/\.md$/, "")}]]"`);
   });
 });

@@ -27,5 +27,7 @@ export interface TurnEnd {
   /** The path of the note now. The user can rename the note. */
   path: string;
   status: "completed" | "interrupted" | "failed";
+  /** The agent's final message for the turn. */
+  text?: string;
   error?: string;
 }
