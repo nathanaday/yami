@@ -4,7 +4,7 @@ import type { Agent } from "yami/agent";
 import { ClaudeAgent } from "yami/agent/claude";
 import { CodexAgent } from "yami/agent/codex";
 import { timestamp } from "yami/document";
-import { createSession, enableModule, runSession } from "yami/module";
+import { createSession, enableModule, moduleTools, runSession } from "yami/module";
 import { hello } from "yami/modules/hello";
 import {
   type CollabHub,
@@ -48,8 +48,9 @@ export default class YamiPlugin extends Plugin {
   async onload() {
     const cwd = vaultRoot(this.app);
     this.vault = new ObsidianVault(this.app, cwd);
-    this.claude = new ClaudeAgent({ preferences: { cwd } });
-    this.codex = new CodexAgent({ preferences: { cwd } });
+    const tools = moduleTools(this.vault, MODULES);
+    this.claude = new ClaudeAgent({ preferences: { cwd, tools } });
+    this.codex = new CodexAgent({ preferences: { cwd, tools } });
     this.agents = [
       { name: "claude", color: COLORS.claude, agent: this.claude },
       { name: "codex", color: COLORS.codex, agent: this.codex },

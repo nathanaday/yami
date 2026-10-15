@@ -73,7 +73,7 @@ yami/agent        the Agent and Session base classes, one adapter for each harne
 
 ## Modules
 
-A module is a plain object: `id`, `name`, `description`, `schema`, `documents`, `defaults`, and `instructions`. A module has no code of its own.
+A module is a plain object: `id`, `name`, `description`, `schema`, `documents`, `defaults`, `instructions`, and `tools`. Its documents are data. Its tools are the one place a module has code: functions the agent calls, which run in the host with the vault. `moduleTools` in `yami/module` serves the tools of every enabled module as one tool set named `yami`, with each tool named `<module id>_<tool name>`. The plugin gives that set to its agents, so every session in the vault has it.
 
 A new feature is a module when it can be expressed as these parts. Before adding a part to the `Module` type or a function to `yami/module`, answer these questions:
 
@@ -83,6 +83,7 @@ A new feature is a module when it can be expressed as these parts. Before adding
 4. Is it a way to verify a deliverable? Then it is a check in `yami/src/module/checks.ts`, and a promise names it.
 5. Is it state? Then it is a property of the session document, with a schema.
 6. Is it a view? Then it is a base, or a section of the session document.
+7. Is it an action the agent takes through the host? Then it is a tool in the module's `tools`.
 
 If none of these fit, the design needs a change to this document before the code.
 

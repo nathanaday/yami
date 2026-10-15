@@ -1,6 +1,8 @@
-import type { AgentInfo, AgentSession, ApprovalSetting, Harness, SessionOptions } from "./types.js";
+import type { AgentInfo, AgentSession, ApprovalSetting, Harness, SessionOptions, ToolSet } from "./types.js";
 
 export interface AgentPreferences {
+  /** Tools that run in the host, given to every session. A session's own `tools` replace them. */
+  tools?: ToolSet;
   /** Working directory of the agent. Defaults to the current process directory. */
   cwd?: string;
   /** Model ID. Defaults to the harness default. */

@@ -1,6 +1,7 @@
+import { defineTool, z } from "../agent/index.js";
 import { policy, promise, skill, type Module } from "../module/module.js";
 
-/** The smallest module: one policy, one promise, one skill, and one session field. */
+/** The smallest module: one policy, one promise, one skill, one session field, and one tool. */
 export const hello: Module = {
   id: "hello",
   name: "Hello world",
@@ -26,4 +27,13 @@ export const hello: Module = {
     promises: ["Greeting note"],
     skills: ["greeting"],
   },
+  tools: () => [
+    defineTool({
+      name: "greet_user",
+      description: "Greets a person by name. Returns the greeting.",
+      input: { name: z.string().describe("The person's name.") },
+      title: ({ name }) => `Greet ${name}`,
+      run: async ({ name }) => `Hello, ${name}!`,
+    }),
+  ],
 };

@@ -1,6 +1,7 @@
 import { moduleLedger, vaultLedger } from "../document/bases.js";
 import { link, readDocument, writeDocument, type Document } from "../document/document.js";
 import { SESSION, timestamp, validate, withDefaults, type Schema } from "../document/schema.js";
+import type { AgentTool } from "../agent/types.js";
 import type { Properties, Vault } from "../document/vault.js";
 
 export type LinkedKind = "articles" | "policies" | "promises" | "skills";
@@ -25,6 +26,13 @@ export interface Module {
   defaults?: Partial<Record<LinkedKind, string[]>>;
   /** Text added to the harness system prompt of each session. */
   instructions?: string;
+  /** Tools that the agent gets while the module is enabled. They run in the host. */
+  tools?: (context: ToolContext) => AgentTool[];
+}
+
+export interface ToolContext {
+  vault: Vault;
+  module: Module;
 }
 
 export function policy(name: string, body: string, properties: Properties = {}): ModuleDocument {

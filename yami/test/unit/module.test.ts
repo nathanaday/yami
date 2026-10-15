@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import YAML from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
-import { Agent, type AgentInfo, type AgentSession, BaseSession, type ActiveTurn, type TurnResult } from "../../src/agent/index.js";
+import { Agent, type AgentInfo, type AgentSession, BaseSession, type ActiveTurn, runTool, type SessionOptions, type TurnResult } from "../../src/agent/index.js";
 import type { Properties, Vault } from "../../src/document/index.js";
-import { createSession, enableModule, promise, runSession } from "../../src/module/index.js";
+import { createSession, enableModule, moduleTools, promise, runSession } from "../../src/module/index.js";
 import { hello } from "../../src/modules/hello.js";
 
 /** A vault on the file system. */
@@ -46,7 +46,10 @@ class FakeSession extends BaseSession {
   readonly harness = "claude";
   readonly id = "fake-session";
   readonly prompts: string[] = [];
-  constructor(private readonly turns: Turn[]) {
+  constructor(
+    private readonly turns: Turn[],
+    readonly options: SessionOptions,
+  ) {
     super();
   }
   protected async startTurn(prompt: string, turn: ActiveTurn) {
@@ -77,8 +80,8 @@ class FakeAgent extends Agent {
   async connect(): Promise<AgentInfo> {
     return { harness: "claude", version: "0", account: {} };
   }
-  protected async createSession(): Promise<AgentSession> {
-    this.last = new FakeSession(this.turns);
+  protected async createSession(options: SessionOptions): Promise<AgentSession> {
+    this.last = new FakeSession(this.turns, this.sessionOptions(options));
     return this.last;
   }
 }
@@ -122,6 +125,26 @@ describe("enableModule and createSession", () => {
   it("refuses a duplicate session name", async () => {
     const { vault } = await fresh("x");
     await expect(createSession(vault, hello, "x")).rejects.toThrow("exists");
+  });
+});
+
+describe("moduleTools", () => {
+  it("serves the tools of every module in one set, named by module", async () => {
+    const { vault } = await fresh("tools");
+    const set = moduleTools(vault, [hello, { ...hello, id: "hello-two", name: "Two" }, { id: "none", name: "None" }]);
+    expect(set?.name).toBe("yami");
+    expect(set?.description).toContain("Hello world, Two");
+    expect(set?.tools.map((tool) => tool.name)).toEqual(["hello_greet_user", "hello_two_greet_user"]);
+    expect(await runTool(set!.tools[0]!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
+    expect(moduleTools(vault, [{ id: "none", name: "None" }])).toBeUndefined();
+  });
+
+  it("reaches the agent's sessions through its preferences", async () => {
+    const { vault, path } = await fresh("with-tools");
+    const agent = new FakeAgent([write(vault, "with-tools")]);
+    agent.setPreferences({ tools: moduleTools(vault, [hello]) });
+    await runSession(vault, agent, hello, path);
+    expect(agent.last!.options.tools?.tools.map((tool) => tool.name)).toEqual(["hello_greet_user"]);
   });
 });
 

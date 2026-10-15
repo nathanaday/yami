@@ -169,6 +169,18 @@ describe("Yami in Obsidian", () => {
     expect(text).toMatch(/\nkiwi\.?\n\n$/i);
   });
 
+  it("calls a module tool from both agents", { timeout: TIMEOUT }, async () => {
+    for (const command of ["yami:new-conversation-claude", "yami:new-conversation-codex"]) {
+      await newConversation(command);
+      await send("Call the greet_user tool of the hello module with the name Ada, then reply with exactly the text the tool returned.");
+      await idle();
+      const text = await obsidian.waitForNote(await activePath(), () => true);
+      // Codex sometimes calls the tool twice; the plumbing, not the count, is under test.
+      expect(text, command).toMatch(/> \[!activity\]- Used (a tool|\d tools)\n(> - `Greet Ada`\n)+/);
+      expect(text, command).toMatch(/\nHello, Ada!\n\n$/);
+    }
+  });
+
   it("starts a conversation for another plugin and reports its turns", { timeout: TIMEOUT }, async () => {
     const result = await page().evaluate(async () => {
       const app = (window as any).app;
