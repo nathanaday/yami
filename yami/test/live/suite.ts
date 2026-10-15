@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -137,6 +137,65 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
       sessions.push(session);
       const result = await session.send("Say hello in two words.");
       expect(result.text).toContain("[[yami]]");
+    });
+
+    /** A vault with one skill set, hello, whose greeting skill answers with a word no model would guess. */
+    function skillVault() {
+      const cwd = mkdtempSync(path.join(tmpdir(), `yami-${harness}-skills-`));
+      const root = path.join(cwd, "internal", "hello");
+      mkdirSync(path.join(root, "skills", "greeting"), { recursive: true });
+      writeFileSync(
+        path.join(root, "skills", "greeting", "SKILL.md"),
+        "---\nname: greeting\ndescription: How to greet a person by name.\n---\n# Greeting\n\nReply with exactly one line: the word Salutations, a comma, the name you were given, and then the word PINEAPPLE. No other words.\n",
+      );
+      return { cwd, root };
+    }
+
+    async function startWithSkills(options: SessionStart<never> = {}) {
+      const { cwd, root } = skillVault();
+      const session = await makeAgent(cwd).startSession({ skills: [root], ...options });
+      sessions.push(session);
+      return session;
+    }
+
+    it("lists a skill set's skill as <set>:<skill> and invokes it with a slash", { timeout: TIMEOUT }, async () => {
+      const session = await startWithSkills();
+      expect((await session.commands()).map((command) => command.name)).toContain("hello:greeting");
+      const result = await session.send("/hello:greeting Ada");
+      expect(result.status).toBe("completed");
+      expect(result.text).toContain("PINEAPPLE");
+      expect(result.text).toContain("Ada");
+    });
+
+    it("passes a long, multi-line message after the command to the skill", { timeout: TIMEOUT }, async () => {
+      const session = await startWithSkills();
+      const result = await session.send("/hello:greeting You are running a session.\n\n## Session\n\nThe person to greet is Grace.\n\n## Notes\n\nNothing else.");
+      expect(result.text).toContain("PINEAPPLE");
+      expect(result.text).toContain("Grace");
+    });
+
+    it("uses a skill of a skill set when the message only asks for it", { timeout: TIMEOUT }, async () => {
+      // No approval handler: Codex reads a skill it chose with a command, and the adapter allows that read itself.
+      const session = await startWithSkills();
+      const result = await session.send("Greet Linus, using your greeting skill from the hello skill set.");
+      expect(result.text).toContain("PINEAPPLE");
+    });
+
+    it("invokes a skill in a read-only session", { timeout: TIMEOUT }, async () => {
+      const session = await startWithSkills({ access: "read-only" });
+      const result = await session.send("/hello:greeting Ada");
+      expect(result.text).toContain("PINEAPPLE");
+    });
+
+    it.runIf(harness === "claude")("keeps a read-only session's subagent from writing", { timeout: TIMEOUT }, async () => {
+      const { cwd, root } = skillVault();
+      const session = await makeAgent(cwd).startSession({ skills: [root], access: "read-only" });
+      sessions.push(session);
+      const events: AgentEvent[] = [];
+      session.on((event) => events.push(event));
+      await session.send("Use your Agent tool to start one subagent, and tell it to create the file note.txt in the working directory with the text hello. Then report what happened.");
+      expect(events.some((event) => event.type === "tool-start" && event.tool === "Agent")).toBe(true);
+      expect(existsSync(path.join(cwd, "note.txt"))).toBe(false);
     });
 
     it("resumes a session by id", { timeout: TIMEOUT }, async () => {

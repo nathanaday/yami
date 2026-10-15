@@ -434,6 +434,7 @@ export class ConversationController {
         model: this.property("model"),
         effort: this.property("effort"),
         approval: this.approval,
+        access: this.property("access") as "edit" | "read-only" | undefined,
         onPermission: (request) => this.ask(request),
         onQuestion: (request) => this.question(request),
         // Shares a note before the agent's tool changes it, so the change merges as the agent's edit.

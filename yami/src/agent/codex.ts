@@ -27,6 +27,7 @@ import type {
 import { findExecutables, harnessEnv, pathDisplay } from "./executable.js";
 import { RpcConnection, RpcError } from "./rpc.js";
 import { type ActiveTurn, askPermission, BaseSession } from "./session.js";
+import { isSkillRead, setSkills, skillList, skillTurn, slashCommand } from "./skills.js";
 import {
   type AgentInfo,
   type AgentSession,
@@ -271,7 +272,9 @@ export class CodexSession extends BaseSession {
       // Approvals go to the user, not to an automatic reviewer that a user configuration can select.
       approvalsReviewer: "user",
       sandbox: readOnly ? "read-only" : "workspace-write",
-      developerInstructions: this.options.instructions ?? null,
+      // Skill sets are listed here, not as Codex extra skill roots: from a root, Codex reads a skill it chose with a
+      // command that asks for approval under `ask`, and sometimes from a wrong path. See isSkillRead.
+      developerInstructions: [this.options.instructions, skillList(setSkills(this.options.skills ?? []))].filter(Boolean).join("\n\n") || null,
       config,
     };
     const dynamicTools = tools && [
@@ -308,10 +311,15 @@ export class CodexSession extends BaseSession {
       }));
   }
 
-  /** Codex skills. `send('/name request')` invokes the skill `name`. */
+  /** Codex skills, and the skills of the session's skill sets as `<set>:<skill>`. `send('/name request')` invokes the skill `name`. */
   async commands(): Promise<CommandOption[]> {
-    const skills = await this.loadSkills();
-    return skills.map((skill) => ({ name: skill.name, description: skill.shortDescription ?? skill.description }));
+    const sets = setSkills(this.options.skills ?? []);
+    const attached = new Set(sets.map((skill) => skill.path));
+    const own = (await this.loadSkills()).filter((skill) => !attached.has(skill.path));
+    return [
+      ...sets.map((skill) => ({ name: skill.command, description: skill.description })),
+      ...own.map((skill) => ({ name: skill.name, description: skill.shortDescription ?? skill.description })),
+    ];
   }
 
   async configure(settings: SessionSettings): Promise<void> {
@@ -337,13 +345,20 @@ export class CodexSession extends BaseSession {
     return this.skills;
   }
 
+  /**
+   * The input of a turn. `/<set>:<skill>` puts the skill's instructions in the turn, as Claude Code does:
+   * a Codex skill input only names the file, and the model then reads it with a shell command that may
+   * need approval. `/<name>` of a Codex skill sends Codex's own skill input.
+   */
   private async input(text: string): Promise<unknown[]> {
     const message = { type: "text", text, text_elements: [] };
-    const command = text.match(/^\/([\w:-]+)\s*([\s\S]*)$/);
+    const command = slashCommand(text);
     if (!command) return [message];
-    const skill = (await this.loadSkills()).find((candidate) => candidate.name === command[1]);
+    const set = setSkills(this.options.skills ?? []).find((candidate) => candidate.command === command.command);
+    if (set) return [{ ...message, text: skillTurn(set, command.rest) }];
+    const skill = (await this.loadSkills()).find((candidate) => candidate.name === command.command);
     if (!skill) return [message];
-    return [{ type: "skill", name: skill.name, path: skill.path }, { ...message, text: command[2] || `Use the ${skill.name} skill.` }];
+    return [{ type: "skill", name: skill.name, path: skill.path }, { ...message, text: command.rest || `Use the ${skill.name} skill.` }];
   }
 
   protected async startTurn(text: string): Promise<void> {
@@ -526,6 +541,9 @@ export class CodexSession extends BaseSession {
       case "item/commandExecution/requestApproval": {
         const request = params as CommandApprovalParams;
         const network = request.networkApprovalContext;
+        // Reading a skill of the session's skill sets is part of using it, as the Skill tool is for Claude Code.
+        const folders = (this.options.skills ?? []).map((root) => join(root, "skills"));
+        if (!network && request.command && isSkillRead(unwrapShell(request.command), folders, this.options.cwd)) return { decision: DECISIONS.allow };
         const detail = [request.command, request.reason && `Reason: ${request.reason}`].filter(Boolean).join("\n");
         const title = network ? `Connect to ${network.host}` : request.command ? `Run ${unwrapShell(request.command)}` : "Run a command";
         const decision = await ask("command", network ? "network" : "command", title, detail);

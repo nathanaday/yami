@@ -40,6 +40,13 @@ export interface SessionOptions {
   /** Tools that run inside the app. The agent calls them like its built-in tools, without approval. */
   tools?: ToolSet;
   /**
+   * Skill-set folders, as absolute paths. Each holds a `skills/` folder with one folder for each skill,
+   * and the set's name is its folder's name. The agent can use every skill, and a message that starts
+   * with `/<set>:<skill>` invokes one. Claude Code loads each set as a plugin of the session; Codex as
+   * an extra skill root, with the adapter mapping the command.
+   */
+  skills?: string[];
+  /**
    * `read-only`: the agent can read files and search, but it cannot change files or run commands
    * that change them, and it never asks for approval. It can still change things through `tools`.
    */

@@ -12,7 +12,7 @@ export interface Field {
 
 export type Schema = Record<string, Field>;
 
-export const DOCUMENT_TYPES = ["module", "session", "policy", "promise", "skill", "conversation"] as const;
+export const DOCUMENT_TYPES = ["module", "session", "policy", "promise", "skill", "conversation", "topic", "source", "snapshot", "change"] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 export const SESSION_STATES = ["open", "running", "done", "failed", "needs-attention"] as const;
@@ -53,6 +53,8 @@ export const CONVERSATION: Schema = {
   model: { type: "text" },
   effort: { type: "text" },
   approval: { type: "text", values: ["ask", "accept-edits", "plan", "auto", "sandbox"] },
+  /** `read-only`: the agent changes nothing except through its tools. */
+  access: { type: "text", values: ["edit", "read-only"] },
   /** The harness session, for resuming. */
   session: { type: "text" },
   status: { type: "text", values: ["active", "ended"], default: "active" },
@@ -73,6 +75,83 @@ export const PROMISE: Schema = {
   check: { type: "text" },
   /** The vault path of the deliverable. `{{session}}` is the session name. */
   path: { type: "text" },
+};
+
+export const TOPIC_STATUSES = ["draft", "stable", "contested", "deprecated"] as const;
+export const TOPIC_KINDS = ["concept", "entity", "overview"] as const;
+
+/** A note the wiki maintains about one subject. */
+export const TOPIC: Schema = {
+  type: typed("topic"),
+  description: { type: "text", required: true },
+  tags: { type: "list", default: [] },
+  aliases: { type: "list", default: [] },
+  /** Every source the topic cites. */
+  sources: links,
+  status: { type: "text", values: TOPIC_STATUSES, default: "draft" },
+  kind: { type: "text", values: TOPIC_KINDS },
+  created: { type: "date" },
+  updated: { type: "date" },
+};
+
+export const SOURCE_STATUSES = ["pending", "absorbed"] as const;
+export const AUTHORITIES = ["official", "primary", "secondary", "community", "synthetic", "unknown"] as const;
+
+/** A note that stands for one original the wiki learned from. */
+export const SOURCE: Schema = {
+  type: typed("source"),
+  description: { type: "text", required: true },
+  tags: { type: "list", default: [] },
+  aliases: { type: "list", default: [] },
+  /** The frozen copy that the source stands for, in `internal/wiki/originals/`. */
+  file: { type: "link", required: true },
+  /** Where the copy was captured from. That file can change later; the copy does not. */
+  from: { type: "link" },
+  /** The SHA-256 of the captured content. */
+  sha256: { type: "text" },
+  status: { type: "text", values: SOURCE_STATUSES, default: "pending" },
+  authority: { type: "text", values: AUTHORITIES },
+  created: { type: "date" },
+};
+
+/** One version of the wiki: the state of the knowledge base at one time, kept as an archive beside the document. */
+export const SNAPSHOT: Schema = {
+  type: typed("snapshot"),
+  module: { type: "text", required: true },
+  version: { type: "number", required: true },
+  created: { type: "date" },
+  /** The hash of every note's path and text. The wiki is captured when its hash equals the latest snapshot's. */
+  hash: { type: "text", required: true },
+  /** How many notes the archive holds. */
+  notes: { type: "number" },
+  /** The archive's vault path. */
+  archive: { type: "text", required: true },
+  /** The change that led to this version, when one did. */
+  change: { type: "link" },
+  /** The version this one restored, when it did. */
+  restored: { type: "number" },
+};
+
+export const CHANGE_STATUSES = ["applying", "applied", "failed"] as const;
+
+/** One change to the wiki: the plan an agent built, and what happened to it. */
+export const CHANGE: Schema = {
+  type: typed("change"),
+  module: { type: "text", required: true },
+  title: { type: "text", required: true },
+  status: { type: "text", values: CHANGE_STATUSES, required: true },
+  created: { type: "date" },
+  applied: { type: "date" },
+  /** The session that proposed it. */
+  session: { type: "link" },
+  /** The versions before and after the change. */
+  before: { type: "number" },
+  after: { type: "number" },
+  creates: { type: "number" },
+  modifies: { type: "number" },
+  removes: { type: "number" },
+  /** Why the change failed. */
+  error: { type: "text" },
 };
 
 /** Fills in the default of each field that is missing. */

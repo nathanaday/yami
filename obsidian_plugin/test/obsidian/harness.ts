@@ -73,11 +73,12 @@ export async function launchObsidian({ vault: source = "test/fixtures/sample-vau
         const deadline = Date.now() + timeout;
         let text = "";
         while (Date.now() < deadline) {
-          // Read through Obsidian, which includes edits that are not saved to disk yet.
-          text = await page.evaluate((file) => {
+          // Read through Obsidian, which includes edits that are not saved to disk yet. A note that does not exist yet reads as empty.
+          text = await page.evaluate(async (file) => {
             const app = (window as any).app;
             const leaf = app.workspace.getLeavesOfType("markdown").find((l: any) => l.view.file?.path === file);
-            return leaf ? leaf.view.editor.getValue() : app.vault.adapter.read(file);
+            if (leaf) return leaf.view.editor.getValue();
+            return (await app.vault.adapter.exists(file)) ? app.vault.adapter.read(file) : "";
           }, note);
           if (check(text)) return text;
           await new Promise((resolve) => setTimeout(resolve, 250));

@@ -8,7 +8,9 @@ The Yami library. The design policy is in [`design.md`](../design.md).
 | `yami/document` | Reads and writes the vault documents that Yami defines, and generates the ledgers. |
 | `yami/module` | Defines modules, creates session documents, and runs the agent loop on them. |
 | `yami/conversation` | The conversation note format: properties, the user and agent blocks, and the turn transcript. |
+| `yami/wiki` | The knowledge base: one index over every note, the link graph, the query algorithms, match, and lint. |
 | `yami/modules/hello` | The smallest module, as the reference. |
+| `yami/modules/wiki` | The wiki module: ingest sessions that turn sources into cited topics, and the search, match, and lint tools. |
 | `yami/obsidian` | The Obsidian layer: the vault adapter, shared documents, conversation notes, and the approval prompts. |
 
 `yami/obsidian` is the one module that uses the Obsidian API, CodeMirror, and the DOM. The other modules are plain TypeScript, and the build checks that they stay so.
@@ -29,6 +31,10 @@ Every document that Yami writes has a `type` property, and links are the identit
 | `promise` | A deliverable: what, where, and how Yami checks it. |
 | `skill` | A skill in the standard `SKILL.md` form. |
 | `conversation` | A conversation with an agent: the messages, the replies, and the tool calls. |
+| `topic` | A note the wiki maintains about one subject, with its claims cited to sources. In `wiki/topics/`. |
+| `source` | A note that stands for one original the wiki learned from, and links or embeds it. In `wiki/sources/`. |
+| `change` | One plan of creates, modifies, and removes over the knowledge base, and what happened to it. In `internal/wiki/changes/`. |
+| `snapshot` | One version of the knowledge base, with a gzip archive of every note beside it. In `internal/wiki/snapshots/`. |
 | article | Any note. Its content becomes context for the agent. |
 
 A module's documents are installed into the vault, so users can read and edit them. The layout of a module with the id `hello`:
@@ -89,15 +95,18 @@ export const hello: Module = {
 
 - `enableModule(vault, module)` writes the ledgers, the module document, and the module's documents. It writes only files that do not exist, so edits in the vault stay, and a host calls it on every start.
 - `createSession(vault, module, name, fields)` writes `hello/<name>.md` with the module's defaults as links, and `fields` as the module's own properties.
-- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `ObsidianConversations` in `yami/obsidian` provides one with the message box, so a person can watch a run and answer its approvals.
+- A module may set `sessions: "internal"` to keep its session documents and ledger under `internal/<id>/`, when its own folder holds its output for a person to read, as the wiki does. `access: "read-only"` makes a session's agent unable to change any file except through the module's tools. `ledgerViews` adds tables to the module ledger.
+- `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `ObsidianConversations` in `yami/obsidian` provides one with the message box, so a person can watch a run and answer its approvals. `options.wiki` is the vault's wiki, for the checks; without one, the run builds its own over the vault.
+- `moduleTools({ vault, wiki }, modules)` serves the tools of every module as one tool set named `yami`, each tool named `<module id>_<tool name>`. A module's `tools` function gets the vault, the wiki, and the module. The host gives the set to its agents.
+- `moduleSkills(vault, modules)` returns each module's internal folder as a skill set, so the host gives its agents every module skill, invoked as `/<module id>:<skill>`. `skill(name, description, body, files)` takes other files, such as worker briefs, which `enableModule` writes beside `SKILL.md`. `skillCommand(path)` gives the command of a skill's `SKILL.md`.
 
 ### The agent loop
 
 Each iteration is one agent turn and one verification.
 
-1. **Context.** The first prompt holds the session document, the session properties, and the content of every linked policy, promise, skill, and article. The skills are inlined for now; loading them through each harness comes later.
+1. **Context.** The first prompt holds the session document, the session properties, and the content of every linked policy, promise, and article. A linked skill goes by its command when the agent has its module's skill set: the prompt starts with `/<module>:<skill>`, and lists the session's other skills to load when needed. A skill the agent does not have, for example in a host that gives no skill sets, is inlined.
 2. **Action.** One turn on a harness session with `edit` access and the vault as the working directory.
-3. **Verification.** Yami runs the `check` of each promise, and updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document. If a promise is unmet, the next prompt says which, and why.
+3. **Verification.** Yami reads the session document again, since the agent's tools can change its properties, and runs the `check` of each promise. It updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document. If a promise is unmet, the next prompt says which, and why.
 
 The exchange goes to a conversation note in `conversations/`, linked from the session document as `conversation`, with the session document linked back as `module`. The note records the prompts, the agent's replies, and its tool calls, and a person can continue it after the run.
 
@@ -111,9 +120,103 @@ A promise names a `check` and gives it properties. `{{session}}` in a value is t
 | --- | --- | --- |
 | `exists` | `path` | The file exists. |
 | `contains` | `path`, `text` | The file exists and contains the text. |
+| `property` | `field`, `name`, `value`, `atLeast` | Every note linked in the session's `field` has the property `name` equal to `value`, and the field links at least `atLeast` notes (default 0). |
+| `lint` | `path`, or `folder`, or `field` | The wiki's lint finds no error in the note, the folder, or the notes linked in the session's `field` and every note that links them. |
 | none | | Never by Yami. The session ends `needs-attention` for a person to decide. |
 
-New checks register in `checks`.
+New checks register in `checks`. The wiki reads the vault again before the checks run, so they see what the agent wrote.
+
+## `yami/wiki`
+
+The knowledge base. One `Wiki` for the vault, built by the host, passed to `moduleTools` and `runSession`, and given to every module's tools and to the checks. It is plain TypeScript over the `Vault` interface: no agent, no Obsidian.
+
+```ts
+import { Wiki, VoyageEmbedder } from "yami/wiki";
+
+const wiki = new Wiki(vault, { exclude: ["conversations"], embedder: new VoyageEmbedder({ apiKey }) });
+await wiki.refresh();                                                              // reads every note
+await wiki.search("how does codex interrupt a turn", { algorithm: "ppr", limit: 10, types: ["topic"], tags: ["yami"] });
+await wiki.search("", { seeds: ["agent/codex.md"], algorithm: "ppr" });            // related notes, no text
+await wiki.match(["Self-supervised learning", "SSL"]);                              // hit | near | new, each with neighbors
+await wiki.lint({ folder: "wiki/topics" });                                         // findings with a fix each
+wiki.note("wiki/topics/Interrupt.md");                                              // links, backlinks, tags, chunks
+wiki.graph;                                                                         // the graphology Graph
+await wiki.change({ title, notes, session, writes: [{ op: "create", path, properties, body, why }] });
+await wiki.captured();                                                              // is the knowledge base at its latest version?
+await wiki.snapshot();                                                              // the next version
+await wiki.versions();                                                              // every version, oldest first
+await wiki.restore(3);                                                              // version 3 back, as a new version
+```
+
+- **The index holds every note** of the vault, except the folders in `exclude`, the types in `skipTypes` (conversation, session, module, change, and snapshot by default), and the files of module skills. Links resolve as Obsidian resolves them, over every note, indexed or not: by path, or by name, and a name that several notes share goes to the shortest path. `locate(target)` gives that note; `resolve(target)` gives it only when the index holds it. A link to a note the index leaves out, such as a session, is not dead, and it is not an edge of the graph. A note holds a tag and every tag above it, so `tags: ["school"]` finds a note tagged `school/cs513`.
+- **`refresh()` reads the vault again.** About 500 notes take a quarter of a second. The tools and the checks call it, so they see the agent's writes. The embeddings are the one cache, keyed by the hash of each chunk, in `internal/wiki/cache/embeddings.json`; a refresh embeds only new chunks.
+- **A hit** has the `path`, a `score` in `[0, 1]` with the best at 1, a `snippet`, and `why`: "title match", "linked from Codex harness", "in the community of Claude harness", or the chunk that matched.
+- **`match`** compares names with the names, aliases, and descriptions of the typed notes: `hit` when a note holds the name or an alias, `near` when one scores above the threshold, `new` otherwise, each with its neighbors. The ingest skill calls it before it writes a topic.
+- **`lint`** reports `dead-link` and `no-description` as errors, and `duplicate-name`, `no-sources`, `uncited`, and `orphan` as warnings. An error fails the `lint` check.
+- **`captureSource(vault, file)`** captures a file as a source. The file stays where it is. Yami copies it into `internal/wiki/originals/`, named by the first 16 hex characters of its SHA-256, and writes `wiki/sources/<name> (source).md` with `type: source`, `status: pending`, `file` (the copy, which the note embeds), `from` (the file), and `sha256`. The wiki reads and cites the copy, so a later edit of the file does not change what the source said, and the source note never shares a name with the file. Content that a source holds already returns that source; a second version of a file gets `<name> (source 2).md`. **`captureSources(vault, folder)`** does it for every file in a folder, and skips the wiki's own files. **`sourceChunks(vault, wiki, source)`** takes a source note, or the file a source was captured from, and splits the frozen copy for the workers of an ingest: a text file into runs of at most 800 lines cut at a heading or a blank line, a PDF into 20 pages at a time, any other file whole.
+
+### Changes and versions
+
+The knowledge base, `wiki/topics/` and `wiki/sources/`, changes only through a change plan, and every change has a version before and after it.
+
+```ts
+const result = await wiki.change({
+  title: "Ingest the DINOv2 paper",
+  notes: "What the change does, the coverage, and each skipped subject.",
+  session: "internal/wiki/sessions/Ingest DINOv2 2026-10-15.md",
+  writes: [
+    { op: "create", path: "wiki/topics/Self-supervised learning.md", properties: { description: "…", tags: ["ml"], sources: ["[[wiki/sources/DINOv2|DINOv2]]"] }, body: "## Definition\n…", why: "the paper's method; no topic explains it" },
+    { op: "modify", path: "wiki/sources/DINOv2.md", properties: { status: "absorbed", tags: null }, body: "…", why: "absorbed" },
+    { op: "remove", path: "wiki/topics/Old idea.md", why: "merged into Self-supervised learning" },
+  ],
+});
+// { path: "internal/wiki/changes/2026-10-15 1432 Ingest the DINOv2 paper.md", before: 3, after: 4, creates: 1, modifies: 1, removes: 1, warnings: [] }
+```
+
+`change()` runs as one step, and changes from several agents run one after another:
+
+1. It reads the vault again and validates the plan: every path under the knowledge folders, a title, at most 100 writes, no path twice; a create at a free path with a description and a body, its properties valid for the folder's type; a modify of a note that exists, valid after the merge, where `null` removes a property and a body replaces the body; a remove of a note that exists. An invalid plan throws `InvalidPlan` with one line per problem, and nothing changes. A link in new content that resolves to no note is a warning, not a refusal.
+2. It snapshots the knowledge base when its state is not captured, so a person's hand edits are in a version before the change touches them.
+3. It writes the change document, `status: applying`, with a Summary (one line per write with its `why`), the Notes, and every write in full.
+4. It applies the writes. A write that fails puts every note back from the version before, marks the change `failed` with the error, and throws.
+5. It snapshots again; the new version links the change. The change document gets `status: applied`, `before`, and `after`, and the session document's `changes` field gets the link.
+
+A **snapshot** is `internal/wiki/snapshots/v<N>.md`, which the module ledger lists, and `v<N>.json.gz` beside it: every note of the knowledge base by path, gzipped. The document holds `version`, `created`, `hash`, `notes`, `archive`, `change`, and `restored`, and its body names the notes added, changed, and removed since the version before. `captured()` compares the hash of the knowledge base now with the latest snapshot's. `restore(n)` snapshots the current state when it is not captured, writes version n back (notes the version lacks are removed), and records the result as a new version with `restored: n`, so the versions stay one line in time.
+
+### The algorithms
+
+Every algorithm is one function in `algorithms`, with the same query and scores in `[0, 1]`. A query names one with `algorithm`; `defaultAlgorithm` in the options sets the default, `bm25` until the benchmark says otherwise.
+
+| Algorithm | How it ranks |
+| --- | --- |
+| `bm25` | BM25F over the title, aliases, tags, description, and body. The baseline, and the seed step of the next three. |
+| `ppr` | Personalized PageRank over the link graph, restarting at the best lexical hits and the query's `seeds`. Power iteration by default; `params: { walks: 20000 }` runs Monte Carlo walks instead. |
+| `hop2` | Two hops from the twelve best seeds, the score cut by 0.6 each hop, with four signals: the note's own score, the inherited score, the tags it shares with the seeds, and its backlinks. |
+| `louvain` | Louvain communities over the graph, computed at refresh. The seeds weight their communities, and every member ranks half by its own score and half by its community. |
+| `hybrid` | BM25 over chunks and cosine over chunk embeddings, fused with reciprocal rank fusion, rolled up to notes by their best chunk. Without an embedder, the lexical half alone. |
+
+`VoyageEmbedder` embeds with Voyage AI over `fetch`; Anthropic has no embeddings endpoint. Any `Embedder` with `id` and `embed(texts, kind)` works, and the tests use a fake one.
+
+### The benchmark
+
+`npm run bench` ranks the queries of a gold file with every algorithm against a real vault and prints recall at 5 and 10, mean reciprocal rank, misses, and the time for each query:
+
+```sh
+YAMI_BENCH_VAULT=~/Vaults/Notes YAMI_BENCH_GOLD=bench/gold.json npm run bench
+YAMI_BENCH_VAULT=~/Vaults/Notes VOYAGE_API_KEY=… npm run bench            # hybrid with embeddings
+```
+
+The gold file is a list of `{ "query", "expected": ["path or [[name]]"] }`; `bench/gold.example.json` shows the form. Without one, the benchmark asks for sampled notes by their description, which favors the lexical algorithms and only shows that each one runs. `YAMI_BENCH_EXCLUDE` names folders to skip, `conversations` by default.
+
+## `yami/modules/wiki`
+
+The wiki module. Its folder, `wiki/`, holds the knowledge base, `wiki/topics/` and `wiki/sources/`, for a person to read. Its sessions, ledger, changes, versions, and cache are under `internal/wiki/`.
+
+- A session's `sources` field links the source notes to absorb, and its `changes` field the changes it applied. `captureSource` and `captureSources` write the source notes from a file or a folder, and the plugin's **Wiki: ingest this file** and **Wiki: ingest a folder** commands do that and create the session.
+- Sessions run with `access: "read-only"`: the agent reads anything and changes nothing except through `wiki_change`. Its policies: cite every claim, change the wiki through one plan, one subject one topic. Its promises: `Change applied` (at least one applied change), `Sources absorbed` (each source has `status: absorbed`), and `Clean topics` (`lint` over the sources and the topics that cite them).
+- Its skill, `/wiki:ingest`, is a map-reduce: `wiki_chunks` for each source, one worker per chunk that reads `extractor.md` (an Item Map of subjects and cited claims), `wiki_match` for every subject at once, one worker per slice that reads `drafter.md` (the writes), then one plan for `wiki_change`. `page-forms.md` gives the topic and source forms. The three files sit in the skill's folder, and the lead gives each worker a path, not the text. A long document or a folder of documents costs the same care as one.
+- Its tools, for every agent in the vault: `wiki_search`, `wiki_match`, `wiki_lint`, `wiki_tags`, `wiki_chunks`, and `wiki_change`. The search tool's description carries the citation procedure, so a plain conversation answers from the wiki without a skill. "Ask the wiki" needs no wiki code: start a conversation with the question.
+- Its ledger, `internal/wiki/sessions.base`, has the session tables and two more: `Versions`, each with its link to the change, and `Changes`.
 
 ## `yami/agent`
 
@@ -162,7 +265,7 @@ Each adapter takes two kinds of settings:
 | --- | --- | --- | --- |
 | Constructor options, fixed for the agent | `executable`, `env`, `preferences` | `settingSources`, `sdkOptions` | `config` |
 | Preferences, can change for each session | `cwd`, `model`, `effort`, `instructions`, `approval`, `access` | `maxBudgetUsd` | `webSearch`, `networkAccess` |
-| Session options | `resume`, `onPermission`, `onQuestion`, `tools`, `beforeFileChange` | | |
+| Session options | `resume`, `onPermission`, `onQuestion`, `tools`, `skills`, `beforeFileChange` | | |
 
 ### Turns
 
@@ -196,6 +299,26 @@ The adapters normalize what they show, so a UI gets the same thing from both har
 - **`allow-session`** approves similar requests for the rest of the session. Claude applies the rule that Claude Code suggests, for this session only, never to the settings files. Codex remembers the approval for the same command or files.
 - **Withdrawn requests.** When a turn ends or the session closes, the request's `signal` aborts, and the request counts as denied.
 - Approvals go to the user, never to an automatic reviewer that a harness configuration can select.
+
+### Skill sets
+
+`skills` is a list of skill-set folders, as absolute paths. A skill set is a folder whose `skills/` holds one folder for each skill, with a `SKILL.md`; the set's name is its folder's name. Every skill is available to the agent, `commands()` lists each as `<set>:<skill>`, and a message that starts with `/<set>:<skill>` invokes one, with the rest of the message, also many lines, as its input.
+
+```ts
+const agent = new ClaudeAgent({ preferences: { cwd: vault, skills: ["/path/to/vault/internal/wiki"] } });
+await session.send("/wiki:ingest Absorb the sources of this session.");
+```
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| How a set loads | A plugin of the session (`plugins`, without its MCP servers), named by the folder. | A list in the developer instructions: each skill's command, description, and `SKILL.md` path. |
+| `/<set>:<skill>` | Claude Code puts the skill's instructions in the turn. | The adapter puts the skill's instructions and folder in the turn. |
+| The model chooses a skill | The Skill tool. | The model reads the skill's files with a command. The adapter allows a command that only reads files in the skill folders (`cat`, `sed -n 'Np'`, `head`, `tail`, `nl`, `ls`, plainly quoted, no pipe or redirect) without asking. Any other command asks as usual. |
+| Read-only sessions | The Skill tool and the Agent tool stay on. A subagent inherits the read-only tools, so it cannot write either. | The read-only sandbox applies. |
+
+Codex also offers extra skill roots, but from one it reads a skill it chose with a command that asks for approval under `ask`, and it sometimes builds the path wrong; so the adapter lists the skills itself.
+
+`setSkills(roots)` lists the skills of skill sets, `slashCommand(text)` splits a `/command`, `skillTurn(skill, message)` is the text that the Codex adapter sends for a skill, `skillList(skills)` its instructions, and `isSkillRead(command, folders, cwd)` its read rule.
 
 ### App tools
 
@@ -284,9 +407,28 @@ A conversation note is a document with `type: conversation`; the format is in `y
 - `/model`, `/effort`, `/mode`, `/new`, and `/end` are local commands. Other `/` commands come from the harness. `[[` suggests notes.
 - The agent process closes after `idleMinutes` without a composer; the next message resumes the session from the `session` property.
 
+### The wiki in Obsidian (`obsidian/wiki/`)
+
+The views that let a person use the vault's `Wiki` directly. They call the wiki's own methods and hold no ranking of their own.
+
+```ts
+const wiki = new Wiki(vault, { exclude: () => ["conversations", ...ignoredPaths(this.app)] });
+watchWiki(this.app, this, wiki);                                   // a change in the vault marks the index stale
+new WikiSearchModal(this.app, wiki).open();                        // live search; Tab moves to the next algorithm
+new WikiSearchModal(this.app, wiki, { seeds: [path], algorithm: "ppr" }).open();   // related notes
+new WikiCompareModal(this.app, wiki, "a query").open();            // every algorithm side by side
+new NoteListModal(this.app, findingRows(wiki, await wiki.lint()), "Findings").open();
+new NoteListModal(this.app, matchRows(wiki, await wiki.match([name])), "Match").open();
+```
+
+- `ignoredPaths(app)` reads Obsidian's Excluded files setting: the entries that name a folder or a file. An entry written as a `/regular expression/` is not read.
+- In every list, Enter opens the note, Cmd+Enter opens it in a new tab, and Alt+Enter inserts a link to it at the cursor of the active editor (`openNote`).
+- Many queries that arrive while the index is stale share one refresh, and a change during a refresh makes the next query read again.
+
 ## Build and tests
 
 - `npm run build` first type-checks every module except `yami/obsidian` with `tsconfig.core.json`. That check has no DOM types, and it maps `obsidian` and `@codemirror/*` to an empty module, so a core file that uses them, or imports a file of `yami/obsidian`, fails the build. Then `tsc` builds the whole library.
-- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the module loop with a fake agent and a file system vault, and in `test/unit/obsidian/` the shared documents and the conversation manager over a fake Obsidian app.
+- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the module loop with a fake agent and a file system vault, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, and in `test/unit/obsidian/` the shared documents and the conversation manager over a fake Obsidian app.
+- `npm run bench` runs the retrieval benchmark against the vault in `YAMI_BENCH_VAULT`; see [The benchmark](#the-benchmark).
 - `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, and resume.
 - The plugin's `npm run test:obsidian` drives the real Obsidian app with `yami/obsidian`.

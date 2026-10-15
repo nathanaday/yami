@@ -35,6 +35,14 @@
       "types": "./dist/modules/hello.d.ts",
       "default": "./dist/modules/hello.js"
     },
+    "./modules/wiki": {
+      "types": "./dist/modules/wiki.d.ts",
+      "default": "./dist/modules/wiki.js"
+    },
+    "./wiki": {
+      "types": "./dist/wiki/index.d.ts",
+      "default": "./dist/wiki/index.js"
+    },
     "./conversation": {
       "types": "./dist/conversation/index.d.ts",
       "default": "./dist/conversation/index.js"
@@ -54,13 +62,15 @@
     "dev": "tsc --watch",
     "prepare": "npm run build",
     "test": "vitest run test/unit",
-    "test:live": "vitest run test/live"
+    "test:live": "vitest run test/live",
+    "bench": "vitest run bench --disableConsoleIntercept"
   },
   "devDependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
     "@types/node": "^26.6.5",
+    "graphology-types": "^0.24.8",
     "obsidian": "^1.14.4",
     "typescript": "^7.0.2",
     "vitest": "^5.0.4",
@@ -70,6 +80,8 @@
     "@anthropic-ai/claude-agent-sdk": "^0.3.300",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "diff-match-patch-es": "^2.0.1",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
     "monkey-around": "^3.0.0",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.33",

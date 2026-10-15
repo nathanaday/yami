@@ -13,14 +13,17 @@ import {
 } from "../document/document.js";
 import { timestamp, type SessionState } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
+import { Wiki } from "../wiki/wiki.js";
 import { runCheck, type CheckResult } from "./checks.js";
-import { layout, readSession, skillPath, type Layout, type LinkedKind, type Module } from "./module.js";
+import { layout, readSession, skillCommand, skillPath, type Layout, type LinkedKind, type Module } from "./module.js";
 
 export interface RunOptions {
   /** Turns the agent gets to meet every promise. Defaults to 3. */
   maxIterations?: number;
   /** Where the conversation note comes from. Defaults to notes written straight to the vault, with approvals denied. */
   conversations?: Conversations;
+  /** The vault's wiki, for the checks. Defaults to a new one over the vault. */
+  wiki?: Wiki;
 }
 
 export interface RunResult {
@@ -55,11 +58,13 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
   const last = start + (options.maxIterations ?? 3);
 
   const conversations = options.conversations ?? new FileConversations(vault);
+  const wiki = options.wiki ?? new Wiki(vault);
   const conversation = await conversations.open({
     agent,
     name: `${module.id} ${name}`,
     module: path,
     approval: "accept-edits",
+    access: module.access,
   });
   doc = await updateDocument(vault, path, (d) => {
     d.properties.state = "running";
@@ -70,7 +75,7 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
   let state: SessionState = "needs-attention";
   let iteration = start;
   try {
-    let prompt = contextPrompt(module, doc, linked, path);
+    let prompt = contextPrompt(vault, agent, module, doc, linked, path);
     while (iteration < last) {
       iteration += 1;
       const result = await conversation.send(prompt);
@@ -79,7 +84,9 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
         await record(vault, path, iteration, `turn ${result.status}: ${result.error ?? "no details"}`, undefined, state);
         break;
       }
-      const verification = await verify(vault, name, doc, linked.promises);
+      // The agent's tools change the session's properties, for example its changes, so the checks read it again.
+      doc = await readSession(vault, module, path);
+      const verification = await verify(vault, wiki, name, doc, linked.promises);
       const summary = `${verification.met.length} met, ${verification.unmet.length} unmet${verification.review.length ? `, ${verification.review.length} for review` : ""}`;
       if (verification.unmet.length === 0) {
         state = verification.review.length === 0 ? "done" : "needs-attention";
@@ -110,10 +117,12 @@ async function loadLinked(vault: Vault, lay: Layout, doc: Document): Promise<Lin
   return linked;
 }
 
-async function verify(vault: Vault, session: string, doc: Document, promises: Document[]): Promise<Verification> {
+/** Runs every check after the agent's turn. The wiki reads the vault again first, so the checks see what the agent wrote. */
+async function verify(vault: Vault, wiki: Wiki, session: string, doc: Document, promises: Document[]): Promise<Verification> {
   const verification: Verification = { results: [], met: [], unmet: [], review: [] };
+  if (promises.length) await wiki.refresh();
   for (const promise of promises) {
-    const result = await runCheck(promise, { vault, session, properties: doc.properties });
+    const result = await runCheck(promise, { vault, wiki, session, properties: doc.properties });
     verification.results.push({ promise, result });
     verification[result.status].push(link(promise.path));
   }
@@ -145,7 +154,12 @@ function sectionContent(body: string, heading: string): string {
   return (match?.[1] ?? "").trim();
 }
 
-function contextPrompt(module: Module, doc: Document, linked: Linked, path: string): string {
+/**
+ * The first prompt. A linked skill that the agent has as a skill set goes by its command: the prompt
+ * starts with the first one, so the harness loads it, and names the others to load. A skill the agent
+ * does not have is inlined.
+ */
+function contextPrompt(vault: Vault, agent: Agent, module: Module, doc: Document, linked: Linked, path: string): string {
   const fields = Object.keys(module.schema ?? {})
     .map((field) => `- ${field}: ${String(doc.properties[field] ?? "")}`)
     .join("\n");
@@ -156,7 +170,20 @@ function contextPrompt(module: Module, doc: Document, linked: Linked, path: stri
       .filter(([key]) => !["type", "module"].includes(key))
       .map(([key, value]) => `- ${key}: ${String(value)}`)
       .join("\n") + `\n\n${d.body.trim()}`;
-  return [
+  const sets = new Set((agent.preferences.skills ?? []).map((root) => root.replace(/\/$/, "")));
+  const attached: { command: string; doc: Document }[] = [];
+  const inlined: Document[] = [];
+  for (const skill of linked.skills) {
+    const named = skillCommand(skill.path);
+    if (named && sets.has(`${vault.root.replace(/\/$/, "")}/${named.root}`)) attached.push({ command: named.command, doc: skill });
+    else inlined.push(skill);
+  }
+  const listed = attached.length
+    ? `## Skills\n\nThis session's skills, which you have as skills of your own. The first is loaded for you; load the others when you need them.\n\n${attached
+        .map(({ command, doc }) => `- \`${command}\`: ${String(doc.properties.description ?? "")} Its folder: ${doc.path.slice(0, doc.path.lastIndexOf("/"))}/`)
+        .join("\n")}`
+    : "";
+  const body = [
     `You are running the Yami session "${basename(path)}" of the module "${module.name}".\n` +
       `The working directory is the vault. Paths are relative to it. The session document is ${path}; Yami maintains its properties and its Deliverables and Progress sections, so do not edit that file.\n` +
       `Follow every policy. The session ends when every promise is met. After each of your turns, Yami checks the promises and tells you what is still unmet.`,
@@ -165,11 +192,13 @@ function contextPrompt(module: Module, doc: Document, linked: Linked, path: stri
     `## Session\n\n${doc.body.trim()}`,
     section("Policies", linked.policies, (d) => d.body.trim()),
     section("Promises", linked.promises, promise),
-    section("Skills", linked.skills, (d) => d.body.trim()),
+    listed,
+    section(attached.length ? "Other skills" : "Skills", inlined, (d) => d.body.trim()),
     section("Articles", linked.articles, (d) => d.body.trim()),
   ]
     .filter(Boolean)
     .join("\n\n");
+  return attached.length ? `/${attached[0]!.command} ${body}` : body;
 }
 
 function feedbackPrompt(verification: Verification): string {

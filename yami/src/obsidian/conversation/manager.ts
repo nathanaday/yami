@@ -28,6 +28,8 @@ export interface CreateOptions {
   module?: string;
   /** When the agent asks before it acts, for this conversation. Default: the agent's preference. */
   approval?: ApprovalSetting;
+  /** `read-only`: the agent changes nothing except through its tools. */
+  access?: "edit" | "read-only";
 }
 
 /** How long to wait for the metadata cache to read a new note. */
@@ -89,6 +91,7 @@ export class ConversationManager {
         created: stamp(new Date(), "YYYY-MM-DD HH:mm"),
         module: options.module ? `[[${options.module.replace(/\.md$/, "")}]]` : undefined,
         approval: options.approval,
+        access: options.access,
       }),
     );
     // A controller reads its agent from the note's properties.

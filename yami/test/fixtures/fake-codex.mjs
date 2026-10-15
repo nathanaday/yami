@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Imitates `codex app-server` for adapter tests. The prompt text selects the scenario.
+import { readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
 const THREAD = 'thread-1';
@@ -105,7 +106,17 @@ async function runTurn(prompt) {
       process.stderr.write('fatal: something broke\n');
       process.exit(3);
     default:
-      if (prompt.startsWith('Ideas.md')) {
+      if (prompt.startsWith('read-file ')) {
+        const file = prompt.slice('read-file '.length);
+        const item = { type: 'commandExecution', id: 'cmd-read', command: `/bin/zsh -lc "sed -n '1,240p' ${file}"`, cwd: '/', status: 'inProgress' };
+        notify('item/started', { turnId: activeTurn, item });
+        const response = await request('item/commandExecution/requestApproval', { itemId: item.id, command: item.command });
+        notify('item/completed', { turnId: activeTurn, item: { ...item, status: 'completed', exitCode: 0, aggregatedOutput: '' } });
+        reply(JSON.stringify(response.result));
+        return complete();
+      }
+      // A skill turn, or a slash command that stayed text: show the input as the server got it.
+      if (lastTurn.input.length > 1 || prompt.startsWith('/') || prompt.startsWith('<skill')) {
         reply(JSON.stringify(lastTurn.input));
         return complete();
       }
@@ -160,7 +171,16 @@ createInterface({ input: process.stdin }).on('line', (line) => {
           nextCursor: null,
         },
       });
-    case 'skills/list':
+    case 'skills/extraRoots/set':
+      setup.extraRoots = params.extraRoots;
+      return send({ id, result: {} });
+    case 'skills/list': {
+      // Like the real server, a skill under an extra root has the bare name of its folder.
+      const extra = (setup.extraRoots ?? []).flatMap((root) =>
+        readdirSync(root, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => ({ name: entry.name, description: `${entry.name} skill`, path: `${root}/${entry.name}/SKILL.md`, enabled: true })),
+      );
       return send({
         id,
         result: {
@@ -170,12 +190,14 @@ createInterface({ input: process.stdin }).on('line', (line) => {
               skills: [
                 { name: 'summarize', description: 'Long text', shortDescription: 'Summarize a note', path: '/skills/summarize/SKILL.md', enabled: true },
                 { name: 'off', description: 'Disabled', path: '/skills/off/SKILL.md', enabled: false },
+                ...extra,
               ],
               errors: [],
             },
           ],
         },
       });
+    }
     case 'turn/interrupt':
       if (activeTurn !== params.turnId) {
         return send({ id, error: { code: -32600, message: 'no active turn to interrupt' } });

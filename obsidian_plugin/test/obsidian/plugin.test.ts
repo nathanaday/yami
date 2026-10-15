@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { launchObsidian, type ObsidianInstance } from "./harness.js";
@@ -53,10 +53,131 @@ describe("Yami in Obsidian", () => {
 
   const activePath = () => page().evaluate(() => (window as any).app.workspace.getActiveFile()?.path as string);
 
+  it("searches, compares, matches, and lints the wiki from the command palette", { timeout: 60_000 }, async () => {
+    await page().evaluate(async () => {
+      const vault = (window as any).app.vault;
+      if (!vault.getFolderByPath("wiki/topics")) await vault.createFolder("wiki/topics");
+      await vault.create("wiki/topics/Sourdough.md", "---\ntype: topic\ndescription: Bread from a wild yeast starter.\n---\nA starter ferments. See [[Levain]].\n");
+      await vault.create("wiki/topics/Levain.md", "---\ntype: topic\ndescription: A sourdough starter.\naliases: [Starter]\n---\nThe starter of [[Sourdough]]. Also [[Nowhere]].\n");
+      await vault.create("Bakery.md", "Bread notes. See [[Sourdough]].\n");
+    });
+    const command = (id: string) => page().evaluate((name) => (window as any).app.commands.executeCommandById(name), id);
+    const open = async (path: string) => {
+      await page().evaluate((file) => (window as any).app.workspace.getLeaf().openFile((window as any).app.vault.getFileByPath(file)), path);
+      await page().waitForFunction((file) => (window as any).app.workspace.getActiveFile()?.path === file, path);
+    };
+    const close = async () => {
+      await page().keyboard.press("Escape");
+      await page().waitForSelector(".modal-container", { state: "detached" });
+    };
+
+    // Search: results as the user types, Tab to the next algorithm, Enter opens the note.
+    await command("yami:wiki-search");
+    await page().keyboard.type("sourdough starter");
+    await page().waitForSelector(".yami-wiki-hit .yami-wiki-hit-name");
+    const names = () => page().$$eval(".yami-wiki-hit-name", (els) => els.map((el) => el.textContent));
+    expect((await names()).slice(0, 2).sort()).toEqual(["Levain", "Sourdough"]);
+    expect(await page().textContent(".yami-wiki-status")).toMatch(/^bm25 · \d+ hits in \d+ ms/);
+    await page().keyboard.press("Tab");
+    await page().waitForFunction(() => document.querySelector(".yami-wiki-status")?.textContent?.startsWith("ppr ·"));
+    await page().keyboard.press("Enter");
+    await page().waitForSelector(".modal-container", { state: "detached" });
+    expect(await activePath()).toMatch(/^wiki\/topics\/(Levain|Sourdough)\.md$/);
+
+    // Related notes start from the active note, with PPR, and list its neighbors with no query.
+    await open("wiki/topics/Levain.md");
+    await command("yami:wiki-related");
+    await page().waitForSelector(".yami-wiki-hit .yami-wiki-hit-name");
+    expect(await names()).toContain("Sourdough");
+    await close();
+
+    // Compare: one column for each algorithm, and the query from the selection.
+    // Line 5 is the first line below the properties: "The starter of [[Sourdough]]".
+    await page().evaluate(() => (window as any).app.workspace.activeEditor.editor.setSelection({ line: 5, ch: 4 }, { line: 5, ch: 11 }));
+    await command("yami:wiki-compare");
+    await page().waitForSelector(".yami-wiki-compare-cell");
+    expect(await page().inputValue(".yami-wiki-compare-input")).toBe("starter");
+    expect(await page().$$eval(".yami-wiki-compare-results th", (els) => els.slice(1).map((el) => el.firstElementChild?.textContent))).toEqual([
+      "bm25",
+      "ppr",
+      "hop2",
+      "louvain",
+      "hybrid",
+    ]);
+    await close();
+
+    // Match: the selection is an alias of Levain.
+    await command("yami:wiki-match");
+    await page().waitForSelector(".yami-wiki-badge.is-hit");
+    expect(await page().textContent(".yami-wiki-list .yami-wiki-hit-name")).toBe("Levain");
+    await close();
+
+    // Lint: the dead link in this note, and the vault's findings after a new note, without a rebuild.
+    await command("yami:wiki-lint-note");
+    await page().waitForSelector(".yami-wiki-badge.is-error");
+    expect(await page().textContent(".yami-wiki-badge.is-error")).toBe("dead-link");
+    await close();
+    await page().evaluate(async () => void (await (window as any).app.vault.create("wiki/topics/Rye.md", "---\ntype: topic\n---\nNo description.\n")));
+    await command("yami:wiki-lint-vault");
+    await page().waitForSelector(".yami-wiki-list .yami-wiki-hit");
+    expect(await page().$$eval(".yami-wiki-list .yami-wiki-hit-meta", (els) => els.some((el) => el.textContent?.startsWith("wiki/topics/Rye.md · has no description")))).toBe(true);
+    await close();
+
+    // Snapshot: the first version, its archive, and the versions list.
+    await command("yami:wiki-snapshot");
+    const snapshot = await obsidian.waitForNote("internal/wiki/snapshots/v1.md", (text) => text.includes("hash:"), 15_000);
+    expect(snapshot).toContain("type: snapshot");
+    expect(snapshot).toContain("notes: 3");
+    expect(readFileSync(path.join(obsidian.vault, "internal/wiki/snapshots/v1.json.gz")).length).toBeGreaterThan(20);
+    await command("yami:wiki-versions");
+    await page().waitForSelector(".yami-wiki-list .yami-wiki-hit");
+    expect(await page().textContent(".yami-wiki-list .yami-wiki-hit-name")).toBe("Version 1");
+    await close();
+
+    // Restore: a hand edit is kept as version 2 before version 1 comes back as version 3.
+    await page().evaluate(async () => void (await (window as any).app.vault.create("wiki/topics/Spelt.md", "---\ntype: topic\ndescription: Spelt.\n---\nAdded by hand.\n")));
+    await command("yami:wiki-restore");
+    await page().waitForSelector(".prompt-input");
+    await page().keyboard.type("Version 1");
+    await page().keyboard.press("Enter");
+    const restored = await obsidian.waitForNote("internal/wiki/snapshots/v3.md", (text) => text.includes("restored:"), 15_000);
+    expect(restored).toContain("restored: 1");
+    expect(await obsidian.read("internal/wiki/snapshots/v2.md")).toContain("notes: 4");
+    expect(existsSync(path.join(obsidian.vault, "wiki/topics/Spelt.md"))).toBe(false);
+
+    // Ingest a folder: every file of the picked folder gets a source note, and one session links them.
+    await page().evaluate(async () => {
+      const vault = (window as any).app.vault;
+      await vault.createFolder("Papers");
+      await vault.create("Papers/Attention.md", "# Attention\n\nTransformers use attention.\n");
+      await vault.create("Papers/Diffusion.md", "# Diffusion\n\nDenoising models.\n");
+    });
+    await command("yami:wiki-ingest-folder");
+    await page().waitForSelector(".prompt-input");
+    // The vault root is not a choice.
+    expect(await page().$$eval(".suggestion-item", (els) => els.map((el) => el.textContent))).not.toContain("/");
+    await page().keyboard.type("Papers");
+    await page().keyboard.press("Enter");
+    await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path.startsWith("internal/wiki/sessions/Ingest Papers (2 files)"), undefined, { timeout: 10_000 });
+    const session = await obsidian.read(await activePath());
+    expect(session).toContain("type: session");
+    expect(session).toContain("[[wiki/sources/Attention (source)|Attention (source)]]");
+    expect(session).toContain("[[wiki/sources/Diffusion (source)|Diffusion (source)]]");
+    const source = await obsidian.read("wiki/sources/Attention (source).md");
+    expect(source).toContain("status: pending");
+    expect(source).toContain("from: \"[[Papers/Attention|Attention]]\"");
+    // The note stays where it was, and the source embeds a frozen copy, named by its hash.
+    const copy = source.match(/!\[\[(internal\/wiki\/originals\/[0-9a-f]{16}\.md)\]\]/)?.[1];
+    expect(copy).toBeDefined();
+    expect(await obsidian.read(copy!)).toBe(await obsidian.read("Papers/Attention.md"));
+  });
+
   it("installs the hello module when it loads", async () => {
     for (const file of ["Yami.base", "hello/sessions.base", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
-      await obsidian.waitForNote(file, () => true, 10_000);
+      await obsidian.waitForNote(file, (text) => text.length > 0, 10_000);
     }
+    // A file at the vault root has no folder to create. A slice to the last slash once made "Yami.bas".
+    expect(existsSync(path.join(obsidian.vault, "Yami.bas"))).toBe(false);
   });
 
   it("writes the exchange into the note and names the note", { timeout: TIMEOUT }, async () => {
@@ -175,8 +296,11 @@ describe("Yami in Obsidian", () => {
       await send("Call the greet_user tool of the hello module with the name Ada, then reply with exactly the text the tool returned.");
       await idle();
       const text = await obsidian.waitForNote(await activePath(), () => true);
-      // Codex sometimes calls the tool twice; the plumbing, not the count, is under test.
-      expect(text, command).toMatch(/> \[!activity\]- Used (a tool|\d tools)\n(> - `Greet Ada`\n)+/);
+      // Codex sometimes calls the tool twice, or first reads the module's greeting skill, which needs no approval;
+      // the plumbing, not the count, is under test.
+      expect(text, command).toMatch(/> \[!activity\]- (.+ · )?Used (a tool|\d tools)\n/);
+      expect(text, command).toContain("> - `Greet Ada`\n");
+      expect(text, command).not.toContain("yami-permission");
       expect(text, command).toMatch(/\nHello, Ada!\n\n$/);
     }
   });

@@ -33,6 +33,8 @@ export interface OpenConversation {
   /** The module session document that the conversation runs, as a vault path. */
   module?: string;
   approval?: ApprovalSetting;
+  /** `read-only`: the agent changes nothing except through its tools. */
+  access?: "edit" | "read-only";
 }
 
 /** Opens conversation notes. The host decides how they show and who answers approvals. */
@@ -57,6 +59,7 @@ export class FileConversations implements Conversations {
     const path = availablePath(folder, noteName(options.name), (candidate) => existing.has(candidate));
     const session = await options.agent.startSession({
       approval: options.approval,
+      access: options.access,
       onPermission: this.onPermission,
     });
     await this.vault.write(
@@ -67,6 +70,7 @@ export class FileConversations implements Conversations {
         effort: options.agent.preferences.effort,
         session: session.id,
         approval: options.approval,
+        access: options.access,
         status: "active",
         created: stamp(new Date(), "YYYY-MM-DD HH:mm"),
         module: options.module ? link(options.module) : undefined,

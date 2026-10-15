@@ -1,8 +1,9 @@
-import { moduleLedger, vaultLedger } from "../document/bases.js";
+import { type LedgerView, moduleLedger, vaultLedger } from "../document/bases.js";
 import { link, readDocument, writeDocument, type Document } from "../document/document.js";
 import { SESSION, timestamp, validate, withDefaults, type Schema } from "../document/schema.js";
 import type { AgentTool } from "../agent/types.js";
 import type { Properties, Vault } from "../document/vault.js";
+import type { Wiki } from "../wiki/wiki.js";
 
 export type LinkedKind = "articles" | "policies" | "promises" | "skills";
 
@@ -12,6 +13,8 @@ export interface ModuleDocument {
   name: string;
   properties?: Properties;
   body: string;
+  /** A skill's other files, by name: what it tells the agent, or a worker, to read when needed. */
+  files?: Record<string, string>;
 }
 
 export interface Module {
@@ -28,10 +31,24 @@ export interface Module {
   instructions?: string;
   /** Tools that the agent gets while the module is enabled. They run in the host. */
   tools?: (context: ToolContext) => AgentTool[];
+  /**
+   * Where the session documents live. Default: the module's own folder, for a person to read.
+   * `internal`: under `internal/<module>/sessions`, when the module's folder is for its output instead.
+   */
+  sessions?: "internal";
+  /** What a session's agent may change. `read-only`: nothing, except through the module's tools. Default: `edit`. */
+  access?: "edit" | "read-only";
+  /** Tables that the module adds to its ledger, beyond the session tables. */
+  ledgerViews?: LedgerView[];
 }
 
-export interface ToolContext {
+/** What the host gives every module: the vault, and the vault's one wiki. */
+export interface Host {
   vault: Vault;
+  wiki: Wiki;
+}
+
+export interface ToolContext extends Host {
   module: Module;
 }
 
@@ -43,9 +60,12 @@ export function promise(name: string, properties: { check?: string; path?: strin
   return { type: "promise", name, properties, body };
 }
 
-/** A skill in the standard `SKILL.md` form: a `name` and `description`, then the instructions. */
-export function skill(name: string, description: string, body: string): ModuleDocument {
-  return { type: "skill", name, properties: { name, description }, body };
+/**
+ * A skill in the standard `SKILL.md` form: a `name` and `description`, then the instructions. `files`
+ * go into the skill's folder beside `SKILL.md`, for the agent or its workers to read when they need them.
+ */
+export function skill(name: string, description: string, body: string, files?: Record<string, string>): ModuleDocument {
+  return { type: "skill", name, properties: { name, description }, body, ...(files && { files }) };
 }
 
 /** The vault paths of a module. */
@@ -64,9 +84,10 @@ export const INTERNAL = "internal";
 
 export function layout(module: Module): Layout {
   const internal = `${INTERNAL}/${module.id}`;
+  const sessions = module.sessions === "internal" ? `${internal}/sessions` : module.id;
   return {
-    sessions: module.id,
-    ledger: `${module.id}/sessions.base`,
+    sessions,
+    ledger: module.sessions === "internal" ? `${internal}/sessions.base` : `${module.id}/sessions.base`,
     internal,
     moduleDoc: `${internal}/${module.id}.md`,
     folders: {
@@ -108,7 +129,7 @@ export function sessionSchema(module: Module): Schema {
 export async function enableModule(vault: Vault, module: Module): Promise<Layout> {
   const lay = layout(module);
   if (!(await vault.exists(VAULT_LEDGER))) await vault.write(VAULT_LEDGER, vaultLedger(vault));
-  if (!(await vault.exists(lay.ledger))) await vault.write(lay.ledger, moduleLedger(vault, module.id, lay.sessions));
+  if (!(await vault.exists(lay.ledger))) await vault.write(lay.ledger, moduleLedger(vault, module.id, module.ledgerViews));
   if (!(await vault.exists(lay.moduleDoc))) {
     await writeDocument(vault, {
       path: lay.moduleDoc,
@@ -118,11 +139,30 @@ export async function enableModule(vault: Vault, module: Module): Promise<Layout
   }
   for (const doc of module.documents ?? []) {
     const path = documentPath(lay, doc);
-    if (await vault.exists(path)) continue;
-    const properties = doc.type === "skill" ? { ...doc.properties } : { type: doc.type, module: module.id, ...doc.properties };
-    await writeDocument(vault, { path, properties, body: doc.body });
+    if (!(await vault.exists(path))) {
+      const properties = doc.type === "skill" ? { ...doc.properties } : { type: doc.type, module: module.id, ...doc.properties };
+      await writeDocument(vault, { path, properties, body: doc.body });
+    }
+    for (const [name, text] of Object.entries(doc.files ?? {})) {
+      const file = `${path.slice(0, path.lastIndexOf("/"))}/${name}`;
+      if (!(await vault.exists(file))) await vault.write(file, text);
+    }
   }
   return lay;
+}
+
+/**
+ * The skill sets of the modules, for the agents of a vault: each module's internal folder, whose
+ * `skills/` holds its skills, as an absolute path. An agent invokes a skill as `/<module id>:<skill>`.
+ */
+export function moduleSkills(vault: Vault, modules: Module[]): string[] {
+  return modules.filter((module) => module.documents?.some((doc) => doc.type === "skill")).map((module) => `${vault.root.replace(/\/$/, "")}/${layout(module).internal}`);
+}
+
+/** The command of a module skill's `SKILL.md`, as a vault path: `internal/wiki/skills/ingest/SKILL.md` is `wiki:ingest`. */
+export function skillCommand(path: string): { command: string; root: string } | undefined {
+  const match = path.match(/^(.*\/([^/]+))\/skills\/([^/]+)\/SKILL\.md$/);
+  return match ? { command: `${match[2]}:${match[3]}`, root: match[1]! } : undefined;
 }
 
 /** Creates the session document with the module's defaults and `fields`, and returns its path. */

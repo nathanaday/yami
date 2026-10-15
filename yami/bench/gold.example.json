@@ -1,0 +1,4 @@
+[
+  { "query": "how does the codex adapter stop a running command", "expected": ["[[Codex harness]]", "[[Interrupt]]"] },
+  { "query": "which harness has a stall watchdog", "expected": ["wiki/topics/Claude harness.md"] }
+]

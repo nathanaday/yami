@@ -4,6 +4,7 @@ export { claudePermissionMode, codexApprovalPolicy } from "./approval.js";
 export { lineDiff } from "./diff.js";
 export { findExecutable, findExecutables, harnessEnv, loginShellPath, pathDisplay } from "./executable.js";
 export { AsyncQueue } from "./async-queue.js";
+export { isSkillRead, setSkills, skillList, skillTurn, slashCommand, type SetSkill } from "./skills.js";
 export { defineTool, runTool, SessionClosedError } from "./types.js";
 // Tool schemas come from this zod, so a host and the SDK share one instance.
 export { z } from "zod";

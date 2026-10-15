@@ -1,8 +1,11 @@
-import { chmodSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { afterEach, describe, expect, it } from "vitest";
 import { startCodexSession, unwrapShell } from "../../src/agent/codex.js";
+import { isSkillRead } from "../../src/agent/skills.js";
 import { type AgentEvent, type AgentSession, defineTool, type PermissionDecision, type PermissionRequest } from "../../src/agent/index.js";
 
 const FAKE = fileURLToPath(new URL("../fixtures/fake-codex.mjs", import.meta.url));
@@ -14,7 +17,7 @@ afterEach(async () => {
   session = undefined;
 });
 
-async function start(decision: PermissionDecision = "allow", resume?: string) {
+async function start(decision: PermissionDecision = "allow", resume?: string, skills?: string[]) {
   const requests: PermissionRequest[] = [];
   const events: AgentEvent[] = [];
   session = await startCodexSession({
@@ -22,6 +25,7 @@ async function start(decision: PermissionDecision = "allow", resume?: string) {
     clientName: "test",
     executablePath: FAKE,
     resume,
+    skills,
     onPermission: async (request) => {
       requests.push(request);
       return decision;
@@ -264,10 +268,101 @@ describe("codex adapter", () => {
     ]);
   });
 
+  function helloSet() {
+    const root = mkdtempSync(path.join(tmpdir(), "yami-skills-"));
+    const hello = path.join(root, "internal", "hello");
+    mkdirSync(path.join(hello, "skills", "greeting"), { recursive: true });
+    writeFileSync(path.join(hello, "skills", "greeting", "SKILL.md"), '---\nname: greeting\ndescription: "How to greet by name."\n---\n# Greeting\n');
+    return hello;
+  }
+
+  it("lists a skill set's skills in the instructions and as <set>:<skill> commands, and invokes one by that name", async () => {
+    const hello = helloSet();
+    const { session } = await start("allow", undefined, [hello]);
+    const setup = JSON.parse((await session.send("setup")).text);
+    expect(setup.extraRoots).toBeUndefined();
+    expect((await session.send("instructions")).text).toContain(`- hello:greeting: How to greet by name. (${path.join(hello, "skills", "greeting", "SKILL.md")})`);
+    expect(await session.commands()).toEqual([
+      { name: "hello:greeting", description: "How to greet by name." },
+      { name: "summarize", description: "Summarize a note" },
+    ]);
+    // The skill's instructions go in the turn, so the model needs no command to read them.
+    const [input] = JSON.parse((await session.send("/hello:greeting Ada\nand Bob")).text);
+    const folder = path.join(hello, "skills", "greeting");
+    expect(input).toEqual({
+      type: "text",
+      text: `<skill name="hello:greeting" folder="${folder}">\nThe user invoked the skill hello:greeting. Follow its instructions. Paths in it are relative to its folder, ${folder}, unless they start at the working directory.\n\n# Greeting\n</skill>\n\nAda\nand Bob`,
+      text_elements: [],
+    });
+    // An unknown command stays text.
+    expect(JSON.parse((await session.send("/hello:nothing x")).text)).toEqual([{ type: "text", text: "/hello:nothing x", text_elements: [] }]);
+  });
+
+  it("allows a read of a skill-set file without asking, and asks for any other read", async () => {
+    const hello = helloSet();
+    const { session, requests } = await start("deny", undefined, [hello]);
+    const skillFile = path.join(hello, "skills", "greeting", "SKILL.md");
+    expect(JSON.parse((await session.send(`read-file ${skillFile}`)).text)).toEqual({ decision: "accept" });
+    expect(requests).toEqual([]);
+    expect(JSON.parse((await session.send("read-file /etc/hosts")).text)).toEqual({ decision: "decline" });
+    expect(requests).toHaveLength(1);
+  });
+
   it("closes cleanly while idle", async () => {
     const { session, events } = await start();
     await session.close();
     expect(session.closed).toBe(true);
     expect(events).toEqual([{ type: "closed", error: undefined }]);
+  });
+});
+
+describe("isSkillRead", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "yami-read-"));
+  const folder = path.join(root, "internal", "wiki", "skills");
+  mkdirSync(path.join(folder, "ingest"), { recursive: true });
+  writeFileSync(path.join(folder, "ingest", "SKILL.md"), "x");
+  const file = path.join(folder, "ingest", "SKILL.md");
+  const read = (command: string) => isSkillRead(command, [folder], root);
+
+  it.each([
+    `cat ${file}`,
+    `sed -n '1,240p' ${file}`,
+    `sed -n 5p "${file}"`,
+    `head -n 40 ${file}`,
+    `tail -20 ${file}`,
+    `nl ${file}`,
+    `ls -la ${path.join(folder, "ingest")}`,
+    "cat internal/wiki/skills/ingest/SKILL.md",
+    `cat ${file} internal/wiki/skills/ingest/SKILL.md`,
+  ])("allows %s", (command) => {
+    expect(read(command)).toBe(true);
+  });
+
+  it.each([
+    `cat /etc/hosts`,
+    `cat ${file} /etc/hosts`,
+    `cat ${path.join(folder, "..", "..", "..", "secret.md")}`,
+    `cat ${file}; rm -rf /`,
+    `cat ${file} | sh`,
+    `cat ${file} > out.md`,
+    `cat $(echo ${file})`,
+    `sed -i '' 's/a/b/' ${file}`,
+    `sed -n '1w out' ${file}`,
+    `sed '1,2p' ${file}`,
+    `head -c 10 ${file}`,
+    `rm ${file}`,
+    `cat`,
+    `cat "${file}$HOME"`,
+    `cat ${path.join(folder, "*")}`,
+    `cat '${file}`,
+  ])("refuses %s", (command) => {
+    expect(read(command)).toBe(false);
+  });
+
+  it("follows links, as /var and /private/var on macOS", () => {
+    const link = path.join(root, "linked");
+    symlinkSync(folder, link);
+    expect(isSkillRead(`cat ${path.join(link, "ingest", "SKILL.md")}`, [folder], root)).toBe(true);
+    expect(isSkillRead(`cat ${file}`, [link], root)).toBe(true);
   });
 });

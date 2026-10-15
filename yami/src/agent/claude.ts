@@ -74,7 +74,8 @@ export interface ClaudeAgentOptions {
 
 const STDERR_LIMIT = 4096;
 /** Built-in tools that only read. `access: 'read-only'` limits the session to these. */
-const READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch"];
+/** A read-only session's tools. A subagent inherits its parent's tools, so its workers are read-only too. */
+const READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"];
 const FILE_TOOLS = new Set(["Read", "Edit", "Write", "NotebookEdit"]);
 /** Built-in tools that change a file, matched by a PreToolUse hook. */
 const FILE_CHANGE_TOOLS = "Edit|MultiEdit|Write|NotebookEdit";
@@ -191,7 +192,8 @@ export class ClaudeSession extends BaseSession {
         settingSources,
         strictMcpConfig: readOnly || !settingSources.includes("user"),
         permissionMode: claudePermissionMode(options.approval ?? "ask"),
-        ...(readOnly && { tools: READ_ONLY_TOOLS }),
+        // The Skill tool is not a built-in tool of the list; the skills option turns it on.
+        ...(readOnly && { tools: READ_ONLY_TOOLS, skills: "all" as const }),
         ...(tools && { mcpServers: { [tools.name]: this.toolServer(tools) } }),
         ...(options.instructions && {
           systemPrompt: { type: "preset", preset: "claude_code", append: options.instructions },
@@ -207,6 +209,10 @@ export class ClaudeSession extends BaseSession {
           options.sdkOptions?.mcpServers && {
             mcpServers: { ...options.sdkOptions.mcpServers, [tools.name]: this.toolServer(tools) },
           }),
+        // A skill set is a plugin folder: Claude Code names it by the folder and finds its skills in skills/.
+        ...(options.skills?.length && {
+          plugins: [...(options.sdkOptions?.plugins ?? []), ...options.skills.map((path) => ({ type: "local" as const, path, skipMcpDiscovery: true }))],
+        }),
         ...(options.beforeFileChange && {
           hooks: {
             ...options.sdkOptions?.hooks,

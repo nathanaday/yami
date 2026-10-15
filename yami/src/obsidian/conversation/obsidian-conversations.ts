@@ -16,7 +16,7 @@ export class ObsidianConversations implements Conversations {
   async open(options: OpenConversation): Promise<Conversation> {
     const registered = this.agents().find((candidate) => candidate.agent === options.agent);
     if (!registered) throw new Error("The agent is not registered for conversations.");
-    const file = await this.manager.create(registered, { name: options.name, folder: options.folder, open: false, module: options.module, approval: options.approval });
+    const file = await this.manager.create(registered, { name: options.name, folder: options.folder, open: false, module: options.module, approval: options.approval, access: options.access });
     const controller = this.manager.conversation(file);
     const manager = this.manager;
     return {

@@ -779,3 +779,140 @@ button.yami-send.is-stop svg {
 .markdown-source-view.yami-conversation.show-properties .metadata-container {
   display: none !important;
 }
+
+/* Wiki: search, compare, and note lists. */
+
+.yami-wiki-status {
+  padding: var(--size-4-1) var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.yami-wiki-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.yami-wiki-hit-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+}
+
+.yami-wiki-hit-name {
+  font-weight: var(--font-semibold);
+}
+
+.yami-wiki-hit-meta,
+.yami-wiki-hit-snippet {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yami-wiki-hit-snippet {
+  color: var(--text-faint);
+}
+
+.yami-wiki-score {
+  color: var(--text-faint);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.yami-wiki-badge {
+  flex: none;
+  padding: 0 var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.yami-wiki-badge.is-error {
+  color: var(--text-error);
+}
+
+.yami-wiki-badge.is-warning,
+.yami-wiki-badge.is-near {
+  color: var(--text-warning);
+}
+
+.yami-wiki-badge.is-hit {
+  color: var(--text-success);
+}
+
+.yami-wiki-badge.is-neighbor {
+  font-family: var(--font-monospace);
+}
+
+.modal.yami-wiki-compare {
+  width: min(1100px, 95vw);
+}
+
+.yami-wiki-compare-input {
+  width: 100%;
+  margin-bottom: var(--size-4-3);
+}
+
+.yami-wiki-compare-results {
+  overflow-x: auto;
+}
+
+.yami-wiki-compare-results table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--font-ui-small);
+}
+
+.yami-wiki-compare-results th {
+  text-align: left;
+  font-weight: var(--font-semibold);
+  padding: var(--size-4-1) var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.yami-wiki-compare-results th:first-child,
+.yami-wiki-compare-rank {
+  width: 2.5em;
+  color: var(--text-faint);
+}
+
+.yami-wiki-compare-ms {
+  color: var(--text-faint);
+  font-weight: normal;
+  font-size: var(--font-ui-smaller);
+}
+
+.yami-wiki-compare-results td {
+  padding: var(--size-4-1) var(--size-4-2);
+  vertical-align: top;
+}
+
+.yami-wiki-compare-cell {
+  cursor: pointer;
+  border-radius: var(--radius-s);
+}
+
+.yami-wiki-compare-cell .yami-wiki-compare-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yami-wiki-compare-cell:hover,
+.yami-wiki-compare-cell.is-marked {
+  background: var(--background-modifier-hover);
+}
+
+.yami-wiki-compare-cell.is-marked {
+  box-shadow: inset 0 0 0 1px var(--interactive-accent);
+}

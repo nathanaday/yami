@@ -3,6 +3,8 @@ import type { AgentInfo, AgentSession, ApprovalSetting, Harness, SessionOptions,
 export interface AgentPreferences {
   /** Tools that run in the host, given to every session. A session's own `tools` replace them. */
   tools?: ToolSet;
+  /** Skill-set folders, given to every session. See `SessionOptions.skills`. */
+  skills?: string[];
   /** Working directory of the agent. Defaults to the current process directory. */
   cwd?: string;
   /** Model ID. Defaults to the harness default. */
@@ -18,7 +20,7 @@ export interface AgentPreferences {
 
 /** What one session can set on top of the agent's preferences. */
 export type SessionStart<P extends AgentPreferences> = Partial<P> &
-  Pick<SessionOptions, "resume" | "onPermission" | "onQuestion" | "tools" | "beforeFileChange">;
+  Pick<SessionOptions, "resume" | "onPermission" | "onQuestion" | "tools" | "skills" | "beforeFileChange">;
 
 /**
  * Holds the preferences for one harness and starts sessions with them.
@@ -75,6 +77,7 @@ export abstract class Agent<P extends AgentPreferences = AgentPreferences> {
       onPermission: options.onPermission,
       onQuestion: options.onQuestion,
       tools: options.tools,
+      skills: options.skills,
       beforeFileChange: options.beforeFileChange,
     };
   }
