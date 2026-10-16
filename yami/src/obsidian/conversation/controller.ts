@@ -67,7 +67,11 @@ interface Turn {
   stopWriting: () => void;
   /** Files that the agent's tools may be changing now. */
   writing: Map<string, number>;
+  /** Who waits for the end of this turn: the sender of its message. */
+  waiter?: TurnWaiter;
 }
+
+type TurnWaiter = (turn: TurnEnd) => void;
 
 export interface ControllerOptions {
   animate: () => boolean;
@@ -88,6 +92,8 @@ export class ConversationController {
   /** Requests that wait for the user, oldest first. */
   readonly pending: PendingRequest[] = [];
   readonly queue: string[] = [];
+  /** Who waits for the turn of each queued message, in the order of `queue`. */
+  private readonly queueWaiters: (TurnWaiter | undefined)[] = [];
   status: string | undefined;
   private session: AgentSession | undefined;
   private starting: Promise<AgentSession> | undefined;
@@ -101,6 +107,10 @@ export class ConversationController {
   private toldPath: string | undefined;
   /** Properties written to the note that the metadata cache may not show yet. */
   private readonly written: Record<string, string | undefined> = {};
+  /** An interrupt that came while the agent was starting, for the turn that follows. */
+  private interruptPending = false;
+  /** Whether the agent session continued the one the note records, or had to start a new one. */
+  private continued = false;
 
   constructor(
     private readonly app: App,
@@ -181,25 +191,50 @@ export class ConversationController {
   }
 
   async send(text: string): Promise<void> {
+    await this.enqueue(text);
+  }
+
+  /**
+   * Sends a message, and resolves when the agent ends the turn that answers it, also when the message
+   * waits in the queue first. A turn of another message, such as one the person typed, does not settle it.
+   */
+  sendForTurn(text: string): Promise<TurnEnd> {
+    return new Promise((resolve) => void this.enqueue(text, resolve));
+  }
+
+  private async enqueue(text: string, waiter?: TurnWaiter): Promise<void> {
     const message = text.trim();
-    if (!message) return;
+    if (!message) return waiter?.({ path: this.file.path, status: "completed" });
     const command = /^\/(\S+)/.exec(message)?.[1];
     if (command && LOCAL_NAMES.has(command)) {
       await this.runLocal(message);
-      return;
+      return waiter?.({ path: this.file.path, status: "completed" });
     }
     if (this.working) {
       this.queue.push(message);
+      this.queueWaiters.push(waiter);
       this.changed();
       return;
     }
-    await this.run(message);
+    await this.run(message, waiter);
   }
 
+  /** Stops the current turn, also one whose agent is still starting, and drops the queued messages. */
   async interrupt(): Promise<void> {
     this.queue.length = 0;
+    for (const waiter of this.queueWaiters.splice(0)) waiter?.({ path: this.file.path, status: "interrupted" });
+    if (this.phase === "starting") this.interruptPending = true;
     await this.session?.interrupt();
     this.changed();
+  }
+
+  /**
+   * Starts the agent session when it has none, so that a caller learns whether it continued the session the
+   * note records (true) or had to start a new one (false), before the first message.
+   */
+  async connect(): Promise<boolean> {
+    await this.ensureSession();
+    return this.continued;
   }
 
   async setModel(model: string | undefined): Promise<void> {
@@ -261,6 +296,8 @@ export class ConversationController {
 
   async destroy(): Promise<void> {
     window.clearTimeout(this.idleTimer);
+    this.queue.length = 0;
+    for (const waiter of this.queueWaiters.splice(0)) waiter?.({ path: this.file.path, status: "interrupted" });
     for (const pending of [...this.pending]) {
       if (pending.kind === "approval") pending.decide("deny");
       else pending.answer(undefined);
@@ -269,9 +306,10 @@ export class ConversationController {
     this.releaseNote();
   }
 
-  private async run(message: string): Promise<void> {
+  private async run(message: string, waiter?: TurnWaiter): Promise<void> {
     this.phase = "starting";
     this.status = "Starting";
+    this.interruptPending = false;
     this.changed();
     let session: AgentSession;
     try {
@@ -281,21 +319,27 @@ export class ConversationController {
       this.status = undefined;
       new Notice(`${this.agentName} could not start: ${(error as Error).message}`);
       this.changed();
-      this.turnEnded("failed", (error as Error).message);
+      this.turnEnded("failed", (error as Error).message, undefined, waiter);
       return;
     }
     const note = (this.note ??= await this.hub.acquire(this.file, this));
     // Name a new conversation first, so the agent learns the note's final path.
     if (!/\n> \[!user\]/.test(note.content)) await this.rename(message).catch(() => undefined);
     this.appendLocal(note, `${userBlock(message)}\n\n\n`);
-    this.beginTurn(note);
+    this.beginTurn(note, waiter);
     this.phase = "working";
     this.status = "Thinking";
     this.changed();
-    await session.send(this.prompt(message)).catch(() => undefined);
+    const sent = session.send(this.prompt(message));
+    if (this.interruptPending) {
+      this.interruptPending = false;
+      void session.interrupt();
+    }
+    // The session can close while the agent starts or the note is read; then no turn starts, and this one ends here.
+    await sent.catch((error: Error) => this.turn && this.finishTurn(this.turn, "interrupted", error.message));
   }
 
-  private beginTurn(note: SharedNote): void {
+  private beginTurn(note: SharedNote, waiter?: TurnWaiter): void {
     const peer = this.presence.peer(note);
     peer.beginTurn();
     // The turn goes before the note's last line break, so text the user types at the very end stays out of it.
@@ -312,6 +356,7 @@ export class ConversationController {
       writing,
       writer,
       stopWriting: this.hub.addWriter(writer),
+      waiter,
     };
     peer.setCursor(note.relative(at, -1));
   }
@@ -345,7 +390,8 @@ export class ConversationController {
       this.session = undefined;
       this.starting = undefined;
       this.toldPath = undefined;
-      if (this.turn) void this.finishTurn(this.turn, "failed", event.error ?? `${this.agentName} stopped.`);
+      // A session closed on purpose, by the person or by Yami, interrupts its turn; one that broke fails it.
+      if (this.turn) void this.finishTurn(this.turn, event.error ? "failed" : "interrupted", event.error ?? `${this.agentName} stopped.`);
     }
     this.changed();
   }
@@ -372,8 +418,9 @@ export class ConversationController {
     this.options.onActivity();
     // The next message starts before listeners hear of the end, so they see the conversation still working.
     const next = this.queue.shift();
-    const running = next ? this.run(next) : undefined;
-    this.turnEnded(status, error, text);
+    const nextWaiter = this.queueWaiters.shift();
+    const running = next ? this.run(next, nextWaiter) : undefined;
+    this.turnEnded(status, error, text, turn.waiter);
     if (running) await running;
     else if (!this.holders.size) {
       this.releaseNote();
@@ -381,8 +428,10 @@ export class ConversationController {
     }
   }
 
-  private turnEnded(status: TurnStatus, error?: string, text?: string): void {
-    this.options.onTurnEnd({ path: this.file.path, status, ...(text && { text }), ...(error && { error }) });
+  private turnEnded(status: TurnStatus, error?: string, text?: string, waiter?: TurnWaiter): void {
+    const end: TurnEnd = { path: this.file.path, status, ...(text && { text }), ...(error && { error }) };
+    this.options.onTurnEnd(end);
+    waiter?.(end);
   }
 
   private releaseNote(): void {
@@ -442,9 +491,12 @@ export class ConversationController {
         beforeFileChange: (paths) => this.turn && this.hub.prepare(this.turn.writer, paths),
       });
     const resume = this.property("session");
+    this.continued = false;
     if (!resume) return start();
     try {
-      return await start(resume);
+      const session = await start(resume);
+      this.continued = true;
+      return session;
     } catch {
       // The stored conversation is gone, for example after the harness cleaned up old sessions.
       return start();

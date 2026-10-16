@@ -188,6 +188,14 @@ export class Wiki {
     }
   }
 
+  /** Reads the vault again, and says what the index holds now and how long the read took. */
+  async rebuild(): Promise<{ notes: number; links: number; communities: number; ms: number }> {
+    const started = performance.now();
+    await this.refresh();
+    const communities = new Set(this.notes.map((note) => note.community).filter((c) => c !== undefined)).size;
+    return { notes: this.notes.length, links: this.graph.size, communities, ms: Math.round(performance.now() - started) };
+  }
+
   /** Marks the index stale, so the next query reads the vault again. */
   invalidate(): void {
     this.fresh = false;

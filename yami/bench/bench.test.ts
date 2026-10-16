@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { algorithms, mulberry32, VoyageEmbedder, Wiki } from "../src/wiki/index.js";
-import { FsVault } from "../test/fixtures/fs-vault.js";
+import { FsVault } from "../src/testing/index.js";
 
 interface Gold {
   query: string;

@@ -1,0 +1,1 @@
+A source captured from `journals/` holds the user's own words. In its modify, set `authority: primary`. Cite it on each claim it supports. Where a topic quotes the user, quote the words exactly. Never make a claim that the note does not make: keep an opinion an opinion, and a question a question. Never change a note in `journals/`.

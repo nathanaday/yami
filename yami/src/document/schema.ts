@@ -15,7 +15,7 @@ export type Schema = Record<string, Field>;
 export const DOCUMENT_TYPES = ["module", "session", "policy", "promise", "skill", "conversation", "topic", "source", "snapshot", "change"] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
-export const SESSION_STATES = ["open", "running", "done", "failed", "needs-attention"] as const;
+export const SESSION_STATES = ["open", "running", "done", "failed", "needs-attention", "stopped"] as const;
 export type SessionState = (typeof SESSION_STATES)[number];
 
 const typed = (type: DocumentType): Field => ({ type: "text", values: [type], required: true });
@@ -32,6 +32,8 @@ export const MODULE: Schema = {
 export const SESSION: Schema = {
   type: typed("session"),
   module: { type: "text", required: true },
+  /** The template of the module that the session came from. */
+  template: { type: "text" },
   state: { type: "text", values: SESSION_STATES, default: "open" },
   created: { type: "date" },
   iteration: { type: "number", default: 0 },

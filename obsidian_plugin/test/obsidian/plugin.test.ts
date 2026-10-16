@@ -20,7 +20,7 @@ describe("Yami in Obsidian", () => {
     // The editor and the shared document must never differ.
     const drift = await obsidian.page.evaluate(() => {
       const app = (window as any).app;
-      const hub = app.plugins.plugins.yami?.hub;
+      const hub = app.plugins.plugins.yami?.yami.hub;
       const problems: string[] = [];
       for (const leaf of app.workspace.getLeavesOfType("markdown")) {
         const note = leaf.view.file && hub?.get(leaf.view.file.path);
@@ -35,7 +35,7 @@ describe("Yami in Obsidian", () => {
 
   /** Waits until no agent works, then for the editor to settle. */
   async function idle(timeout = 180_000) {
-    await page().waitForFunction(() => (window as any).app.plugins.plugins.yami.conversations.working.length === 0, undefined, { timeout, polling: 250 });
+    await page().waitForFunction(() => (window as any).app.plugins.plugins.yami.yami.conversations.working.length === 0, undefined, { timeout, polling: 250 });
     await page().waitForTimeout(600);
   }
 
@@ -52,6 +52,37 @@ describe("Yami in Obsidian", () => {
   }
 
   const activePath = () => page().evaluate(() => (window as any).app.workspace.getActiveFile()?.path as string);
+  /**
+   * Runs a command once it is available. Right after a note changes, Obsidian's metadata cache can lack the
+   * note for a moment, and a command that reads the note's properties is not available then.
+   */
+  async function run(id: string) {
+    await page().waitForFunction(
+      (name) => {
+        const command = (window as any).app.commands.findCommand(name);
+        return command && (command.checkCallback ? command.checkCallback(true) : true);
+      },
+      id,
+      { timeout: 10_000, polling: 100 },
+    );
+    await page().evaluate((name) => (window as any).app.commands.executeCommandById(name), id);
+  }
+
+  /** Creates a hello session and waits until it is open and Obsidian has read its properties. */
+  async function newGreeting(): Promise<string> {
+    const before = await activePath();
+    await run("yami:hello-new-greeting");
+    await page().waitForFunction(
+      (previous) => {
+        const app = (window as any).app;
+        const file = app.workspace.getActiveFile();
+        return file && file.path !== previous && file.path.startsWith("hello/") && app.metadataCache.getFileCache(file)?.frontmatter?.type === "session";
+      },
+      before,
+      { timeout: 10_000 },
+    );
+    return activePath();
+  }
 
   it("searches, compares, matches, and lints the wiki from the command palette", { timeout: 60_000 }, async () => {
     await page().evaluate(async () => {
@@ -197,7 +228,7 @@ describe("Yami in Obsidian", () => {
       const app = (window as any).app;
       if (!app.vault.getFolderByPath("wiki/topics")) await app.vault.createFolder("wiki/topics");
       await app.vault.create("wiki/topics/Compost.md", "---\ntype: topic\ndescription: Rotted plant matter.\n---\nCompost feeds the soil.\n");
-      const tool = (window as any).yami.claude.preferences.tools.tools.find((t: any) => t.name === "librarian_checkout");
+      const tool = (window as any).yami.agents[0].preferences.tools.tools.find((t: any) => t.name === "librarian_checkout");
       return JSON.parse(await tool.run({ request: "the material on compost", name: "Compost", documents: [{ path: "wiki/topics/Compost.md", why: "the basics" }] }, { signal: new AbortController().signal }));
     });
     await page().evaluate(async (copy) => {
@@ -213,7 +244,7 @@ describe("Yami in Obsidian", () => {
   });
 
   it("installs the hello module when it loads", async () => {
-    for (const file of ["Yami.base", "hello/sessions.base", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
+    for (const file of ["Yami.base", "internal/hello/sessions.base", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
       await obsidian.waitForNote(file, (text) => text.length > 0, 10_000);
     }
     // A file at the vault root has no folder to create. A slice to the last slash once made "Yami.bas".
@@ -348,7 +379,7 @@ describe("Yami in Obsidian", () => {
   it("starts a conversation for another plugin and reports its turns", { timeout: TIMEOUT }, async () => {
     const result = await page().evaluate(async () => {
       const app = (window as any).app;
-      const conversations = app.plugins.plugins.yami.conversations;
+      const conversations = app.plugins.plugins.yami.yami.conversations;
       const file = await conversations.start({ message: "Reply with exactly the word: plum", title: "From another plugin", folder: "Agents" });
       const working = conversations.status(file.path);
       const turn = await new Promise((resolve) => {
@@ -371,18 +402,110 @@ describe("Yami in Obsidian", () => {
     expect(text).toMatch(/\nplum\.?\n\n$/i);
   });
 
+  it("offers the commands of the sessions, the templates, and the actions", async () => {
+    const ids = await page().evaluate(() => Object.keys((window as any).app.commands.commands).filter((id) => id.startsWith("yami:")));
+    for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search"]) {
+      expect(ids, id).toContain(`yami:${id}`);
+    }
+    // A thread's document holds sections only the tools write, and the wiki's ingest starts from files.
+    expect(ids).not.toContain("yami:threads-new-thread");
+    expect(ids).not.toContain("yami:wiki-new-ingest");
+  });
+
   it("runs a hello session from its document", { timeout: TIMEOUT }, async () => {
-    await page().evaluate(() => (window as any).app.commands.executeCommandById("yami:hello-new-session"));
-    await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path.startsWith("hello/"), undefined, { timeout: 10_000 });
-    const session = await activePath();
-    await page().evaluate(() => (window as any).app.commands.executeCommandById("yami:hello-run-claude"));
+    const session = await newGreeting();
+    await run("yami:run-session-claude");
     const doc = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
     expect(doc).toContain("state: done");
+    expect(doc).toContain("template: greeting");
     expect(doc).toMatch(/- \[x\] \[\[internal\/hello\/promises\/Greeting note\|Greeting note\]\]/);
     const conversation = doc.match(/\nconversation: "\[\[(conversations\/[^|\]]+)\|/)?.[1];
     expect(conversation).toBeTruthy();
     const record = await obsidian.waitForNote(`${conversation}.md`, (text) => text.includes("> [!user]"), 10_000);
     expect(record).toMatch(/^---\ntype: conversation\nagent: claude\n/);
     expect(record).toContain(`module: "[[${session.replace(/\.md$/, "")}]]"`);
+  });
+
+  it("kills a session's agent while it starts, and in the middle of a turn, and the session ends stopped", { timeout: TIMEOUT }, async () => {
+    const conversationOf = async (session: string) =>
+      (await obsidian.waitForNote(session, (text) => /\nconversation: "\[\[conversations\//.test(text), 60_000)).match(/\nconversation: "\[\[(conversations\/[^|\]]+)\|/)![1]!;
+
+    // While the agent starts: the kill closes the session that is starting, and the turn that would follow never runs.
+    const starting = await newGreeting();
+    await run("yami:run-session-claude");
+    const first = `${await conversationOf(starting)}.md`;
+    await page().waitForFunction(
+      (path) => {
+        const app = (window as any).app;
+        const file = app.vault.getFileByPath(path);
+        return file && app.plugins.plugins.yami.yami.conversations.controller(file)?.phase === "starting";
+      },
+      first,
+      { timeout: 30_000, polling: 50 },
+    );
+    await run("yami:kill-session");
+    expect(await obsidian.waitForNote(starting, (text) => /state: (stopped|done|failed|needs-attention)/.test(text), 60_000)).toContain("state: stopped");
+
+    // In the middle of a turn: the harness session closes at once.
+    const working = await newGreeting();
+    await page().evaluate(async (path) => {
+      const app = (window as any).app;
+      await app.vault.process(app.vault.getFileByPath(path), (text: string) => text.replace("## Deliverables", "Before anything else, run the shell command `sleep 30` with your Bash tool. Then write the greeting note.\n\n## Deliverables"));
+    }, working);
+    await page().evaluate(() => {
+      (window as any).__allow = setInterval(() => (document.querySelector(".yami-permission .mod-cta") as HTMLElement | null)?.click(), 200);
+    });
+    try {
+      await run("yami:run-session-claude");
+      const second = `${await conversationOf(working)}.md`;
+      await page().waitForFunction((path) => ((window as any).app.plugins.plugins.yami.yami.hub.get(path)?.content ?? "").includes("sleep 30"), second, { timeout: 120_000, polling: 200 });
+      await run("yami:kill-session");
+      const killed = await obsidian.waitForNote(working, (text) => /state: (stopped|done|failed|needs-attention)/.test(text), 30_000);
+      expect(killed).toContain("state: stopped");
+      expect(killed).toMatch(/iteration 1: 0 met, 1 unmet; stopped/);
+    } finally {
+      await page().evaluate(() => clearInterval((window as any).__allow));
+    }
+    expect(await page().evaluate(() => (window as any).app.plugins.plugins.yami.yami.running.length)).toBe(0);
+  });
+
+  it("stops a session's run in the middle of a turn, and resumes it in the same conversation", { timeout: TIMEOUT }, async () => {
+    const session = await newGreeting();
+    // A long first act, so the turn is still going when the person stops it.
+    await page().evaluate(async (path) => {
+      const app = (window as any).app;
+      await app.vault.process(app.vault.getFileByPath(path), (text: string) =>
+        text.replace("## Deliverables", "Before anything else, run the shell command `sleep 30` with your Bash tool. Then write the greeting note.\n\n## Deliverables"),
+      );
+    }, session);
+    // The person allows each request; the user's own permission rules may also allow the command.
+    await page().evaluate(() => {
+      (window as any).__allow = setInterval(() => (document.querySelector(".yami-permission .mod-cta") as HTMLElement | null)?.click(), 200);
+    });
+    try {
+      await run("yami:run-session-claude");
+      const conversation = (await obsidian.waitForNote(session, (text) => /\nconversation: "\[\[conversations\//.test(text), 60_000)).match(/\nconversation: "\[\[(conversations\/[^|\]]+)\|/)![1]!;
+      await page().waitForFunction(
+        (path) => ((window as any).app.plugins.plugins.yami.yami.hub.get(path)?.content ?? "").includes("sleep 30"),
+        `${conversation}.md`,
+        { timeout: 120_000, polling: 200 },
+      );
+      expect(await page().evaluate(() => (window as any).app.commands.findCommand("yami:resume-session").checkCallback(true))).toBe(false);
+      await run("yami:stop-session");
+      const stopped = await obsidian.waitForNote(session, (text) => /state: (stopped|done|failed|needs-attention)/.test(text), 60_000);
+      expect(stopped).toContain("state: stopped");
+      expect(stopped).toMatch(/iteration 1: 0 met, 1 unmet; stopped/);
+      expect(await page().evaluate(() => (window as any).app.plugins.plugins.yami.yami.running.length)).toBe(0);
+
+      await run("yami:resume-session");
+      const done = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
+      expect(done).toContain("state: done");
+      expect(done).toContain(`conversation: "[[${conversation}|`);
+      const record = await obsidian.read(`${conversation}.md`);
+      expect(record).toContain("> [!user]\n> Yami checked the promises");
+      expect(record.match(/> \[!user\]/g)).toHaveLength(2);
+    } finally {
+      await page().evaluate(() => clearInterval((window as any).__allow));
+    }
   });
 });

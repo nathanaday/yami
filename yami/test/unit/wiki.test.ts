@@ -4,10 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, readDocument } from "../../src/document/index.js";
-import { createSession, enableModule, moduleTools, runCheck } from "../../src/module/index.js";
-import { wiki as wikiModule, SOURCES, TOPICS } from "../../src/modules/wiki.js";
-import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, sourceChunks, stem, tokens, Wiki, type Embedder } from "../../src/wiki/index.js";
-import { FsVault } from "../fixtures/fs-vault.js";
+import { runCheck, Yami, type WikiModule } from "../../src/index.js";
+import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type Embedder } from "../../src/wiki/index.js";
+import { FsVault } from "../../src/testing/index.js";
 
 let root = "";
 let vault: FsVault;
@@ -19,6 +18,13 @@ beforeEach(async () => {
 afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
+
+/** A Yami over the test vault, with the wiki module installed, and the wiki's ingest template. */
+async function enabled() {
+  const yami = new Yami({ vault });
+  await yami.enable();
+  return { yami, ingest: (yami.module("wiki") as WikiModule).ingest };
+}
 
 const note = (path: string, properties: Record<string, unknown>, body: string) =>
   vault.write(path, `---\n${vault.stringifyProperties(properties)}---\n${body}`);
@@ -332,14 +338,14 @@ describe("checks", () => {
 
 describe("the wiki module", () => {
   it("installs its documents and serves search, match, and lint as tools", async () => {
-    const wiki = await fixture();
-    await enableModule(vault, wikiModule);
+    await fixture();
+    const { yami, ingest } = await enabled();
     for (const file of ["internal/wiki/skills/ingest/SKILL.md", "internal/wiki/skills/ingest/extractor.md", "internal/wiki/skills/ingest/drafter.md", "internal/wiki/skills/ingest/page-forms.md", "internal/wiki/promises/Sources absorbed.md"]) {
       expect(await vault.exists(file), file).toBe(true);
     }
-    const path = await createSession(vault, wikiModule, "Ingest codex", { sources: [link(`${SOURCES}/codex-notes.md`)] });
+    const { path } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`)] } });
     expect((await readDocument(vault, path)).properties.sources).toEqual([link(`${SOURCES}/codex-notes.md`)]);
-    const set = moduleTools({ vault, wiki }, [wikiModule])!;
+    const set = yami.tools()!;
     expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_chunks", "wiki_change"]);
     const signal = new AbortController().signal;
     const search = JSON.parse((await runTool(set.tools[0]!, { text: "codex harness", limit: 1 }, signal)).text);
@@ -393,8 +399,8 @@ describe("versions", () => {
 
 describe("change", () => {
   const session = async (wiki: Wiki) => {
-    await enableModule(vault, wikiModule);
-    const path = await createSession(vault, wikiModule, "Ingest codex", { sources: [link(`${SOURCES}/codex-notes.md`)] });
+    const { ingest } = await enabled();
+    const { path } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`)] } });
     await wiki.refresh();
     return path;
   };
@@ -601,14 +607,14 @@ describe("source chunks", () => {
 describe("the wiki module's layout", () => {
   it("keeps its sessions and ledger internal, with the versions and changes in the ledger", async () => {
     await fixture();
-    await enableModule(vault, wikiModule);
+    const { ingest } = await enabled();
     expect(await vault.exists("internal/wiki/sessions.base")).toBe(true);
     expect(await vault.exists("wiki/sessions.base")).toBe(false);
     const ledger = await vault.read("internal/wiki/sessions.base");
     expect(ledger).toContain("name: Versions");
     expect(ledger).toContain("name: Changes");
     expect(ledger).toContain('module == "wiki"');
-    const path = await createSession(vault, wikiModule, "Ingest x");
+    const { path } = await ingest.create({ name: "Ingest x", exact: true });
     expect(path).toBe("internal/wiki/sessions/Ingest x.md");
     expect((await readDocument(vault, path)).properties.changes).toEqual([]);
   });
@@ -617,7 +623,7 @@ describe("the wiki module's layout", () => {
 describe("what the index leaves out", () => {
   it("skips change and snapshot records and skill files, and the change check still finds the change", async () => {
     const wiki = await fixture();
-    await enableModule(vault, wikiModule);
+    await enabled();
     const result = await wiki.change({ title: "One topic", writes: [{ op: "create", path: `${TOPICS}/Codex app-server.md`, properties: { description: "The app-server of codex." }, body: "x" }] });
     await wiki.refresh();
     const paths = wiki.notes.map((n) => n.path);
@@ -685,9 +691,9 @@ describe("copies, agent files, and base hashes", () => {
 
 describe("wiki_change through the tool", () => {
   it("removes a property that the plan sets to null", async () => {
-    const wiki = await fixture();
-    await enableModule(vault, wikiModule);
-    const change = moduleTools({ vault, wiki }, [wikiModule])!.tools.find((t) => t.name === "wiki_change")!;
+    await fixture();
+    const { yami } = await enabled();
+    const change = yami.tools()!.tools.find((t) => t.name === "wiki_change")!;
     const result = await runTool(change, { title: "Untag", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, properties: { tags: null } }] }, new AbortController().signal);
     expect(result.isError, result.text).toBe(false);
     expect((await readDocument(vault, `${TOPICS}/Levain.md`)).properties.tags).toBeUndefined();

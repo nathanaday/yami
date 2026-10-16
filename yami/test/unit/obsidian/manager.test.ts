@@ -361,4 +361,87 @@ describe("ConversationManager", () => {
     await manager.destroy();
     await expect(manager.start({ message: "Hi" })).rejects.toThrow("Yami is turned off.");
   });
+
+  describe("a turn that a run waits for", () => {
+    const settled = (promise: Promise<unknown>) => {
+      let done = false;
+      void promise.then(() => (done = true));
+      return () => done;
+    };
+
+    it("settles with the turn of its own message, not with a turn of the person's that came before", async () => {
+      const { file } = await start({ message: "The person's message", open: false });
+      const controller = manager.conversation(file);
+      const mine = controller.sendForTurn("The run's prompt");
+      const done = settled(mine);
+      session.endTurn();
+      await flush();
+      expect(done()).toBe(false);
+      expect(session.sent.at(-1)).toMatch(/^The run's prompt/);
+      session.endTurn();
+      expect(await mine).toMatchObject({ status: "completed", text: "Done." });
+    });
+
+    it("ends as interrupted when the session closes on purpose, and as failed when it breaks", async () => {
+      const { file } = await start({ message: "One", open: false });
+      const controller = manager.conversation(file);
+      const first = controller.sendForTurn("Two");
+      session.endTurn();
+      await flush();
+      session.emit({ type: "closed" } as AgentEvent);
+      expect(await first).toMatchObject({ status: "interrupted" });
+      const second = controller.sendForTurn("Three");
+      await flush();
+      session.emit({ type: "closed", error: "boom" } as AgentEvent);
+      expect(await second).toMatchObject({ status: "failed", error: "boom" });
+    });
+
+    it("ends when the session closed while the agent started, so no run waits for ever", async () => {
+      session.send = function (text: string) {
+        this.sent.push(text);
+        return Promise.reject(new Error("The session is closed."));
+      };
+      const { file } = await start({ message: "Hello", open: false });
+      const turn = await manager.conversation(file).sendForTurn("Again");
+      expect(turn).toMatchObject({ status: "interrupted", error: "The session is closed." });
+      expect(manager.status(file.path)).toBe("active");
+    });
+
+    it("interrupts the turn that follows when the interrupt came while the agent started", async () => {
+      let ready!: (value: AgentSession) => void;
+      const interrupts: number[] = [];
+      session.interrupt = async () => void interrupts.push(1);
+      agents[0] = { ...agents[0]!, agent: new FakeAgent("claude", () => new Promise((resolve) => (ready = resolve))) };
+      const file = await manager.create(agents[0]!, { open: false });
+      const controller = manager.conversation(file);
+      void controller.sendForTurn("Slow start");
+      await flush();
+      expect(controller.phase).toBe("starting");
+      await controller.interrupt();
+      ready(session as unknown as AgentSession);
+      await flush();
+      await flush();
+      expect(session.sent).toHaveLength(1);
+      expect(interrupts).toEqual([1]);
+    });
+
+    it("says whether the agent continued the session that the note records", async () => {
+      const { file } = await start({ message: "Hello", open: false });
+      session.endTurn();
+      await flush();
+      const controller = manager.conversation(file);
+      await controller.closeSession();
+      expect(await controller.connect()).toBe(true);
+      expect(claude.started.at(-1)?.resume).toBe("session-1");
+      await controller.closeSession();
+      agents[0] = {
+        ...agents[0]!,
+        agent: new FakeAgent("claude", async () => {
+          if ((agents[0]!.agent as FakeAgent).started.at(-1)?.resume) throw new Error("No such session.");
+          return session as unknown as AgentSession;
+        }),
+      };
+      expect(await controller.connect()).toBe(false);
+    });
+  });
 });

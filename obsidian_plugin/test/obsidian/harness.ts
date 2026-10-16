@@ -64,6 +64,17 @@ export async function launchObsidian({ vault: source = "test/fixtures/sample-vau
     }
     if (await page.$(".modal-container")) throw new Error("A dialog stayed open in Obsidian.");
 
+    // What Obsidian said, for the message of a wait that times out: its errors, and each notice it showed.
+    const said: string[] = [];
+    page.on("pageerror", (error) => said.push(`error: ${error.message}`));
+    page.on("console", (message) => message.type() === "error" && said.push(`console: ${message.text()}`));
+    await page.exposeFunction("__yamiNotice", (text: string) => said.push(`notice: ${text}`));
+    await page.evaluate(() => {
+      new MutationObserver((records) => {
+        for (const record of records) for (const node of record.addedNodes) if (node instanceof HTMLElement && node.classList.contains("notice")) (window as any).__yamiNotice(node.textContent ?? "");
+      }).observe(document.body, { childList: true, subtree: true });
+    });
+
     const read = (note: string) => readFile(path.join(vault, note), "utf8");
     return {
       page,
@@ -83,7 +94,7 @@ export async function launchObsidian({ vault: source = "test/fixtures/sample-vau
           if (check(text)) return text;
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
-        throw new Error(`Timed out waiting for ${note}. Last text:\n${text}`);
+        throw new Error(`Timed out waiting for ${note}. Last text:\n${text}\nWhat Obsidian said last:\n${said.slice(-10).join("\n") || "nothing"}`);
       },
       async close() {
         await browser?.close().catch(() => undefined);

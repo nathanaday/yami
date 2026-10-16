@@ -1,6 +1,6 @@
 # Yami
 
-The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conversations with Claude Code and Codex in your notes, and the sessions of Yami modules. The Obsidian layer, `yami/obsidian`, does the work; the plugin registers the agents and the commands.
+The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conversations with Claude Code and Codex in your notes, and the sessions of its modules: hello, threads, the librarian, and journals. `src/main.ts` gives `createYami` the agents and the modules; `yami/obsidian` does the rest.
 
 ## Develop
 
@@ -26,6 +26,19 @@ The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conver
 
 4. In Obsidian, open **Settings → Community plugins** and turn on **Yami**. To load your changes, turn the plugin off and on again, or run the command **Reload app without saving**.
 
+## The modules
+
+Each module is a folder in `src/modules/`: the class in `index.ts`, and its skills, policies, promises, and agents as markdown files beside it, which the build imports as text. When the plugin loads, each module writes the files that are missing under `internal/<module>/`. Files that exist stay as they are, so you can edit them in the vault.
+
+| Module | Folder | Templates | Actions |
+| --- | --- | --- | --- |
+| Hello world | `hello/` | Greeting | |
+| Threads | `threads/` | Thread (planted by `/threads:stub`) | |
+| Librarian | `librarian/` | Checkout | Return this checkout |
+| Journals | none | | Publish a volume |
+
+To add a module, write its folder and add an instance to `modules` in `src/main.ts`. Its commands appear on the next load: one for each template, **<Module>: new <template>**, and one for each action. Its tools and skills reach every agent. Test it in `test/unit/` with `testYami` from `yami/testing`.
+
 ## Conversations
 
 Run **New conversation** from the ribbon, or **New conversation with claude** or **with codex** from the command palette. You get a note in `conversations/` with a message box at the bottom. Press Enter to send. The note records the conversation: your messages, the agent's replies, and its tool calls in collapsed sections. The note gets its name from your first message.
@@ -36,24 +49,55 @@ Commands: **End this conversation**, **Stop the agent in this conversation**, **
 
 Every module skill is a command in every conversation: type `/wiki:ingest` or `/hello:greeting`, with what the skill should work on after it. The message box suggests them after `/`. The agent can also load a module skill on its own when a request needs it, without asking you: reading a module skill's files is the one thing Codex does without an approval under **ask**.
 
-The agents use your own setup for their harness: your `CLAUDE.md` and `AGENTS.md` files, skills, plugins, MCP servers, and permission rules. `window.yami` holds the agents and the conversation manager for the developer console.
+The agents use your own setup for their harness: your `CLAUDE.md` and `AGENTS.md` files, skills, plugins, MCP servers, and permission rules. `window.yami` holds the plugin's Yami for the developer console: its `agents`, `modules`, `wiki`, `conversations`, and `running` sessions.
 
-## Threads, the librarian, and journals
+## Sessions
 
-- **Threads.** In a conversation, `/threads:stub <your idea>` plants a thread in `threads/`, and `/threads:run <thread>` takes it to closed: a spec, a review, a plan, the work with a commit per task, a validation by a read-only agent, and the close. A thread is also a session: open its document and run **Threads: run this session with Claude**. For a repository outside the vault, let the agent edit there and run its tests in your Claude Code or Codex settings, or answer each approval in the conversation.
-- **The librarian.** `/librarian:checkout <subject>` makes a reading list in `librarian/` with a copy of each document. Mark up the copies, then open the reading list and run **Librarian: return this checkout**: your edits go back into the wiki as one change.
-- **Journals.** Write in `journals/<volume>/`. **Journals: publish a volume** captures the notes that are new or changed and opens the edition's wiki session; run it to absorb them.
+A session is one document in its module's folder. Its properties link its skills, policies, and promises; its body says the work, and shows the deliverables and the progress. With a session document open:
+
+- **Run this session with Claude** or **with Codex** runs the agent loop: a turn, then a check of every promise, until each one is met or the iterations run out. The document links the conversation note that records the run; open it to watch the agent, answer its approvals, or write to it.
+- **Stop this session** interrupts the agent's turn. **Kill this session's agent** closes the agent at once, for an agent that does not respond. Both leave the session `stopped`.
+- **Resume this session** checks the promises, and ends the session `done` when they are met. Otherwise it continues the same conversation, so the agent keeps what it did.
+
+The ledger of each module, `internal/<module>/sessions.base`, lists its sessions and their state. `Yami.base` lists every session of the vault.
 
 ## Try the hello module
 
-The hello module is the smallest Yami module: one policy, one promise, and one skill. When the plugin loads, it writes the files of each module that are missing: `Yami.base`, `hello/sessions.base`, and the module's documents under `internal/hello/`. Files that exist stay as they are, so you can edit the bases and the documents. Two commands drive the module:
+The hello module is the smallest module: one policy, one promise, one skill, and one template.
 
-1. **Hello: new session** creates `hello/Session <time>.md` and opens it. Its properties link the policy, the promise, and the skill, and `greeting` is the module's own field, which you can change.
-2. **Hello: run this session with Claude** or **with Codex**, with the session document open, runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs, and links the conversation note in `conversations/` that records the run. Open that note to watch the agent, answer its approvals, or continue the conversation.
+1. **Hello world: new greeting** creates `hello/Greeting <time>.md` and opens it. Its properties link the policy, the promise, and the skill, and `greeting` is the module's own field, which you can change.
+2. **Run this session with Claude** or **with Codex** runs the agent loop. The document shows the state, the deliverables, and the progress as the loop runs.
+
+## Threads
+
+A thread is one piece of work on one or more repositories, from idea to closed. It is one session document in `threads/`: the user's idea and the research's context, the spec (goal, requirements, rules, decisions), the plan, the validation rounds, and the outcome.
+
+- In a conversation, `/threads:stub <your idea>` plants a thread, and `/threads:run <thread>` takes it to closed: a spec, a review, a plan, the work with a commit per task, a validation by a read-only agent, and the close. A thread is also a session: open its document and run **Run this session with Claude**.
+- **Skills**: `/threads:stub`, `/threads:spec` (writes the spec, has it reviewed, and plans), `/threads:run`, and `/threads:validate`, which validates in a fresh conversation, for Codex. **Agents**: `threads:reviewer` reviews a spec and `threads:validator` validates the work, both with no edit tool.
+- **Tools**: `threads_stub`, `threads_spec`, `threads_plan` (add, done, drop), `threads_round`, `threads_close` (closed or dropped), and `threads_status`. Each write returns the thread's `phase`, its `next` step, and its problems. The input of each is declared once, in `stubShape`, `specShape`, `planShape`, `roundShape`, and `closeShape`.
+- **The phase** is derived from the document at each read: stub, specified, planned, in progress, unvalidated, failed, validated, closed, or dropped. The next step is spec, plan, wait, execute, validate, resolve, ask, close, or none. The `thread` check is met when the thread is closed or dropped, and is for review when the user decides: the budget of rounds is used, or the thread waits for one in its `after`.
+- **The rules of a round**: each requirement gets one result with evidence; a failing requirement needs a blocking finding; a finding with `predates` never blocks; each finding of the last round needs an outcome (fixed, spec, stub, declined, or knowledge) in the next round or at the close, where only stub, declined, or knowledge are taken; a carried result must be a pass of the last round whose requirement text did not change; a thread may take 3 rounds unless the spec sets `budget`. After a pass, a change to the plan or the spec needs `user_asked`, the user's words, which the decisions keep.
+- **The document's formats**: `- **R1** text`; `- [ ] **T1** text · serves R1, R2` with a `· done: <trail>` or `· dropped: <reason>`, and details indented below; each round as `### Round N`, with its data in a hidden comment on its last line.
+
+For a repository outside the vault, let the agent edit there and run its tests in your Claude Code settings (`additionalDirectories`) or Codex settings (`sandbox_workspace_write.writable_roots`), or answer each approval in the conversation.
+
+## The librarian
+
+A checkout is a reading list of the wiki's material on a subject, and a copy of each document for you to read and mark up.
+
+- **Librarian: new checkout** creates a checkout session. Write your request in its Request section, and run it. Or, in a conversation, `/librarian:checkout <subject>`.
+- The checkout skill searches with `wiki_search` and the `hop2` algorithm, keeps what serves the request, orders it foundations first with a reason each, and calls `librarian_checkout`. The tool writes the reading list into the session document, and the copies in the folder of its name, `<Title> (checkout).md`. A copy holds the original's body, `copy_of`, and `sha256`, the hash of that body. Only topics and sources are checked out, at most 60.
+- Mark up the copies, then open the reading list and run **Librarian: return this checkout**. Each copy whose hash changed returns its edits as a `modify` with `base`, in one change, "Return <name>"; a copy whose original changed too, is gone, or whose edit the wiki refuses stays, with the reason. Copies that returned or had no edit are removed. The reading list's Return section says what happened.
+
+## Journals
+
+Your own writing: each folder directly under `journals/` is a volume. No agent changes a journal.
+
+**Journals: publish a volume** lists the volumes with how many notes wait to be published. It captures each note whose latest source does not hold its text, and opens the edition, a wiki ingest session `<Volume Name> edition <date>`, with those sources and the `Journal sources` policy (primary authority, exact quotes, no claim the note does not make). Run the edition to absorb them. It refuses a volume with no note, and one with no change since its last publish.
 
 ## The wiki
 
-The plugin builds one `Wiki` over the vault and gives every agent the wiki tools, `wiki_search`, `wiki_match`, and `wiki_lint`, so any conversation can answer from your notes with citations. The wiki module keeps topics in `wiki/topics/` and sources in `wiki/sources/`.
+The plugin gives every agent the wiki tools, `wiki_search`, `wiki_match`, and `wiki_lint`, so any conversation can answer from your notes with citations. The wiki module keeps topics in `wiki/topics/` and sources in `wiki/sources/`.
 
 The wiki indexes every note except `conversations/` and the folders and files in Obsidian's **Settings → Files and links → Excluded files**. A change in the vault marks the index stale, and the next query reads the vault again.
 
@@ -71,13 +115,15 @@ Commands to try the wiki yourself. In each list, Enter opens the note, Cmd+Enter
 `window.yami.wiki` holds the wiki for the developer console, for example `await yami.wiki.search("interrupt", { algorithm: "hop2" })`.
 
 1. **Wiki: ingest this file**, with a note or an attachment open, captures it as a source. Your file stays where it is. Yami keeps a frozen copy in `internal/wiki/originals/`, writes `wiki/sources/<name> (source).md`, which embeds the copy, and creates `internal/wiki/sessions/Ingest <name> <date>.md`, a session that links it. **Wiki: ingest a folder** does the same for every file in a folder you pick.
-2. **Wiki: run this session with Claude** or **with Codex**, with the session open, runs the ingest. The agent reads the originals in chunks, with one worker per chunk when its harness has subagents, matches the subjects against the wiki, drafts the topics, and applies them as one change plan with `wiki_change`. It cannot write the wiki any other way: the session is read-only. The loop checks the `Change applied`, `Sources absorbed`, and `Clean topics` promises after each turn.
+2. **Run this session with Claude** or **with Codex**, with the session open, runs the ingest. The agent reads the originals in chunks, with one worker per chunk when its harness has subagents, matches the subjects against the wiki, drafts the topics, and applies them as one change plan with `wiki_change`. It cannot write the wiki any other way: the session is read-only. The loop checks the `Change applied`, `Sources absorbed`, and `Clean topics` promises after each turn.
 
 Every change has a version before and after it. **Wiki: take a snapshot** saves the current state as a version when it is not one already. **Wiki: versions** lists them, newest first, each with its change; Enter opens the version's document, which names what changed. **Wiki: restore a version** writes a version back, as a new version, so nothing is lost. The module ledger, `internal/wiki/sessions.base`, has the versions and the changes as tables.
 
 ## Tests
 
-`npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the module install, the wiki commands, a journal publish and a checkout return, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, and a hello session. Your own Obsidian and vaults are not touched. Build the plugin first.
+- `npm test` runs the unit tests of the modules in Node, with `testYami`: no Obsidian, no harness.
+- `YAMI_LIVE_THREAD=1 npm run test:live` takes one thread from stub to closed with a real Claude Code, on a scratch repository: the skills, the tools, the reviewer and validator agents, and the loop. It takes some minutes.
+- `npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the module install, the commands, the wiki commands, a journal publish and a checkout return, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, a hello session, and a session stopped in the middle of a turn and resumed. Your own Obsidian and vaults are not touched. Build the plugin first.
 
 ## Build a release
 
@@ -85,4 +131,4 @@ Every change has a version before and after it. **Wiki: take a snapshot** saves 
 npm run build
 ```
 
-This command type-checks `src/` and writes a minified `main.js`. A release contains `main.js` and `manifest.json`.
+This command type-checks `src/` and writes a minified `main.js`. A release contains `main.js`, `manifest.json`, and `styles.css`.

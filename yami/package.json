@@ -2,7 +2,7 @@
   "name": "yami",
   "version": "0.1.0",
   "private": true,
-  "description": "Yami: the agent harnesses, the documents, the modules, and the Obsidian layer.",
+  "description": "Yami: build agent workflows on session documents in an Obsidian vault. The agent harnesses, the documents, the wiki, the session runtime, and the Obsidian layer.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,30 +27,6 @@
       "types": "./dist/document/index.d.ts",
       "default": "./dist/document/index.js"
     },
-    "./module": {
-      "types": "./dist/module/index.d.ts",
-      "default": "./dist/module/index.js"
-    },
-    "./modules/hello": {
-      "types": "./dist/modules/hello.d.ts",
-      "default": "./dist/modules/hello.js"
-    },
-    "./modules/wiki": {
-      "types": "./dist/modules/wiki.d.ts",
-      "default": "./dist/modules/wiki.js"
-    },
-    "./modules/threads": {
-      "types": "./dist/modules/threads/index.d.ts",
-      "default": "./dist/modules/threads/index.js"
-    },
-    "./modules/journals": {
-      "types": "./dist/modules/journals/index.d.ts",
-      "default": "./dist/modules/journals/index.js"
-    },
-    "./modules/librarian": {
-      "types": "./dist/modules/librarian/index.d.ts",
-      "default": "./dist/modules/librarian/index.js"
-    },
     "./wiki": {
       "types": "./dist/wiki/index.d.ts",
       "default": "./dist/wiki/index.js"
@@ -63,11 +39,23 @@
       "types": "./dist/obsidian/index.d.ts",
       "default": "./dist/obsidian/index.js"
     },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    },
+    "./esbuild": {
+      "types": "./dist/build/esbuild.d.ts",
+      "default": "./dist/build/esbuild.js"
+    },
+    "./markdown": {
+      "types": "./markdown.d.ts"
+    },
     "./obsidian/styles.css": "./src/obsidian/styles.css"
   },
   "files": [
     "dist",
-    "src/obsidian/styles.css"
+    "src/obsidian/styles.css",
+    "markdown.d.ts"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.core.json && tsc",
@@ -78,24 +66,25 @@
     "bench": "vitest run bench --disableConsoleIntercept"
   },
   "devDependencies": {
-    "@cfworker/json-schema": "^4.1.1",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.13",
     "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
     "graphology-types": "^0.24.8",
     "obsidian": "^1.14.4",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.4",
-    "yaml": "^2.9.1"
+    "vitest": "^5.0.4"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.300",
+    "@cfworker/json-schema": "^4.1.1",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "diff-match-patch-es": "^2.0.1",
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",
     "monkey-around": "^3.0.0",
     "y-protocols": "^1.0.7",
+    "yaml": "^2.9.1",
     "yjs": "^13.6.33",
     "zod": "^4.6.7"
   }

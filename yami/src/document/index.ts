@@ -33,4 +33,4 @@ export {
   type Schema,
   type SessionState,
 } from "./schema.js";
-export { moduleLedger, vaultLedger } from "./bases.js";
+export { moduleLedger, vaultLedger, type LedgerView } from "./bases.js";

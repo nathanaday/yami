@@ -1,287 +1,281 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runTool, setSkills, slashCommand } from "../../src/agent/index.js";
-import { FakeAgent } from "../fixtures/fake-agent.js";
-import type { Vault } from "../../src/document/index.js";
-import { captureSource, Wiki } from "../../src/wiki/index.js";
-import { wiki as wikiModule } from "../../src/modules/wiki.js";
-import { link, sectionText } from "../../src/document/index.js";
-import { FsVault } from "../fixtures/fs-vault.js";
-import { agent, createSession, enableModule, freeSessionName, moduleSkills, moduleTools, promise, runSession, skill, skillCommand } from "../../src/module/index.js";
-import { hello } from "../../src/modules/hello.js";
+import { readDocument, sectionText } from "../../src/document/index.js";
+import { skillCommand, Yami, YamiModule, type AgentTool, type Place } from "../../src/index.js";
+import { FsVault, ScriptedAgent, testYami, type TestYami } from "../../src/testing/index.js";
+import { GREETING_SKILL, Hello } from "../fixtures/hello.js";
 
-let root = "";
+let t: TestYami | undefined;
 afterEach(async () => {
-  if (root) await rm(root, { recursive: true, force: true });
+  await t?.dispose();
+  t = undefined;
 });
 
-async function fresh(name: string, module = hello) {
-  root = await mkdtemp(join(tmpdir(), "yami-module-"));
-  const vault = new FsVault(root);
-  await enableModule(vault, module);
-  const path = await createSession(vault, module, name);
-  return { vault, path };
+async function fresh(...modules: YamiModule[]) {
+  t = await testYami({ modules: modules.length ? modules : [new Hello()] });
+  return t;
 }
 
-const write = (vault: Vault, name: string) => () => vault.write(`greetings/${name}.md`, `Hello, ${name}`);
-
-describe("enableModule and createSession", () => {
-  it("installs the module's files, with links that carry full paths", async () => {
-    const { vault, path } = await fresh("x");
-    for (const file of ["Yami.base", "hello/sessions.base", "internal/hello/hello.md", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
+describe("a module's files", () => {
+  it("installs the ledgers, the module document, and its documents, with the ledger out of the sessions' way", async () => {
+    const { vault } = await fresh();
+    for (const file of ["Yami.base", "internal/hello/sessions.base", "internal/hello/hello.md", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
       expect(await vault.exists(file), file).toBe(true);
     }
-    const created = await vault.read(path);
-    expect(created).toContain('"[[internal/hello/skills/greeting/SKILL|greeting]]"');
-    expect(created).toContain('"[[internal/hello/policies/Always say hello|Always say hello]]"');
-    expect(created).toContain("greeting: Hello");
+    expect(await vault.exists("hello/sessions.base")).toBe(false);
+    expect(await vault.read("internal/hello/skills/greeting/SKILL.md")).toBe(GREETING_SKILL);
+    expect(await vault.read("internal/hello/promises/Greeting note.md")).toBe(
+      "---\ntype: promise\nmodule: hello\ncheck: exists\npath: greetings/{{session}}.md\n---\nCreate this note. Its content is one line: the greeting, addressed to the session by name.",
+    );
+    expect(await vault.read("internal/hello/hello.md")).toContain("[[internal/hello/sessions.base|Hello world sessions]]");
   });
 
   it("keeps edited documents and bases on a second enable", async () => {
-    const { vault } = await fresh("x");
+    const { vault, yami } = await fresh();
     await vault.write("internal/hello/policies/Always say hello.md", "---\ntype: policy\nmodule: hello\n---\nEdited by the user.\n");
-    await vault.write("hello/sessions.base", "views:\n  - type: table\n    name: Mine\n");
-    await enableModule(vault, hello);
+    await vault.write("internal/hello/sessions.base", "views:\n  - type: table\n    name: Mine\n");
+    await yami.enable();
     expect(await vault.read("internal/hello/policies/Always say hello.md")).toContain("Edited by the user.");
-    expect(await vault.read("hello/sessions.base")).toContain("Mine");
+    expect(await vault.read("internal/hello/sessions.base")).toContain("Mine");
   });
 
-  it("refuses a duplicate session name", async () => {
-    const { vault } = await fresh("x");
-    await expect(createSession(vault, hello, "x")).rejects.toThrow("exists");
+  it("puts the sessions and the ledger where the module says", async () => {
+    class Inner extends Hello {
+      readonly id = "inner";
+      readonly sessionsIn = "internal";
+    }
+    class Shown extends Hello {
+      readonly id = "shown";
+      readonly ledgerIn: Place = "folder";
+    }
+    class Quiet extends Hello {
+      readonly id = "quiet";
+      readonly sessionsIn = "none";
+    }
+    const quiet = new Quiet();
+    const inner = new Inner();
+    const { vault } = await fresh(inner, new Shown(), quiet);
+    expect((await inner.greet.create({ name: "x" })).path).toBe("internal/inner/sessions/x.md");
+    expect(await vault.read("internal/shown/shown.md")).toContain("[[shown/sessions.base|Hello world sessions]]");
+    expect(await vault.exists("shown/sessions.base")).toBe(true);
+    expect(await vault.exists("internal/quiet/sessions.base")).toBe(false);
+    expect(await vault.read("internal/quiet/quiet.md")).not.toContain("Sessions:");
+    await expect(quiet.greet.create()).rejects.toThrow("has no sessions");
   });
-});
-
-describe("moduleTools", () => {
-  it("serves the tools of every module in one set, named by module", async () => {
-    const { vault } = await fresh("tools");
-    const set = moduleTools({ vault, wiki: new Wiki(vault) }, [hello, { ...hello, id: "hello-two", name: "Two" }, { id: "none", name: "None" }]);
-    expect(set?.name).toBe("yami");
-    expect(set?.description).toContain("Hello world, Two");
-    expect(set?.tools.map((tool) => tool.name)).toEqual(["hello_greet_user", "hello_two_greet_user"]);
-    expect(await runTool(set!.tools[0]!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
-    expect(moduleTools({ vault, wiki: new Wiki(vault) }, [{ id: "none", name: "None" }])).toBeUndefined();
-  });
-
-  it("reaches the agent's sessions through its preferences", async () => {
-    const { vault, path } = await fresh("with-tools");
-    const agent = new FakeAgent([write(vault, "with-tools")]);
-    agent.setPreferences({ tools: moduleTools({ vault, wiki: new Wiki(vault) }, [hello]) });
-    await runSession(vault, agent, hello, path);
-    expect(agent.last!.options.tools?.tools.map((tool) => tool.name)).toEqual(["hello_greet_user"]);
-  });
-});
-
-describe("runSession", () => {
-  it("meets the promise on the second iteration and records both", async () => {
-    const { vault, path } = await fresh("second");
-    const agent = new FakeAgent([() => {}, write(vault, "second")]);
-    const result = await runSession(vault, agent, hello, path);
-    expect(result).toMatchObject({ state: "done", iterations: 2 });
-    const [first, second] = agent.last!.prompts;
-    expect(first).toContain("## Policies");
-    expect(first).toContain("## Promises");
-    expect(first).toContain("### greeting");
-    expect(first).toContain("- greeting: Hello");
-    expect(second).toMatch(/^Yami checked/);
-    expect(second).toContain("no file at greetings/second.md");
-    const doc = await vault.read(path);
-    expect(doc).toContain("iteration 1: 0 met, 1 unmet");
-    expect(doc).toContain("iteration 2: 1 met, 0 unmet");
-    expect(doc).toContain("- [x] [[internal/hello/promises/Greeting note|Greeting note]]");
-    expect(doc).toContain("state: done");
-    expect(doc).toContain('conversation: "[[conversations/hello second|hello second]]"');
-    expect(doc).toContain("\n\n## Deliverables\n");
-    const record = await vault.read(result.conversation);
-    expect(result.conversation).toBe("conversations/hello second.md");
-    expect(record).toMatch(/^---\ntype: conversation\nagent: claude\n/);
-    expect(record).toContain("session: fake-session");
-    expect(record).toContain('module: "[[hello/second|second]]"');
-    expect(record).toContain("> [!user]\n> You are running the Yami session");
-    expect(record).toContain("> [!user]\n> Yami checked the promises");
-    expect(record.match(/> \[!user\]/g)).toHaveLength(2);
-    expect(record.trim().endsWith("ok")).toBe(true);
-    expect(await vault.exists("internal/hello/logs/second.md")).toBe(false);
-  });
-
-  it("opens the conversation with the module's access setting, and keeps internal sessions under internal/", async () => {
-    const internal = { ...hello, id: "quiet", name: "Quiet", sessions: "internal" as const, access: "read-only" as const };
-    const { vault, path } = await fresh("hidden", internal);
-    expect(path).toBe("internal/quiet/sessions/hidden.md");
-    expect(await vault.exists("internal/quiet/sessions.base")).toBe(true);
-    expect(await vault.exists("quiet/sessions.base")).toBe(false);
-    const agent = new FakeAgent([]);
-    await runSession(vault, agent, internal, path, { maxIterations: 1 });
-    expect(agent.last!.options.access).toBe("read-only");
-    expect(await vault.read("conversations/quiet hidden.md")).toContain("access: read-only");
-  });
-
-  it("needs attention when the iterations run out", async () => {
-    const { vault, path } = await fresh("never");
-    const result = await runSession(vault, new FakeAgent([]), hello, path, { maxIterations: 2 });
-    expect(result).toMatchObject({ state: "needs-attention", iterations: 2 });
-    const doc = await vault.read(path);
-    expect(doc).toContain("state: needs-attention");
-    expect(doc).toContain('unmet:\n  - "[[internal/hello/promises/Greeting note|Greeting note]]"');
-  });
-
-  it("needs attention when a promise has no check", async () => {
-    const reviewed = { ...hello, id: "review", documents: [...hello.documents!.filter((d) => d.type !== "promise"), promise("Greeting note", {}, "No check.")] };
-    const { vault, path } = await fresh("manual", reviewed);
-    const result = await runSession(vault, new FakeAgent([]), reviewed, path);
-    expect(result).toMatchObject({ state: "needs-attention", iterations: 1 });
-    expect(await vault.read(path)).toContain("1 for review");
-  });
-
-  it("fails when the harness fails", async () => {
-    const { vault, path } = await fresh("broken");
-    const result = await runSession(vault, new FakeAgent([() => ({ status: "failed", error: "boom" })]), hello, path);
-    expect(result.state).toBe("failed");
-    const doc = await vault.read(path);
-    expect(doc).toContain("state: failed");
-    expect(doc).toContain("turn failed: boom");
-  });
-
-  it("continues the iteration count on a later run", async () => {
-    const { vault, path } = await fresh("resume");
-    await runSession(vault, new FakeAgent([]), hello, path, { maxIterations: 1 });
-    const result = await runSession(vault, new FakeAgent([write(vault, "resume")]), hello, path, { maxIterations: 1 });
-    expect(result.state).toBe("done");
-    const doc = await vault.read(path);
-    expect(doc).toContain("iteration: 2");
-    expect(doc).toContain("iteration 2:");
-  });
-});
-
-describe("module skills", () => {
-  const withFiles = { ...hello, documents: [...(hello.documents ?? []).filter((doc) => doc.type !== "skill"), skill("greeting", "How to greet by name.", "# Greeting\n\nRead tone.md first.", { "tone.md": "Warm and short." })] };
 
   it("installs a skill's files beside its SKILL.md, and keeps edited ones", async () => {
-    const { vault } = await fresh("files", withFiles);
-    expect(await vault.read("internal/hello/skills/greeting/tone.md")).toBe("Warm and short.");
-    await vault.write("internal/hello/skills/greeting/tone.md", "Edited.");
-    await enableModule(vault, withFiles);
-    expect(await vault.read("internal/hello/skills/greeting/tone.md")).toBe("Edited.");
+    class Files extends Hello {
+      readonly id = "files";
+      readonly toned = this.skill({ name: "toned", description: "Greets in a tone.", body: "Read tone.md first.", files: { "tone.md": "Warm and short." } });
+    }
+    const { vault, yami } = await fresh(new Files());
+    expect(await vault.read("internal/files/skills/toned/tone.md")).toBe("Warm and short.");
+    expect(await vault.read("internal/files/skills/toned/SKILL.md")).toBe("---\nname: toned\ndescription: Greets in a tone.\n---\nRead tone.md first.");
+    await vault.write("internal/files/skills/toned/tone.md", "Edited.");
+    await yami.enable();
+    expect(await vault.read("internal/files/skills/toned/tone.md")).toBe("Edited.");
+  });
+
+  it("installs an agent in its harness's own form, from its parts or from markdown", async () => {
+    class Agents extends Hello {
+      readonly id = "agents";
+      readonly checker = this.agent({ name: "checker", description: "Checks the greeting. Edits nothing.", tools: ["Read", "Grep"], body: "Read the greeting note." });
+      readonly reviewer = this.agent("---\nname: reviewer\ndescription: Reviews.\ntools: Read\n---\nReview it.\n");
+    }
+    const { vault } = await fresh(new Agents());
+    expect(await vault.read("internal/agents/agents/checker.md")).toBe("---\nname: checker\ndescription: Checks the greeting. Edits nothing.\ntools: Read, Grep\n---\nRead the greeting note.");
+    expect(await vault.read("internal/agents/agents/reviewer.md")).toBe("---\nname: reviewer\ndescription: Reviews.\ntools: Read\n---\nReview it.\n");
+  });
+
+  it("refuses a skill with no name, a document or a template twice, and an id a folder cannot take", () => {
+    expect(
+      () =>
+        new (class extends Hello {
+          readonly nameless = this.skill("# No frontmatter\n");
+        })(),
+    ).toThrow("has no name in its frontmatter");
+    expect(
+      () =>
+        new (class extends Hello {
+          readonly again = this.policy("Always say hello", "x");
+        })(),
+    ).toThrow("The policy Always say hello is in the module twice.");
+    expect(
+      () =>
+        new (class extends Hello {
+          readonly again = this.template({ id: "greet", name: "Again" });
+        })(),
+    ).toThrow("The template greet is in the module twice.");
+    expect(
+      () =>
+        new (class extends Hello {
+          readonly bad = this.template({ id: "Not an id", name: "Bad" });
+        })(),
+    ).toThrow("cannot be a template id");
+    const vault = new FsVault("/tmp/none");
+    expect(
+      () =>
+        new Yami({
+          vault,
+          modules: [
+            new (class extends Hello {
+              readonly id = "Bad Id";
+            })(),
+          ],
+        }),
+    ).toThrow("cannot be a module id");
+    expect(() => new Yami({ vault, modules: [new Hello(), new Hello()] })).toThrow("Two modules have the id hello.");
+    expect(
+      () =>
+        new Yami({
+          vault,
+          modules: [
+            new (class extends Hello {
+              readonly id = "wiki";
+            })(),
+          ],
+        }),
+    ).toThrow("Two modules have the id wiki.");
+  });
+
+  it("knows the vault only once a Yami has it, and belongs to one Yami", () => {
+    const hello = new Hello();
+    expect(() => hello.vault).toThrow("The hello module is not added to a Yami yet.");
+    const vault = new FsVault("/tmp/none");
+    new Yami({ vault, modules: [hello] });
+    expect(hello.vault).toBe(vault);
+    expect(() => new Yami({ vault, modules: [hello] })).toThrow("already added to another Yami");
+  });
+});
+
+describe("creating a session from a template", () => {
+  it("links the template's documents by full path, with the module's fields, the template, and a body to fill in", async () => {
+    class Asked extends Hello {
+      readonly id = "asked";
+      readonly ask = this.template({ id: "ask", name: "Question", fields: { greeting: "Hi" }, body: "## Question\n\nWrite it here.", promises: [this.note] });
+    }
+    const asked = new Asked();
+    const { vault } = await fresh(asked);
+    const { path } = await asked.greet.create({ name: "x" });
+    const created = await vault.read(path);
+    expect(created).toContain('"[[internal/asked/skills/greeting/SKILL|greeting]]"');
+    expect(created).toContain('"[[internal/asked/policies/Always say hello|Always say hello]]"');
+    expect(created).toContain("greeting: Hello");
+    expect(created).toContain("template: greet");
+    expect(created).toContain("# x\n\n## Deliverables\n- [ ] [[internal/asked/promises/Greeting note|Greeting note]]\n\n## Progress\n");
+    const asking = await vault.read((await asked.ask.create({ name: "y", fields: { greeting: "Hey" } })).path);
+    expect(asking).toContain("greeting: Hey");
+    expect(asking).toContain("template: ask");
+    expect(asking).toContain("# y\n\n## Question\n\nWrite it here.\n\n## Deliverables\n");
+    expect((await readDocument(vault, `asked/y.md`)).properties.skills).toEqual([]);
+  });
+
+  it("names a session after its template and the time, makes any name safe, and numbers a name in use", async () => {
+    const hello = new Hello();
+    await fresh(hello);
+    expect((await hello.greet.create()).path).toMatch(/^hello\/Greeting \d{4}-\d\d-\d\d \d\d-\d\d\.md$/);
+    expect((await hello.greet.create({ name: "C# notes: week [1]" })).path).toBe("hello/C notes week 1.md");
+    expect((await hello.greet.create({ name: "C# notes: week [1]" })).path).toBe("hello/C notes week 1 (2).md");
+    expect((await hello.greet.create({ name: "..." })).path).toBe("hello/Session.md");
+  });
+
+  it("refuses an exact name that is in use or that cannot name one file", async () => {
+    const hello = new Hello();
+    await fresh(hello);
+    await hello.greet.create({ name: "x", exact: true });
+    await expect(hello.greet.create({ name: "x", exact: true })).rejects.toThrow("A session named x exists.");
+    for (const name of ["train/val split", "a:b", "x#y", " padded", ".hidden", "", "[x]", "a|b", "a^b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a\\b", "Fix\nparser", "tab\there"]) {
+      await expect(hello.greet.create({ name, exact: true }), JSON.stringify(name)).rejects.toThrow("cannot name a file");
+    }
+    expect((await hello.greet.create({ name: "Divide by zero, safely (v2)", exact: true })).path).toBe("hello/Divide by zero, safely (v2).md");
+  });
+
+  it("links a document of another module on top of the template's, once", async () => {
+    class Other extends Hello {
+      readonly id = "other";
+      readonly extra = this.policy("Be brief", "One line.");
+    }
+    const hello = new Hello();
+    const other = new Other();
+    const { vault } = await fresh(hello, other);
+    const { path } = await hello.greet.create({ name: "x", add: [other.extra, hello.polite] });
+    expect((await readDocument(vault, path)).properties.policies).toEqual(["[[internal/hello/policies/Always say hello|Always say hello]]", "[[internal/other/policies/Be brief|Be brief]]"]);
+  });
+
+  it("refuses fields that the module's schema does not take", async () => {
+    const hello = new Hello();
+    await fresh(hello);
+    await expect(hello.greet.create({ fields: { greeting: 3 } })).rejects.toThrow("greeting must be text");
+  });
+
+  it("lists the session documents of the vault, of a module, or of a template", async () => {
+    class Two extends Hello {
+      readonly id = "two";
+      readonly other = this.template({ id: "other", name: "Other" });
+    }
+    const hello = new Hello();
+    const two = new Two();
+    const { yami, vault } = await fresh(hello, two);
+    await hello.greet.create({ name: "a" });
+    await two.greet.create({ name: "b" });
+    await two.other.create({ name: "c" });
+    await vault.write("two/c/notes.md", "---\ntype: session\nmodule: two\n---\nA note in a session's folder.\n");
+    await vault.write("two/plain.md", "No properties.\n");
+    const paths = async (of?: Parameters<typeof yami.sessions>[0]) => (await yami.sessions(of)).map((s) => s.path);
+    expect(await paths()).toEqual(["two/c.md", "two/b.md", "hello/a.md"]);
+    expect(await paths(two)).toEqual(["two/c.md", "two/b.md"]);
+    expect(await paths(two.greet)).toEqual(["two/b.md"]);
+    expect(yami.session("two/b.md")).toBe(yami.session("two/b.md"));
+  });
+});
+
+describe("the tools and skills of the modules", () => {
+  it("serves the tools of every module in one set, named by module, and gives it to the agents with the vault and the skills", async () => {
+    class Two extends Hello {
+      readonly id = "hello-two";
+      readonly name = "Two";
+    }
+    class None extends YamiModule {
+      readonly id = "none";
+      readonly name = "None";
+    }
+    const { yami, agent, root } = await fresh(new Hello(), new Two(), new None());
+    const set = yami.tools()!;
+    expect(set.name).toBe("yami");
+    expect(set.description).toBe("Tools of the Yami modules in this vault: Wiki, Hello world, Two.");
+    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_chunks", "wiki_change", "hello_greet_user", "hello_two_greet_user"]);
+    expect(await runTool(set.tools[6]!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
+    expect(agent.preferences.cwd).toBe(root);
+    expect(agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(set.tools.map((tool) => tool.name));
+    expect(agent.preferences.skills).toEqual([`${root}/internal/wiki`, `${root}/internal/hello`, `${root}/internal/hello-two`]);
   });
 
   it("names each module's internal folder as a skill set, and each skill by /<module>:<skill>", async () => {
-    const { vault } = await fresh("sets");
-    expect(moduleSkills(vault, [hello, { id: "plain", name: "Plain" }])).toEqual([`${vault.root}/internal/hello`]);
+    const { root } = await fresh();
     expect(skillCommand("internal/wiki/skills/ingest/SKILL.md")).toEqual({ command: "wiki:ingest", root: "internal/wiki" });
     expect(skillCommand("notes/SKILL.md")).toBeUndefined();
-    expect(setSkills([`${vault.root}/internal/hello`])).toEqual([
-      { command: "hello:greeting", set: "hello", name: "greeting", path: `${vault.root}/internal/hello/skills/greeting/SKILL.md`, description: "How to greet a person or a session by name." },
+    expect(setSkills([`${root}/internal/hello`])).toEqual([
+      { command: "hello:greeting", set: "hello", name: "greeting", path: `${root}/internal/hello/skills/greeting/SKILL.md`, description: "How to greet a person or a session by name." },
     ]);
     expect(slashCommand("/wiki:ingest the context\nwith lines")).toEqual({ command: "wiki:ingest", rest: "the context\nwith lines" });
     expect(slashCommand("/hello:greeting")).toEqual({ command: "hello:greeting", rest: "" });
     expect(slashCommand("no command")).toBeUndefined();
   });
 
-  it("invokes a session's skill by command when the agent has the module's skill set, and inlines it otherwise", async () => {
-    const { vault, path } = await fresh("invoked");
-    const agent = new FakeAgent([write(vault, "invoked")]);
-    agent.setPreferences({ skills: moduleSkills(vault, [hello]) });
-    await runSession(vault, agent, hello, path);
-    const [first] = agent.last!.prompts;
-    expect(first!.startsWith("/hello:greeting You are running the Yami session")).toBe(true);
-    expect(first).toContain("- `hello:greeting`: How to greet a person or a session by name. Its folder: internal/hello/skills/greeting/");
-    expect(first).not.toContain("Keep it to one line");
-
-    const plain = await createSession(vault, hello, "inlined");
-    const other = new FakeAgent([write(vault, "inlined")]);
-    await runSession(vault, other, hello, plain);
-    const [inlined] = other.last!.prompts;
-    expect(inlined!.startsWith("You are running")).toBe(true);
-    expect(inlined).toContain("## Skills\n\n### greeting\n\n# Greeting");
-    expect(inlined).toContain("Keep it to one line");
-  });
-});
-
-describe("a wiki session end to end", () => {
-  it("ends done after the agent applies its change with wiki_change, and a topic may link the session", async () => {
-    root = await mkdtemp(join(tmpdir(), "yami-wiki-session-"));
-    const vault = new FsVault(root);
-    await enableModule(vault, wikiModule);
-    await vault.write("Notes/Darts.md", "# Darts\n\nA dart takes in fullness at the bust.\n");
-    const source = await captureSource(vault, "Notes/Darts.md");
-    const path = await createSession(vault, wikiModule, "Ingest darts", { sources: [link(source)] });
-    const wiki = new Wiki(vault);
-    const agent = new FakeAgent([
-      async () => {
-        const change = agent.last!.options.tools!.tools.find((tool) => tool.name === "wiki_change")!;
-        const result = await runTool(
-          change,
-          {
-            title: "Ingest darts",
-            session: path,
-            writes: [
-              {
-                op: "create",
-                path: "wiki/topics/Dart.md",
-                properties: { description: "A fold sewn into fabric to shape it.", sources: [link(source)] },
-                body: `## Definition\n\nA dart takes in fullness ([[${source.slice(0, -3)}|Darts]]). Drafted in [[${path.slice(0, -3)}|its session]].`,
-              },
-              { op: "modify", path: source, properties: { description: "Notes on darts.", status: "absorbed" }, body: "[[Notes/Darts|Darts]]\n\n## Summary\n\nDarts.\n" },
-            ],
-          },
-          new AbortController().signal,
-        );
-        if (result.isError) throw new Error(result.text);
-      },
-    ]);
-    agent.setPreferences({ tools: moduleTools({ vault, wiki }, [wikiModule]) });
-    const result = await runSession(vault, agent, wikiModule, path, { wiki, maxIterations: 2 });
-    const doc = await vault.read(path);
-    expect(result, doc).toMatchObject({ state: "done", iterations: 1 });
-    expect(doc).toContain("iteration 1: 3 met, 0 unmet");
-  });
-});
-
-describe("module documents, checks, and sessions", () => {
-  const custom = {
-    ...hello,
-    id: "custom",
-    name: "Custom",
-    documents: [...(hello.documents ?? []), agent("checker", "Checks the greeting. Edits nothing.", ["Read", "Grep"], "Read the greeting note.")],
-    checks: { exists: async () => ({ status: "met" as const, detail: "the module's own check" }) },
-  };
-
-  it("installs an agent in its harness's own form, under the module's agents folder", async () => {
-    const { vault } = await fresh("agents", custom);
-    const text = await vault.read("internal/custom/agents/checker.md");
-    expect(text).toBe("---\nname: checker\ndescription: Checks the greeting. Edits nothing.\ntools: Read, Grep\n---\nRead the greeting note.");
-  });
-
-  it("runs a module's own check before the core check of the same name", async () => {
-    const { vault, path } = await fresh("own", custom);
-    const result = await runSession(vault, new FakeAgent([]), custom, path, { maxIterations: 1 });
-    expect(result.state).toBe("done");
-    expect(await vault.read(path)).toContain("the module's own check");
-  });
-
-  it("links the module ledger from the module document, at its real path", async () => {
-    const { vault } = await fresh("ledger");
-    expect(await vault.read("internal/hello/hello.md")).toContain("[[hello/sessions.base|Hello world sessions]]");
-    const internal = { ...hello, id: "inner", name: "Inner", sessions: "internal" as const };
-    await enableModule(vault, internal);
-    expect(await vault.read("internal/inner/inner.md")).toContain("[[internal/inner/sessions.base|Inner sessions]]");
-  });
-
-  it("refuses a session name that cannot name one file", async () => {
-    const { vault } = await fresh("names");
-    for (const name of ["train/val split", "a:b", "x#y", " padded", ".hidden", "", "[x]", "a|b", "a^b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a\\b", "Fix\nparser", "tab\there"]) {
-      await expect(createSession(vault, hello, name), JSON.stringify(name)).rejects.toThrow("cannot name a file");
+  it("keeps a module's actions, each id once", () => {
+    class Acting extends Hello {
+      readonly publish = this.action({ id: "publish", name: "Publish", run: async () => "done" });
+      readonly pick = this.action({ id: "pick", name: "Pick one", choose: { items: async () => [1, 2], label: (n) => `${n}`, placeholder: "A number" }, run: async (n) => `${n * 2}` });
+      readonly back = this.action({ id: "back", name: "Return", on: this.greet, when: (p) => p.state === "done", run: async (s) => s.path });
     }
-    await expect(createSession(vault, hello, "Divide by zero, safely (v2)")).resolves.toBe("hello/Divide by zero, safely (v2).md");
-  });
-
-  it("makes a free session name from any text: no character a file cannot take, and a number when it is in use", async () => {
-    const { vault } = await fresh("names");
-    expect(await freeSessionName(vault, hello, "C# notes: week [1]")).toBe("C notes week 1");
-    expect(await freeSessionName(vault, hello, "names")).toBe("names (2)");
-    expect(await freeSessionName(vault, hello, "...")).toBe("Session");
+    const acting = new Acting();
+    expect(acting.actions.map((a) => a.id)).toEqual(["publish", "pick", "back"]);
+    expect(
+      () =>
+        new (class extends Acting {
+          readonly again = this.action({ id: "publish", name: "Again", run: async () => undefined });
+        })(),
+    ).toThrow("The action publish is in the module twice.");
   });
 
   it("reads a section's text, trimmed, and nothing for a missing one", () => {
@@ -289,5 +283,16 @@ describe("module documents, checks, and sessions", () => {
     expect(sectionText(body, "Plan")).toBe("- a\n- b");
     expect(sectionText(body, "Notes")).toBe("n");
     expect(sectionText(body, "Missing")).toBe("");
+  });
+
+  it("follows the script of a scripted agent across its sessions", async () => {
+    const agent = new ScriptedAgent([() => ({ text: "one" })]).queue(() => ({ text: "two" }));
+    const first = await agent.startSession();
+    expect((await first.send("a")).text).toBe("one");
+    const second = await agent.startSession({ resume: first.id });
+    expect(second.id).toBe(first.id);
+    expect((await second.send("b")).text).toBe("two");
+    expect((await second.send("c")).text).toBe("ok");
+    expect(agent.started.map((s) => s.prompts)).toEqual([["a"], ["b", "c"]]);
   });
 });
