@@ -4,9 +4,12 @@ import type { Agent } from "yami/agent";
 import { ClaudeAgent } from "yami/agent/claude";
 import { CodexAgent } from "yami/agent/codex";
 import { link, timestamp } from "yami/document";
-import { createSession, enableModule, layout, moduleSkills, moduleTools, runSession, type Module } from "yami/module";
+import { createSession, enableModule, freeSessionName, layout, moduleSkills, moduleTools, runSession, type Module } from "yami/module";
 import { hello } from "yami/modules/hello";
-import { SOURCES, wiki as wikiModule } from "yami/modules/wiki";
+import { journals, publish, volumes } from "yami/modules/journals";
+import { librarian, returnCheckout } from "yami/modules/librarian";
+import { threads } from "yami/modules/threads";
+import { wiki as wikiModule } from "yami/modules/wiki";
 import { captureSource, captureSources, Wiki } from "yami/wiki";
 import {
   type CollabHub,
@@ -29,7 +32,7 @@ import {
   WikiSearchModal,
 } from "yami/obsidian";
 
-const MODULES = [hello, wikiModule];
+const MODULES = [hello, wikiModule, threads, librarian, journals];
 const CONVERSATION_FOLDER = "conversations";
 const IDLE_MINUTES = 15;
 const COLORS = { claude: "#d97757", codex: "#4f8cf7" };
@@ -171,7 +174,38 @@ export default class YamiPlugin extends Plugin {
         ),
     });
     this.addWikiCommands();
-    for (const module of MODULES) {
+    this.addCommand({
+      id: "journals-publish",
+      name: "Journals: publish a volume",
+      callback: () =>
+        this.notify(
+          volumes(this.vault).then(async (list) => {
+            if (!list.length) return "No volume: a volume is a folder directly under journals/.";
+            const ordered = [...list].sort((a, b) => Number(b.unpublished > 0) - Number(a.unpublished > 0));
+            const picked = await pickOne(this.app, ordered, (v) => `${v.name} · ${v.unpublished ? `${v.unpublished} of ${v.notes} notes to publish` : "nothing new"}`, "The volume to publish");
+            if (!picked) return "";
+            const edition = await publish(this.vault, picked.volume);
+            await this.open(edition.session);
+            return `Published ${picked.name}: ${edition.sources.length} source(s). Run the edition's session to absorb them.`;
+          }),
+        ),
+    });
+    this.addCommand({
+      id: "librarian-return",
+      name: "Librarian: return this checkout",
+      checkCallback: (checking) => {
+        const file = this.app.workspace.getActiveFile();
+        const status = file && this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (!file || status?.module !== librarian.id || status?.status !== "out") return false;
+        if (!checking)
+          this.notify(
+            returnCheckout(this.vault, this.wiki, file.path).then((result) => result.summary.replace(/^- /gm, "").replace(/\[\[[^\]|]*\|([^\]]*)\]\]/g, "$1")),
+          );
+        return true;
+      },
+    });
+    // A session runs only when its module gives it promises to meet.
+    for (const module of MODULES.filter((m) => m.sessions !== "none" && m.defaults?.promises?.length)) {
       for (const [name, agent] of [["Claude", () => this.claude], ["Codex", () => this.codex]] as const) {
         this.addCommand({
           id: `${module.id}-run-${name.toLowerCase()}`,
@@ -342,10 +376,10 @@ export default class YamiPlugin extends Plugin {
 
   /** Writes the source notes of the files, or of every file in a folder, and an ingest session that links them. */
   private async newIngestSession(paths: string[], folder = false): Promise<string> {
-    const sources = folder ? await captureSources(this.vault, paths[0]!, SOURCES) : await Promise.all(paths.map((file) => captureSource(this.vault, file, SOURCES)));
+    const sources = folder ? await captureSources(this.vault, paths[0]!) : [await captureSource(this.vault, paths[0]!)];
     const first = sources[0]!;
     const name = sources.length === 1 ? first.slice(first.lastIndexOf("/") + 1, -3).replace(/ \(source( \d+)?\)$/, "") : `${paths[0]!.split("/").pop()} (${sources.length} files)`;
-    const path = await createSession(this.vault, wikiModule, `Ingest ${name} ${timestamp().slice(0, 10)}`, { sources: sources.map(link) });
+    const path = await createSession(this.vault, wikiModule, await freeSessionName(this.vault, wikiModule, `Ingest ${name} ${timestamp().slice(0, 10)}`), { sources: sources.map(link) });
     await this.open(path);
     return `Created ${path} with ${sources.length} source(s).`;
   }

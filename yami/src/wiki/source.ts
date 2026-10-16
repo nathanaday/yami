@@ -7,21 +7,60 @@ import type { Wiki } from "./wiki.js";
 /** How many hex characters of the content hash name a copy in the originals folder. */
 const HASH_NAME = 16;
 
+/** Where each file's content stands among the sources: built once, and kept current as captures add to it. */
+export interface Sources {
+  folder: string;
+  /** The latest source captured from each file, by the target of its `from` link, with that source's content hash. */
+  latest: Map<string, { path: string; sha256: string }>;
+  /** A source for each content hash. */
+  byHash: Map<string, string>;
+}
+
+/** Reads the sources of a folder once, for any number of captures. */
+export async function readSources(vault: Vault, folder = SOURCES): Promise<Sources> {
+  const out: Sources = { folder: folder.replace(/\/$/, ""), latest: new Map(), byHash: new Map() };
+  const order = (path: string) => Number(path.match(/\(source (\d+)\)\.md$/)?.[1] ?? 1);
+  const all: { path: string; from: string; sha256: string; created: string }[] = [];
+  for (const path of await vault.list(out.folder)) {
+    const p = (await readDocument(vault, path)).properties;
+    if (typeof p.sha256 !== "string") continue;
+    all.push({ path, from: fromTarget(String(p.from ?? "")), sha256: p.sha256, created: String(p.created ?? "") });
+  }
+  // Oldest first, so a later capture of a file replaces an earlier one; captures in one second go by their number.
+  all.sort((a, b) => (a.created < b.created ? -1 : a.created > b.created ? 1 : order(a.path) - order(b.path)));
+  for (const source of all) {
+    if (source.from) out.latest.set(source.from, { path: source.path, sha256: source.sha256 });
+    if (!out.byHash.has(source.sha256)) out.byHash.set(source.sha256, source.path);
+  }
+  return out;
+}
+
+/**
+ * The source that holds a file's content already, or nothing when the file needs a new one. A file
+ * that has sources is compared with its latest: an edit back to an older text is still a change. A
+ * file with no source of its own shares a source with any file of the same content.
+ */
+export function sourceOf(sources: Sources, file: string, sha256: string): string | undefined {
+  const latest = sources.latest.get(fromKey(file));
+  if (latest) return latest.sha256 === sha256 ? latest.path : undefined;
+  return sources.byHash.get(sha256);
+}
+
 /**
  * Captures a file of the vault as a source. The file stays where it is. Yami copies it into
  * `internal/wiki/originals/`, named by its content hash, and writes the source note
  * `<name> (source).md`, which embeds the copy and links the file in `from`. The copy is what the
  * wiki reads and cites, so a later edit of the file does not change what a source said; and the
  * source note never shares a name with the file, so a link by name is never ambiguous.
- * A file whose content a source holds already returns that source. Returns the note's path.
+ * Returns the note's path: a new one, or the source that holds the file's content already (`sourceOf`).
  */
-export async function captureSource(vault: Vault, file: string, folder = SOURCES): Promise<string> {
+export async function captureSource(vault: Vault, file: string, sources?: Sources): Promise<string> {
   if (!(await vault.exists(file))) throw new Error(`No file at ${file}.`);
   if (isWikiFile(file)) throw new Error(`${file} is part of the wiki itself; capture a file from elsewhere in the vault.`);
+  sources ??= await readSources(vault);
   const data = await vault.readBinary(file);
   const sha256 = await hashBytes(data);
-  const sources = folder.replace(/\/$/, "");
-  const existing = await sourceWithHash(vault, sources, sha256);
+  const existing = sourceOf(sources, file, sha256);
   if (existing) return existing;
   const name = file.slice(file.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
@@ -29,8 +68,8 @@ export async function captureSource(vault: Vault, file: string, folder = SOURCES
   const stem = dot > 0 ? name.slice(0, dot) : name;
   const copy = `${ORIGINALS}/${sha256.slice(0, HASH_NAME)}${extension}`;
   if (!(await vault.exists(copy))) await vault.writeBinary(copy, data);
-  let path = `${sources}/${stem} (source).md`;
-  for (let n = 2; await vault.exists(path); n++) path = `${sources}/${stem} (source ${n}).md`;
+  let path = `${sources.folder}/${stem} (source).md`;
+  for (let n = 2; await vault.exists(path); n++) path = `${sources.folder}/${stem} (source ${n}).md`;
   await writeDocument(vault, {
     path,
     properties: {
@@ -45,32 +84,37 @@ export async function captureSource(vault: Vault, file: string, folder = SOURCES
     },
     body: `![[${copy}]]\n\n## Summary\n\n## Structure\n\n## Notes\n`,
   });
+  sources.latest.set(fromKey(file), { path, sha256 });
+  if (!sources.byHash.has(sha256)) sources.byHash.set(sha256, path);
   return path;
 }
 
 /** Captures every file of a folder and its subfolders. Files of the wiki itself are skipped. Returns each source once. */
-export async function captureSources(vault: Vault, folder: string, sourcesFolder = SOURCES): Promise<string[]> {
+export async function captureSources(vault: Vault, folder: string): Promise<string[]> {
   const files = (await vault.files(folder.replace(/\/$/, ""))).filter((file) => !isWikiFile(file));
   if (!files.length) throw new Error(`No files under ${folder}.`);
+  const sources = await readSources(vault);
   const out: string[] = [];
   for (const file of files) {
-    const path = await captureSource(vault, file, sourcesFolder);
+    const path = await captureSource(vault, file, sources);
     if (!out.includes(path)) out.push(path);
   }
   return out;
 }
 
+/** The target of a `from` link that code wrote: the text before the alias. It holds no heading, so a "#" in it is part of the path. */
+function fromTarget(from: string): string {
+  return from.replace(/^\[\[|\]\]$/g, "").split("|")[0]!.trim();
+}
+
+/** How a source's `from` link names its file: a note by its path without `.md`, any other file with its extension. */
+function fromKey(file: string): string {
+  return file.endsWith(".md") ? file.slice(0, -3) : file;
+}
+
 /** The knowledge base and what the wiki keeps for itself: nothing there is a source to capture. */
 function isWikiFile(path: string): boolean {
   return path.startsWith(`${WIKI}/`) || path.startsWith(`${WIKI_INTERNAL}/`);
-}
-
-/** The source note whose captured content has this hash. */
-async function sourceWithHash(vault: Vault, folder: string, sha256: string): Promise<string | undefined> {
-  for (const path of await vault.list(folder)) {
-    if ((await readDocument(vault, path)).properties.sha256 === sha256) return path;
-  }
-  return undefined;
 }
 
 export async function hashBytes(data: Uint8Array): Promise<string> {

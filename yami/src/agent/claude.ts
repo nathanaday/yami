@@ -488,6 +488,8 @@ export class ClaudeSession extends BaseSession {
     if (appTool) return appTool.title?.(input as never) ?? appTool.name;
     const fields = (input ?? {}) as Record<string, unknown>;
     if (name === "AskUserQuestion") return "Asked you questions";
+    // A subagent's title names its type, so the record shows which agent did the work.
+    if (name === "Agent" && typeof fields.subagent_type === "string") return `Agent ${fields.subagent_type}: ${String(fields.description ?? "")}`.trim();
     if (typeof fields.file_path === "string") return `${name} ${this.showPath(fields.file_path)}`;
     const subject = fields.command ?? fields.pattern ?? fields.url ?? fields.description;
     return typeof subject === "string" ? `${name} ${subject}` : name;

@@ -1,0 +1,69 @@
+/**
+ * One thread, from stub to closed, with a real Claude Code: the threads skills, tools, reviewer and
+ * validator agents, and the loop, on a scratch repository outside the vault. It takes some minutes and
+ * costs a real run, so it runs only on request:
+ *
+ *   YAMI_LIVE_THREAD=1 npx vitest run test/live/thread.test.ts
+ */
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { ClaudeAgent } from "../../src/agent/claude.js";
+import { FileConversations } from "../../src/conversation/index.js";
+import { readDocument } from "../../src/document/index.js";
+import { enableModule, moduleSkills, moduleTools, runSession } from "../../src/module/index.js";
+import { threads } from "../../src/modules/threads/index.js";
+import { stub } from "../../src/modules/threads/ops.js";
+import { parse, phase } from "../../src/modules/threads/thread.js";
+import { wiki as wikiModule } from "../../src/modules/wiki.js";
+import { Wiki } from "../../src/wiki/index.js";
+import { FsVault } from "../fixtures/fs-vault.js";
+
+describe.runIf(process.env.YAMI_LIVE_THREAD)("a thread with a real agent", () => {
+  it("goes from stub to closed: spec, review, plan, commits, a fresh validator, close", { timeout: 1_800_000 }, async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "yami-thread-"));
+    const repo = path.join(root, "calc");
+    mkdirSync(repo);
+    writeFileSync(path.join(repo, "calc.js"), "export function add(a, b) {\n  return a + b;\n}\n");
+    writeFileSync(path.join(repo, "calc.test.js"), 'import { test } from "node:test";\nimport assert from "node:assert";\nimport { add } from "./calc.js";\n\ntest("add", () => assert.equal(add(2, 3), 5));\n');
+    writeFileSync(path.join(repo, "package.json"), '{ "type": "module", "scripts": { "test": "node --test" } }\n');
+    writeFileSync(path.join(repo, "CLAUDE.md"), "Run the tests with `npm test`. Keep each function small.\n");
+    const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+    git("init", "-q");
+    git("-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "start");
+    git("add", ".");
+    git("-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add");
+
+    const vault = new FsVault(path.join(root, "vault"));
+    mkdirSync(vault.root);
+    for (const module of [wikiModule, threads]) await enableModule(vault, module);
+    const wiki = new Wiki(vault);
+    await stub(vault, threads, {
+      title: "Divide",
+      idea: "calc needs a divide(a, b) function that throws an error when b is zero.",
+      description: "Add divide to calc.js, with tests.",
+      context: `The repository is ${repo}. calc.js holds add; calc.test.js tests it with node --test (npm test).`,
+      repositories: [repo],
+    });
+
+    const agent = new ClaudeAgent({ preferences: { cwd: vault.root, effort: "low", tools: moduleTools({ vault, wiki }, [wikiModule, threads]), skills: moduleSkills(vault, [wikiModule, threads]) } });
+    // This test is the user: it allows each request, such as a commit in the scratch repository.
+    const result = await runSession(vault, agent, threads, "threads/Divide.md", { wiki, maxIterations: 4, conversations: new FileConversations(vault, async () => "allow") });
+    await agent.closeAll();
+
+    const t = parse(await readDocument(vault, "threads/Divide.md"));
+    const record = await vault.read(result.conversation);
+    console.log(`state ${result.state} after ${result.iterations} iteration(s); phase ${phase(t)}; ${t.requirements.length} requirements, ${t.plan.length} tasks, ${t.rounds.length} rounds`);
+    expect(result.state).toBe("done");
+    expect(phase(t)).toBe("closed");
+    expect(t.requirements.length).toBeGreaterThan(0);
+    expect(t.plan.every((task) => task.state !== "open")).toBe(true);
+    expect(t.rounds.at(-1)!.verdict).toBe("pass");
+    expect(git("log", "--oneline").split("\n").length).toBeGreaterThan(2);
+    expect(execFileSync("npm", ["test"], { cwd: repo, encoding: "utf8" })).toContain("pass");
+    // The work was validated by the read-only agent of the module, not by the agent that did it.
+    expect(record).toContain("threads:validator");
+  });
+});

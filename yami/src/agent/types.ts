@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 export type Harness = "claude" | "codex";
 
@@ -83,14 +83,29 @@ export function defineTool<Shape extends z.ZodRawShape>(tool: AgentTool<Shape>):
   return tool;
 }
 
-/** Runs an app tool. A thrown error becomes an error result, so the agent can react to it. */
+/**
+ * Runs an app tool. The input is checked against the tool's schema first, here for every harness: Claude
+ * Code checks it too, Codex does not. An input that fails as sent is tried once more with its null
+ * fields left out, as Codex can send an optional field so; a null that the schema takes, such as one
+ * that removes a property, stays. An invalid input, or a thrown error, becomes an error result.
+ */
 export async function runTool(tool: AgentTool, input: unknown, signal: AbortSignal): Promise<{ text: string; isError: boolean }> {
+  const schema = z.object(tool.input);
+  let parsed = schema.safeParse(input);
+  if (!parsed.success) parsed = schema.safeParse(withoutNulls(input));
+  if (!parsed.success) return { text: `The input is not valid:\n${z.prettifyError(parsed.error)}`, isError: true };
   try {
-    const output = await tool.run(input as never, { signal });
+    const output = await tool.run(parsed.data as never, { signal });
     return typeof output === "string" ? { text: output, isError: false } : { text: output.text, isError: output.isError ?? false };
   } catch (error) {
     return { text: error instanceof Error ? error.message : String(error), isError: true };
   }
+}
+
+function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, withoutNulls(v)]));
 }
 
 export interface SessionSettings {

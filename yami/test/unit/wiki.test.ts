@@ -6,7 +6,7 @@ import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, readDocument } from "../../src/document/index.js";
 import { createSession, enableModule, moduleTools, runCheck } from "../../src/module/index.js";
 import { wiki as wikiModule, SOURCES, TOPICS } from "../../src/modules/wiki.js";
-import { algorithms, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, sourceChunks, stem, tokens, Wiki, type Embedder } from "../../src/wiki/index.js";
+import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, sourceChunks, stem, tokens, Wiki, type Embedder } from "../../src/wiki/index.js";
 import { FsVault } from "../fixtures/fs-vault.js";
 
 let root = "";
@@ -309,7 +309,7 @@ describe("checks", () => {
     const wiki = await fixture();
     await note(`${SOURCES}/pending.md`, { type: "source", description: "Pending.", file: "[[x.pdf]]", status: "pending" }, "");
     await wiki.refresh();
-    const context = (sources: string[]) => ({ vault, wiki, session: "s", properties: { sources: sources.map(link) } });
+    const context = (sources: string[]) => ({ vault, wiki, session: "s", path: "s.md", properties: { sources: sources.map(link) } });
     const absorbed = { path: "p", properties: { check: "property", field: "sources", name: "status", value: "absorbed" }, body: "" };
     expect(await runCheck(absorbed, context([`${SOURCES}/codex-notes.md`]))).toMatchObject({ status: "met" });
     expect(await runCheck(absorbed, context([`${SOURCES}/codex-notes.md`, `${SOURCES}/pending.md`]))).toMatchObject({
@@ -482,7 +482,7 @@ describe("change", () => {
 
     // The checks of the module see the change through the session. The loop refreshes the wiki before the checks.
     await wiki.refresh();
-    const context = { vault, wiki, session: "Ingest codex", properties: (await readDocument(vault, sessionPath)).properties };
+    const context = { vault, wiki, session: "Ingest codex", path: sessionPath, properties: (await readDocument(vault, sessionPath)).properties };
     const applied = { path: "p", properties: { check: "property", field: "changes", name: "status", value: "applied", atLeast: 1 }, body: "" };
     expect(await runCheck(applied, context)).toMatchObject({ status: "met" });
     const absorbed = { path: "p", properties: { check: "property", field: "sources", name: "status", value: "absorbed" }, body: "" };
@@ -624,7 +624,7 @@ describe("what the index leaves out", () => {
     expect(paths.some((p) => p.startsWith("internal/wiki/changes/") || p.startsWith("internal/wiki/snapshots/") || p.startsWith("internal/wiki/skills/"))).toBe(false);
     expect((await wiki.search("codex app-server")).map((h) => h.path)).not.toContain(result.path);
     const check = { path: "p", properties: { check: "property", field: "changes", name: "status", value: "applied", atLeast: 1 }, body: "" };
-    expect(await runCheck(check, { vault, wiki, session: "s", properties: { changes: [link(result.path)] } })).toMatchObject({ status: "met" });
+    expect(await runCheck(check, { vault, wiki, session: "s", path: "s.md", properties: { changes: [link(result.path)] } })).toMatchObject({ status: "met" });
   });
 });
 
@@ -658,5 +658,38 @@ describe("links to notes the index leaves out", () => {
       writes: [{ op: "create", path: `${TOPICS}/Linked.md`, properties: { description: "Links." }, body: "From [[internal/wiki/sessions/Ingest codex]] and [[Nowhere]]." }],
     });
     expect(result.warnings).toEqual(["wiki/topics/Linked.md links [[Nowhere]], which is not a note"]);
+  });
+});
+
+describe("copies, agent files, and base hashes", () => {
+  it("leaves a copy and a module's agent files out of the index", async () => {
+    const wiki = await fixture();
+    await note("librarian/x/Levain (checkout).md", { copy_of: "[[wiki/topics/Levain|Levain]]" }, "Levain is the starter.\n");
+    await vault.write("internal/threads/agents/validator.md", "---\nname: validator\n---\nValidate the starter.\n");
+    await wiki.refresh();
+    expect(wiki.notes.map((n) => n.path)).not.toContain("librarian/x/Levain (checkout).md");
+    expect(wiki.notes.map((n) => n.path)).not.toContain("internal/threads/agents/validator.md");
+    expect(wiki.locate("librarian/x/Levain (checkout)")).toBe("librarian/x/Levain (checkout).md");
+  });
+
+  it("refuses a modify whose base no longer matches the note, and takes one that does", async () => {
+    const wiki = await fixture();
+    const base = await bodyHash(wiki.note(`${TOPICS}/Levain.md`)!.body);
+    await note(`${TOPICS}/Levain.md`, { type: "topic", description: "A sourdough starter, in the French usage.", aliases: ["Starter"], sources: [] }, "Changed by hand.\n");
+    await expect(wiki.change({ title: "Stale", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, body: "Mine.", base }] })).rejects.toThrow("the note changed since its base was read");
+    const fresh = await bodyHash("Changed by hand.\n");
+    await expect(wiki.change({ title: "Stale remove", writes: [{ op: "remove", path: `${TOPICS}/Levain.md`, base }] })).rejects.toThrow("the note changed since its base was read");
+    await expect(wiki.change({ title: "Fresh", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, body: "Mine.", base: fresh }] })).resolves.toMatchObject({ modifies: 1 });
+  });
+});
+
+describe("wiki_change through the tool", () => {
+  it("removes a property that the plan sets to null", async () => {
+    const wiki = await fixture();
+    await enableModule(vault, wikiModule);
+    const change = moduleTools({ vault, wiki }, [wikiModule])!.tools.find((t) => t.name === "wiki_change")!;
+    const result = await runTool(change, { title: "Untag", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, properties: { tags: null } }] }, new AbortController().signal);
+    expect(result.isError, result.text).toBe(false);
+    expect((await readDocument(vault, `${TOPICS}/Levain.md`)).properties.tags).toBeUndefined();
   });
 });

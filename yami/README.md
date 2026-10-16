@@ -11,6 +11,9 @@ The Yami library. The design policy is in [`design.md`](../design.md).
 | `yami/wiki` | The knowledge base: one index over every note, the link graph, the query algorithms, match, and lint. |
 | `yami/modules/hello` | The smallest module, as the reference. |
 | `yami/modules/wiki` | The wiki module: ingest sessions that turn sources into cited topics, and the search, match, and lint tools. |
+| `yami/modules/threads` | Validated work on repositories: one thread per session document, from idea to closed. |
+| `yami/modules/librarian` | Checkouts: a reading list of the wiki's material on a subject, with copies to mark up and return. |
+| `yami/modules/journals` | The user's own writing, published to the wiki one edition at a time. |
 | `yami/obsidian` | The Obsidian layer: the vault adapter, shared documents, conversation notes, and the approval prompts. |
 
 `yami/obsidian` is the one module that uses the Obsidian API, CodeMirror, and the DOM. The other modules are plain TypeScript, and the build checks that they stay so.
@@ -95,7 +98,10 @@ export const hello: Module = {
 
 - `enableModule(vault, module)` writes the ledgers, the module document, and the module's documents. It writes only files that do not exist, so edits in the vault stay, and a host calls it on every start.
 - `createSession(vault, module, name, fields)` writes `hello/<name>.md` with the module's defaults as links, and `fields` as the module's own properties.
-- A module may set `sessions: "internal"` to keep its session documents and ledger under `internal/<id>/`, when its own folder holds its output for a person to read, as the wiki does. `access: "read-only"` makes a session's agent unable to change any file except through the module's tools. `ledgerViews` adds tables to the module ledger.
+- A module may set `sessions: "internal"` to keep its session documents and ledger under `internal/<id>/`, when its own folder holds its output for a person to read, as the wiki does; or `sessions: "none"` when it has no sessions of its own and needs no ledger, as journals. `access: "read-only"` makes a session's agent unable to change any file except through the module's tools. `ledgerViews` adds tables to the module ledger.
+- `checks` adds checks that the module's promises can name, ahead of the core checks of the same name. A check gets the vault, the wiki, the session's `path`, and its properties.
+- `agent(name, description, tools, body)` is a document for a Claude Code subagent of the module's skill set, invoked as `<module id>:<name>`. Claude Code enforces its tool list, so an agent with no edit tool cannot change a file. Codex has no subagents.
+- `createSession` refuses a name that cannot be one file name. `freeSessionName(vault, module, text)` makes a safe name from any text, and adds " (2)" when the name is in use.
 - `runSession(vault, agent, module, path, options)` runs the agent loop and returns the final state and the conversation note. `options.conversations` decides how the conversation note is kept; the default writes it straight to the vault and denies approvals, and `ObsidianConversations` in `yami/obsidian` provides one with the message box, so a person can watch a run and answer its approvals. `options.wiki` is the vault's wiki, for the checks; without one, the run builds its own over the vault.
 - `moduleTools({ vault, wiki }, modules)` serves the tools of every module as one tool set named `yami`, each tool named `<module id>_<tool name>`. A module's `tools` function gets the vault, the wiki, and the module. The host gives the set to its agents.
 - `moduleSkills(vault, modules)` returns each module's internal folder as a skill set, so the host gives its agents every module skill, invoked as `/<module id>:<skill>`. `skill(name, description, body, files)` takes other files, such as worker briefs, which `enableModule` writes beside `SKILL.md`. `skillCommand(path)` gives the command of a skill's `SKILL.md`.
@@ -120,7 +126,7 @@ A promise names a `check` and gives it properties. `{{session}}` in a value is t
 | --- | --- | --- |
 | `exists` | `path` | The file exists. |
 | `contains` | `path`, `text` | The file exists and contains the text. |
-| `property` | `field`, `name`, `value`, `atLeast` | Every note linked in the session's `field` has the property `name` equal to `value`, and the field links at least `atLeast` notes (default 0). |
+| `property` | `field`, `name`, `value`, `atLeast` | Every note linked in the session's `field` has the property `name` equal to `value`, and the field links at least `atLeast` notes (default 0). It reads the notes from the vault, so a note the index leaves out, such as a change, counts too. |
 | `lint` | `path`, or `folder`, or `field` | The wiki's lint finds no error in the note, the folder, or the notes linked in the session's `field` and every note that links them. |
 | none | | Never by Yami. The session ends `needs-attention` for a person to decide. |
 
@@ -153,7 +159,7 @@ await wiki.restore(3);                                                          
 - **A hit** has the `path`, a `score` in `[0, 1]` with the best at 1, a `snippet`, and `why`: "title match", "linked from Codex harness", "in the community of Claude harness", or the chunk that matched.
 - **`match`** compares names with the names, aliases, and descriptions of the typed notes: `hit` when a note holds the name or an alias, `near` when one scores above the threshold, `new` otherwise, each with its neighbors. The ingest skill calls it before it writes a topic.
 - **`lint`** reports `dead-link` and `no-description` as errors, and `duplicate-name`, `no-sources`, `uncited`, and `orphan` as warnings. An error fails the `lint` check.
-- **`captureSource(vault, file)`** captures a file as a source. The file stays where it is. Yami copies it into `internal/wiki/originals/`, named by the first 16 hex characters of its SHA-256, and writes `wiki/sources/<name> (source).md` with `type: source`, `status: pending`, `file` (the copy, which the note embeds), `from` (the file), and `sha256`. The wiki reads and cites the copy, so a later edit of the file does not change what the source said, and the source note never shares a name with the file. Content that a source holds already returns that source; a second version of a file gets `<name> (source 2).md`. **`captureSources(vault, folder)`** does it for every file in a folder, and skips the wiki's own files. **`sourceChunks(vault, wiki, source)`** takes a source note, or the file a source was captured from, and splits the frozen copy for the workers of an ingest: a text file into runs of at most 800 lines cut at a heading or a blank line, a PDF into 20 pages at a time, any other file whole.
+- **`captureSource(vault, file)`** captures a file as a source. The file stays where it is. Yami copies it into `internal/wiki/originals/`, named by the first 16 hex characters of its SHA-256, and writes `wiki/sources/<name> (source).md` with `type: source`, `status: pending`, `file` (the copy, which the note embeds), `from` (the file), and `sha256`. The wiki reads and cites the copy, so a later edit of the file does not change what the source said, and the source note never shares a name with the file. A file whose latest source holds its content returns that source; a changed file gets a new one, `<name> (source 2).md`, also when it changed back to an older text. A file with no source of its own shares the source of any file with the same content. `readSources(vault)` reads the sources once for many captures, and `sourceOf(sources, file, sha256)` says which source holds a file's content, if any. **`captureSources(vault, folder)`** does it for every file in a folder, and skips the wiki's own files. **`sourceChunks(vault, wiki, source)`** takes a source note, or the file a source was captured from, and splits the frozen copy for the workers of an ingest: a text file into runs of at most 800 lines cut at a heading or a blank line, a PDF into 20 pages at a time, any other file whole.
 
 ### Changes and versions
 
@@ -217,6 +223,33 @@ The wiki module. Its folder, `wiki/`, holds the knowledge base, `wiki/topics/` a
 - Its skill, `/wiki:ingest`, is a map-reduce: `wiki_chunks` for each source, one worker per chunk that reads `extractor.md` (an Item Map of subjects and cited claims), `wiki_match` for every subject at once, one worker per slice that reads `drafter.md` (the writes), then one plan for `wiki_change`. `page-forms.md` gives the topic and source forms. The three files sit in the skill's folder, and the lead gives each worker a path, not the text. A long document or a folder of documents costs the same care as one.
 - Its tools, for every agent in the vault: `wiki_search`, `wiki_match`, `wiki_lint`, `wiki_tags`, `wiki_chunks`, and `wiki_change`. The search tool's description carries the citation procedure, so a plain conversation answers from the wiki without a skill. "Ask the wiki" needs no wiki code: start a conversation with the question.
 - Its ledger, `internal/wiki/sessions.base`, has the session tables and two more: `Versions`, each with its link to the change, and `Changes`.
+
+## `yami/modules/threads`
+
+A thread is one piece of work on one or more repositories, from idea to closed. It is one session document in `threads/`: the user's idea and the research's context, the spec (goal, requirements, rules, decisions), the plan, the validation rounds, and the outcome.
+
+- **Skills**: `/threads:stub` plants a thread; `/threads:spec` writes the spec, has it reviewed, and plans; `/threads:run` takes a thread from where it stands to closed; `/threads:validate` validates in a fresh conversation, for Codex. **Agents**: `threads:reviewer` reviews a spec and `threads:validator` validates the work, both with no edit tool.
+- **Tools**: `threads_stub`, `threads_spec`, `threads_plan` (add, done, drop), `threads_round`, `threads_close` (closed or dropped), and `threads_status`. Each write returns the thread's `phase`, its `next` step, and its problems. The input of each is declared once, in `stubShape`, `specShape`, `planShape`, `roundShape`, and `closeShape`.
+- **The phase** is derived from the document at each read: stub, specified, planned, in progress, unvalidated, failed, validated, closed, or dropped. The next step is spec, plan, wait, execute, validate, resolve, ask, close, or none. The `thread` check is met when the thread is closed or dropped, and is for review when the user decides: the budget of rounds is used, or the thread waits for one in its `after`.
+- **The rules of a round**: each requirement gets one result with evidence; a failing requirement needs a blocking finding; a finding with `predates` never blocks; each finding of the last round needs an outcome (fixed, spec, stub, declined, or knowledge) in the next round or at the close, where only stub, declined, or knowledge are taken; a carried result must be a pass of the last round whose requirement text did not change; a thread may take 3 rounds unless the spec sets `budget`. After a pass, a change to the plan or the spec needs `user_asked`, the user's words, which the decisions keep.
+- **The document's formats**: `- **R1** text`; `- [ ] **T1** text · serves R1, R2` with a `· done: <trail>` or `· dropped: <reason>`, and details indented below; each round as `### Round N`, with its data in a hidden comment on its last line.
+
+Threads in repositories outside the vault use the user's own harness settings: the folders an agent may edit (Claude Code's `additionalDirectories`, Codex's `sandbox_workspace_write.writable_roots`) and the commands it may run without asking.
+
+## `yami/modules/librarian`
+
+A checkout is a reading list of the wiki's material on a subject, and a copy of each document for the user to read and mark up.
+
+- `/librarian:checkout <request>` searches with `wiki_search` and the `hop2` algorithm, keeps what serves the request, orders it foundations first with a reason each, and calls `librarian_checkout`.
+- `checkout(vault, wiki, order)` writes the reading list, `librarian/<date> <name>.md`, and the copies in the folder of that name, `<Title> (checkout).md`. A copy holds the original's body, `copy_of`, and `sha256`, the hash of that body. Only topics and sources are checked out, at most 60.
+- `returnCheckout(vault, wiki, session)` is the user's act. Each copy whose hash changed returns its edits as a `modify` with `base`, in one change, "Return <name>"; a copy whose original changed too, is gone, or whose edit the wiki refuses stays, with the reason. Copies that returned or had no edit are removed. It returns the change, the originals it modified, the copies it kept, and a `summary`, which the reading list's `## Return` also holds.
+
+## `yami/modules/journals`
+
+The user's own writing: each folder directly under `journals/` is a volume. No agent changes a journal.
+
+- `volumes(vault)` lists each volume with its note count and how many notes wait to be published.
+- `publish(vault, volume)` is the user's act: it captures each note whose latest source does not hold its text, and creates a wiki ingest session, the edition `<Volume Name> edition <date>`, with those sources and the `Journal sources` policy (primary authority, exact quotes, no claim the note does not make). It refuses a volume with no note, and one with no change since its last publish.
 
 ## `yami/agent`
 
@@ -322,7 +355,7 @@ Codex also offers extra skill roots, but from one it reads a skill it chose with
 
 ### App tools
 
-`tools` is a set of functions that run inside the app. The agent calls them like its own tools, without approval. Claude Code gets them as an in-process MCP server; Codex gets them as dynamic tools. Define one with `defineTool({ name, description, input: { text: z.string() }, title, run })`.
+`tools` is a set of functions that run inside the app. The agent calls them like its own tools, without approval. Claude Code gets them as an in-process MCP server; Codex gets them as dynamic tools. Define one with `defineTool({ name, description, input: { text: z.string() }, title, run })`. `runTool` checks the input against `input` before `run`, for both harnesses: an invalid input returns an error result that names each problem, and a field set to `null` counts as left out. So `run` receives typed, valid input, and repeats none of the schema's checks.
 
 ### Environment
 
@@ -429,6 +462,7 @@ new NoteListModal(this.app, matchRows(wiki, await wiki.match([name])), "Match").
 
 - `npm run build` first type-checks every module except `yami/obsidian` with `tsconfig.core.json`. That check has no DOM types, and it maps `obsidian` and `@codemirror/*` to an empty module, so a core file that uses them, or imports a file of `yami/obsidian`, fails the build. Then `tsc` builds the whole library.
 - `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the module loop with a fake agent and a file system vault, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, and in `test/unit/obsidian/` the shared documents and the conversation manager over a fake Obsidian app.
+- `YAMI_LIVE_THREAD=1 npx vitest run test/live/thread.test.ts` runs one thread from stub to closed with a real Claude Code, on a scratch repository: the skills, the tools, the reviewer and validator agents, and the loop. It takes some minutes.
 - `npm run bench` runs the retrieval benchmark against the vault in `YAMI_BENCH_VAULT`; see [The benchmark](#the-benchmark).
 - `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, and resume.
 - The plugin's `npm run test:obsidian` drives the real Obsidian app with `yami/obsidian`.

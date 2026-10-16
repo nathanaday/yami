@@ -1,7 +1,8 @@
-import { link, readDocument, serializeDocument, updateDocument, writeDocument, type Document } from "../document/document.js";
+import { link, LINK, readDocument, serializeDocument, updateDocument, writeDocument, type Document } from "../document/document.js";
 import { SOURCE, timestamp, TOPIC, validate, withDefaults } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { CHANGES, inKnowledge, SOURCES, TOPICS } from "./folders.js";
+import { hashBytes } from "./source.js";
 import type { Wiki } from "./wiki.js";
 
 /** One write of a change plan. */
@@ -15,6 +16,11 @@ export interface Write {
   body?: string;
   /** One line on why the change makes this write. */
   why?: string;
+  /**
+   * modify, remove: the `bodyHash` of the note as the writer read it. The change refuses the write when
+   * the note changed since, so it never overwrites work it did not see.
+   */
+  base?: string;
 }
 
 export interface ChangePlan {
@@ -85,6 +91,8 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan): Promise<string
       if (typeof write.body !== "string") problems.push(`${label}: a create needs a body`);
     } else if (!exists) {
       problems.push(`${label}: no note at this path`);
+    } else if (write.base !== undefined && (await bodyHash(wiki.note(write.path)!.body)) !== write.base) {
+      problems.push(`${label}: the note changed since its base was read; read it again`);
     } else if (write.op === "modify") {
       const note = wiki.note(write.path)!;
       const type = note.type === "source" ? "source" : "topic";
@@ -96,7 +104,7 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan): Promise<string
   }
   for (const write of plan.writes ?? []) {
     if (write.op === "remove" || typeof write.body !== "string") continue;
-    for (const match of write.body.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)) {
+    for (const match of write.body.matchAll(LINK)) {
       const target = match[1]!.trim();
       if (/\.[a-z0-9]{1,5}$/i.test(target) && !target.endsWith(".md")) continue;
       if (wiki.locate(target) || created.has(`${target.replace(/\.md$/, "")}.md`) || [...created].some((p) => p.endsWith(`/${target}.md`))) continue;
@@ -105,6 +113,11 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan): Promise<string
   }
   if (problems.length) throw new InvalidPlan(problems);
   return [...new Set(warnings)];
+}
+
+/** The hash of a note's body as a change compares it: the SHA-256 of the body without trailing space. */
+export async function bodyHash(body: string): Promise<string> {
+  return hashBytes(new TextEncoder().encode(body.trimEnd()));
 }
 
 /** Properties with a change merged over them; a `null` removes a property. */

@@ -38,6 +38,12 @@ Every module skill is a command in every conversation: type `/wiki:ingest` or `/
 
 The agents use your own setup for their harness: your `CLAUDE.md` and `AGENTS.md` files, skills, plugins, MCP servers, and permission rules. `window.yami` holds the agents and the conversation manager for the developer console.
 
+## Threads, the librarian, and journals
+
+- **Threads.** In a conversation, `/threads:stub <your idea>` plants a thread in `threads/`, and `/threads:run <thread>` takes it to closed: a spec, a review, a plan, the work with a commit per task, a validation by a read-only agent, and the close. A thread is also a session: open its document and run **Threads: run this session with Claude**. For a repository outside the vault, let the agent edit there and run its tests in your Claude Code or Codex settings, or answer each approval in the conversation.
+- **The librarian.** `/librarian:checkout <subject>` makes a reading list in `librarian/` with a copy of each document. Mark up the copies, then open the reading list and run **Librarian: return this checkout**: your edits go back into the wiki as one change.
+- **Journals.** Write in `journals/<volume>/`. **Journals: publish a volume** captures the notes that are new or changed and opens the edition's wiki session; run it to absorb them.
+
 ## Try the hello module
 
 The hello module is the smallest Yami module: one policy, one promise, and one skill. When the plugin loads, it writes the files of each module that are missing: `Yami.base`, `hello/sessions.base`, and the module's documents under `internal/hello/`. Files that exist stay as they are, so you can edit the bases and the documents. Two commands drive the module:
@@ -71,7 +77,7 @@ Every change has a version before and after it. **Wiki: take a snapshot** saves 
 
 ## Tests
 
-`npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the module install, the wiki commands, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, and a hello session. Your own Obsidian and vaults are not touched. Build the plugin first.
+`npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the module install, the wiki commands, a journal publish and a checkout return, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, and a hello session. Your own Obsidian and vaults are not touched. Build the plugin first.
 
 ## Build a release
 

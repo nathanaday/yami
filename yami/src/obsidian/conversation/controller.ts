@@ -14,6 +14,7 @@ import type {
   TurnStatus,
 } from "../../agent/index.js";
 import { availablePath, frontmatterEdit, isUnnamed, nameFrom, renderTurn, TurnTranscript, userBlock } from "../../conversation/index.js";
+import { LINK } from "../../document/index.js";
 import { activity, type ConversationAgent, Presence } from "../agents.js";
 import type { TurnEnd } from "../api.js";
 import type { CollabHub, DiskWriter } from "../collab/hub.js";
@@ -391,7 +392,7 @@ export class ConversationController {
 
   private prompt(message: string): string {
     const linked = new Set<string>();
-    for (const match of message.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g)) {
+    for (const match of message.matchAll(LINK)) {
       const file = this.app.metadataCache.getFirstLinkpathDest(match[1]!.trim(), this.file.path);
       if (file) linked.add(file.path);
     }

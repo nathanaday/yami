@@ -1,9 +1,11 @@
 export {
   INTERNAL,
   VAULT_LEDGER,
+  agent,
   createSession,
   documentPath,
   enableModule,
+  freeSessionName,
   layout,
   moduleSkills,
   policy,

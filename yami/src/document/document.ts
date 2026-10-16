@@ -76,14 +76,31 @@ export async function resolveLink(vault: Vault, name: string, folders: string[])
   return undefined;
 }
 
+/** A wiki link, `[[target#heading|alias]]`, or an embed with `!`. Group 1 is the target; group 2 the heading and the alias. */
+export const LINK = /!?\[\[([^\]|#]+)((?:#[^\]|]*)?(?:\|[^\]]*)?)\]\]/g;
+
+/** The lines of a `## heading` section: its heading's line, and the line after its end. A heading starts at column 0. */
+function sectionLines(lines: string[], heading: string): [number, number] | undefined {
+  const start = lines.findIndex((line) => line.trimEnd() === `## ${heading}`);
+  if (start === -1) return undefined;
+  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+  return [start, end === -1 ? lines.length : end];
+}
+
+/** The content of a `## heading` section, trimmed, without the heading. Empty when the body has none. */
+export function sectionText(body: string, heading: string): string {
+  const lines = body.split("\n");
+  const span = sectionLines(lines, heading);
+  return span ? lines.slice(span[0] + 1, span[1]).join("\n").trim() : "";
+}
+
 /** Replaces the `## heading` section of a body, or appends it. The content has no heading. */
 export function replaceSection(body: string, heading: string, content: string): string {
   const section = `## ${heading}\n${content.replace(/\n+$/, "")}\n`;
   const lines = body.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
-  if (start === -1) return `${body.replace(/\n+$/, "")}\n\n${section}`;
-  let end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
-  if (end === -1) end = lines.length;
+  const span = sectionLines(lines, heading);
+  if (!span) return `${body.replace(/\n+$/, "")}\n\n${section}`;
+  const [start, end] = span;
   const before = lines.slice(0, start).join("\n");
   const after = lines.slice(end).join("\n");
   return `${before}${before ? "\n" : ""}${section}${after ? `\n${after}` : ""}`;

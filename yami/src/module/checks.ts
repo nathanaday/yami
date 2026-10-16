@@ -1,4 +1,4 @@
-import { linksOf, readDocument, type Document } from "../document/document.js";
+import { basename, linksOf, readDocument, type Document } from "../document/document.js";
 import type { Properties, Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
 
@@ -6,8 +6,8 @@ export interface CheckContext {
   vault: Vault;
   /** The vault's wiki, refreshed after the agent's turn. */
   wiki: Wiki;
-  /** The session name, for `{{session}}` in promise paths. */
-  session: string;
+  /** The session document, as a vault path. Its name fills `{{session}}` in promise values. */
+  path: string;
   /** The session properties, for `{{name}}` in promise paths. */
   properties: Properties;
 }
@@ -23,7 +23,7 @@ export type Check = (promise: Document, context: CheckContext) => Promise<CheckR
 /** Fills `{{session}}` and `{{property}}` in a promise value. */
 export function expand(template: string, context: CheckContext): string {
   return template.replace(/\{\{\s*([\w-]+)\s*\}\}/g, (_match, name: string) =>
-    name === "session" ? context.session : String(context.properties[name] ?? ""),
+    name === "session" ? basename(context.path) : String(context.properties[name] ?? ""),
   );
 }
 
@@ -102,10 +102,11 @@ const lint: Check = async (promise, context) => {
 /** The checks that a promise can name in its `check` property. */
 export const checks: Record<string, Check> = { exists, contains, property, lint };
 
-export async function runCheck(promise: Document, context: CheckContext): Promise<CheckResult> {
+/** Runs the check a promise names: one of `own`, the module's checks, or else a core check. */
+export async function runCheck(promise: Document, context: CheckContext, own: Record<string, Check> = {}): Promise<CheckResult> {
   const name = promise.properties.check;
   if (typeof name !== "string" || name === "") return { status: "review", detail: "no automatic check" };
-  const check = checks[name];
+  const check = own[name] ?? checks[name];
   if (!check) return { status: "review", detail: `unknown check "${name}"` };
   return check(promise, context);
 }

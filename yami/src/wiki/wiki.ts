@@ -1,6 +1,6 @@
 import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
-import { link, linkTarget, parseDocument, updateDocument, writeDocument } from "../document/document.js";
+import { link, LINK, linkTarget, parseDocument, updateDocument, writeDocument } from "../document/document.js";
 import { timestamp } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { algorithms, type Algorithm, type Hit, type Query, type Scored } from "./algorithms/index.js";
@@ -53,8 +53,8 @@ export interface WikiOptions {
 
 export const FIELD_WEIGHTS = { title: 3, aliases: 3, tags: 2, description: 2, body: 1 };
 
-/** Files that are not knowledge: the instructions of module skills, and the frozen copies that sources embed. */
-const UNINDEXED = [/^internal\/[^/]+\/skills\//, new RegExp(`^${ORIGINALS}/`)];
+/** Files that are not knowledge: the instructions of module skills and agents, and the frozen copies that sources embed. */
+const UNINDEXED = [/^internal\/[^/]+\/(skills|agents)\//, new RegExp(`^${ORIGINALS}/`)];
 
 /** A seed of a graph query: a note and its weight. */
 export interface Seed {
@@ -118,7 +118,8 @@ export class Wiki {
     for (const path of paths) {
       const doc = parseDocument(this.vault, path, await this.vault.read(path));
       const type = typeof doc.properties.type === "string" ? doc.properties.type : undefined;
-      if (type && this.options.skipTypes.includes(type)) continue;
+      // A copy of another note, such as a librarian's checkout copy, is not knowledge of its own.
+      if ((type && this.options.skipTypes.includes(type)) || doc.properties.copy_of !== undefined) continue;
       const name = path.slice(path.lastIndexOf("/") + 1, -3);
       const aliases = list(doc.properties.aliases);
       const tags = expandTags(list(doc.properties.tags));
@@ -421,7 +422,6 @@ export function expandTags(tags: string[]): string[] {
   return [...out];
 }
 
-const LINK = /!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
 
 /** The targets of every `[[link]]` in a body and in the link properties. */
 function linkTargets(body: string, properties: Properties): string[] {

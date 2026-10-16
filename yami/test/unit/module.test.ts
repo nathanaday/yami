@@ -2,61 +2,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { Agent, type AgentInfo, type AgentSession, BaseSession, type ActiveTurn, runTool, type SessionOptions, setSkills, slashCommand, type TurnResult } from "../../src/agent/index.js";
+import { runTool, setSkills, slashCommand } from "../../src/agent/index.js";
+import { FakeAgent } from "../fixtures/fake-agent.js";
 import type { Vault } from "../../src/document/index.js";
 import { captureSource, Wiki } from "../../src/wiki/index.js";
 import { wiki as wikiModule } from "../../src/modules/wiki.js";
-import { link } from "../../src/document/index.js";
+import { link, sectionText } from "../../src/document/index.js";
 import { FsVault } from "../fixtures/fs-vault.js";
-import { createSession, enableModule, moduleSkills, moduleTools, promise, runSession, skill, skillCommand } from "../../src/module/index.js";
+import { agent, createSession, enableModule, freeSessionName, moduleSkills, moduleTools, promise, runSession, skill, skillCommand } from "../../src/module/index.js";
 import { hello } from "../../src/modules/hello.js";
-
-type Turn = (prompt: string) => Promise<Partial<TurnResult> | void> | Partial<TurnResult> | void;
-
-/** A session that runs one scripted behavior per turn. */
-class FakeSession extends BaseSession {
-  readonly harness = "claude";
-  readonly id = "fake-session";
-  readonly prompts: string[] = [];
-  constructor(
-    private readonly turns: Turn[],
-    readonly options: SessionOptions,
-  ) {
-    super();
-  }
-  protected async startTurn(prompt: string, turn: ActiveTurn) {
-    this.prompts.push(prompt);
-    const behavior = this.turns.shift() ?? (() => ({}));
-    const outcome = (await behavior(prompt)) ?? {};
-    turn.finish({ status: "completed", text: "ok", ...outcome });
-  }
-  protected async interruptTurn() {}
-  async close() {
-    this.markClosed();
-  }
-  async models() {
-    return [];
-  }
-  async commands() {
-    return [];
-  }
-  async configure() {}
-}
-
-class FakeAgent extends Agent {
-  readonly harness = "claude";
-  last: FakeSession | undefined;
-  constructor(private readonly turns: Turn[]) {
-    super({});
-  }
-  async connect(): Promise<AgentInfo> {
-    return { harness: "claude", version: "0", account: {} };
-  }
-  protected async createSession(options: SessionOptions): Promise<AgentSession> {
-    this.last = new FakeSession(this.turns, this.sessionOptions(options));
-    return this.last;
-  }
-}
 
 let root = "";
 afterEach(async () => {
@@ -282,5 +236,58 @@ describe("a wiki session end to end", () => {
     const doc = await vault.read(path);
     expect(result, doc).toMatchObject({ state: "done", iterations: 1 });
     expect(doc).toContain("iteration 1: 3 met, 0 unmet");
+  });
+});
+
+describe("module documents, checks, and sessions", () => {
+  const custom = {
+    ...hello,
+    id: "custom",
+    name: "Custom",
+    documents: [...(hello.documents ?? []), agent("checker", "Checks the greeting. Edits nothing.", ["Read", "Grep"], "Read the greeting note.")],
+    checks: { exists: async () => ({ status: "met" as const, detail: "the module's own check" }) },
+  };
+
+  it("installs an agent in its harness's own form, under the module's agents folder", async () => {
+    const { vault } = await fresh("agents", custom);
+    const text = await vault.read("internal/custom/agents/checker.md");
+    expect(text).toBe("---\nname: checker\ndescription: Checks the greeting. Edits nothing.\ntools: Read, Grep\n---\nRead the greeting note.");
+  });
+
+  it("runs a module's own check before the core check of the same name", async () => {
+    const { vault, path } = await fresh("own", custom);
+    const result = await runSession(vault, new FakeAgent([]), custom, path, { maxIterations: 1 });
+    expect(result.state).toBe("done");
+    expect(await vault.read(path)).toContain("the module's own check");
+  });
+
+  it("links the module ledger from the module document, at its real path", async () => {
+    const { vault } = await fresh("ledger");
+    expect(await vault.read("internal/hello/hello.md")).toContain("[[hello/sessions.base|Hello world sessions]]");
+    const internal = { ...hello, id: "inner", name: "Inner", sessions: "internal" as const };
+    await enableModule(vault, internal);
+    expect(await vault.read("internal/inner/inner.md")).toContain("[[internal/inner/sessions.base|Inner sessions]]");
+  });
+
+  it("refuses a session name that cannot name one file", async () => {
+    const { vault } = await fresh("names");
+    for (const name of ["train/val split", "a:b", "x#y", " padded", ".hidden", "", "[x]", "a|b", "a^b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a\\b", "Fix\nparser", "tab\there"]) {
+      await expect(createSession(vault, hello, name), JSON.stringify(name)).rejects.toThrow("cannot name a file");
+    }
+    await expect(createSession(vault, hello, "Divide by zero, safely (v2)")).resolves.toBe("hello/Divide by zero, safely (v2).md");
+  });
+
+  it("makes a free session name from any text: no character a file cannot take, and a number when it is in use", async () => {
+    const { vault } = await fresh("names");
+    expect(await freeSessionName(vault, hello, "C# notes: week [1]")).toBe("C notes week 1");
+    expect(await freeSessionName(vault, hello, "names")).toBe("names (2)");
+    expect(await freeSessionName(vault, hello, "...")).toBe("Session");
+  });
+
+  it("reads a section's text, trimmed, and nothing for a missing one", () => {
+    const body = "# T\n\n## Plan\n\n- a\n- b\n\n## Notes\nn\n";
+    expect(sectionText(body, "Plan")).toBe("- a\n- b");
+    expect(sectionText(body, "Notes")).toBe("n");
+    expect(sectionText(body, "Missing")).toBe("");
   });
 });

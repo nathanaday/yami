@@ -8,6 +8,7 @@ import {
   parseDocument,
   replaceSection,
   resolveLink,
+  sectionText,
   updateDocument,
   type Document,
 } from "../document/document.js";
@@ -86,7 +87,7 @@ export async function runSession(vault: Vault, agent: Agent, module: Module, pat
       }
       // The agent's tools change the session's properties, for example its changes, so the checks read it again.
       doc = await readSession(vault, module, path);
-      const verification = await verify(vault, wiki, name, doc, linked.promises);
+      const verification = await verify(vault, wiki, module, doc, linked.promises);
       const summary = `${verification.met.length} met, ${verification.unmet.length} unmet${verification.review.length ? `, ${verification.review.length} for review` : ""}`;
       if (verification.unmet.length === 0) {
         state = verification.review.length === 0 ? "done" : "needs-attention";
@@ -118,11 +119,11 @@ async function loadLinked(vault: Vault, lay: Layout, doc: Document): Promise<Lin
 }
 
 /** Runs every check after the agent's turn. The wiki reads the vault again first, so the checks see what the agent wrote. */
-async function verify(vault: Vault, wiki: Wiki, session: string, doc: Document, promises: Document[]): Promise<Verification> {
+async function verify(vault: Vault, wiki: Wiki, module: Module, doc: Document, promises: Document[]): Promise<Verification> {
   const verification: Verification = { results: [], met: [], unmet: [], review: [] };
   if (promises.length) await wiki.refresh();
   for (const promise of promises) {
-    const result = await runCheck(promise, { vault, wiki, session, properties: doc.properties });
+    const result = await runCheck(promise, { vault, wiki, path: doc.path, properties: doc.properties }, module.checks);
     verification.results.push({ promise, result });
     verification[result.status].push(link(promise.path));
   }
@@ -142,16 +143,10 @@ async function record(vault: Vault, path: string, iteration: number, summary: st
         .join("\n");
       doc.body = replaceSection(doc.body, "Deliverables", deliverables);
     }
-    const progress = sectionContent(doc.body, "Progress");
+    const progress = sectionText(doc.body, "Progress");
     const line = `- ${timestamp().slice(11, 16)} iteration ${iteration}: ${summary}`;
     doc.body = replaceSection(doc.body, "Progress", progress ? `${progress}\n${line}` : line);
   });
-}
-
-/** The content of a `## heading` section, without the heading. */
-function sectionContent(body: string, heading: string): string {
-  const match = body.match(new RegExp(`^## ${heading}\\n([\\s\\S]*?)(?=\\n## |$)`, "m"));
-  return (match?.[1] ?? "").trim();
 }
 
 /**

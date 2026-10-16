@@ -39,6 +39,18 @@
       "types": "./dist/modules/wiki.d.ts",
       "default": "./dist/modules/wiki.js"
     },
+    "./modules/threads": {
+      "types": "./dist/modules/threads/index.d.ts",
+      "default": "./dist/modules/threads/index.js"
+    },
+    "./modules/journals": {
+      "types": "./dist/modules/journals/index.d.ts",
+      "default": "./dist/modules/journals/index.js"
+    },
+    "./modules/librarian": {
+      "types": "./dist/modules/librarian/index.d.ts",
+      "default": "./dist/modules/librarian/index.js"
+    },
     "./wiki": {
       "types": "./dist/wiki/index.d.ts",
       "default": "./dist/wiki/index.js"

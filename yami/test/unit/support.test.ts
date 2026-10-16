@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { lineDiff } from "../../src/agent/diff.js";
 import { pathDisplay } from "../../src/agent/executable.js";
 import { RpcConnection, RpcError } from "../../src/agent/rpc.js";
+import { defineTool, runTool, z } from "../../src/agent/index.js";
 
 describe("lineDiff", () => {
   it("marks unchanged, removed and added lines", () => {
@@ -110,5 +111,40 @@ describe("RpcConnection", () => {
     rpc.close(new Error("gone"));
     await expect(pending).rejects.toThrow("gone");
     await expect(rpc.request("b")).rejects.toThrow("gone");
+  });
+});
+
+describe("runTool", () => {
+  const tool = defineTool({
+    name: "echo",
+    description: "Echoes.",
+    input: { word: z.string(), times: z.number().int().min(1).optional() },
+    run: async ({ word, times }) => `${word} x${times ?? 1}`,
+  });
+  const signal = new AbortController().signal;
+
+  it("checks the input against the schema, for every harness, and says what is wrong", async () => {
+    expect(await runTool(tool, { word: "hi", times: 2 }, signal)).toEqual({ text: "hi x2", isError: false });
+    const bad = await runTool(tool, { word: 3, times: 0 }, signal);
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toMatch(/^The input is not valid:\n[\s\S]*word[\s\S]*times/);
+  });
+
+  it("takes a field set to null as left out, as Codex can send it", async () => {
+    expect(await runTool(tool, { word: "hi", times: null }, signal)).toEqual({ text: "hi x1", isError: false });
+  });
+});
+
+describe("runTool and null", () => {
+  it("keeps a null that the schema takes, such as one that removes a property", async () => {
+    const tool = defineTool({ name: "props", description: "Props.", input: { properties: z.record(z.string(), z.unknown()) }, run: async ({ properties }) => JSON.stringify(properties) });
+    expect(await runTool(tool, { properties: { status: null, tags: ["a"] } }, new AbortController().signal)).toEqual({ text: '{"status":null,"tags":["a"]}', isError: false });
+  });
+});
+
+describe("runTool and nulls in arrays", () => {
+  it("drops nulls inside arrays too, and passes the parsed input to the tool", async () => {
+    const tool = defineTool({ name: "items", description: "Items.", input: { items: z.array(z.object({ a: z.number(), b: z.string().optional() })) }, run: async (input) => JSON.stringify(input) });
+    expect(await runTool(tool, { items: [{ a: 1, b: null }], extra: "ignored" }, new AbortController().signal)).toEqual({ text: '{"items":[{"a":1}]}', isError: false });
   });
 });

@@ -172,6 +172,46 @@ describe("Yami in Obsidian", () => {
     expect(await obsidian.read(copy!)).toBe(await obsidian.read("Papers/Attention.md"));
   });
 
+  it("publishes a journal volume, and returns a checkout with the user's edit", { timeout: 60_000 }, async () => {
+    const command = (id: string) => page().evaluate((name) => (window as any).app.commands.executeCommandById(name), id);
+    for (const module of ["threads", "librarian", "journals"]) await obsidian.waitForNote(`internal/${module}/${module}.md`, (text) => text.length > 0, 10_000);
+    expect(existsSync(path.join(obsidian.vault, "internal/threads/agents/validator.md"))).toBe(true);
+
+    // Publish: pick the volume; the edition's session opens with a source for each note.
+    await page().evaluate(async () => {
+      const vault = (window as any).app.vault;
+      await vault.createFolder("journals/garden-log");
+      await vault.create("journals/garden-log/Tomatoes.md", "Plant after the frost.\n");
+    });
+    await command("yami:journals-publish");
+    await page().waitForSelector(".prompt-input");
+    await page().keyboard.type("Garden Log");
+    await page().keyboard.press("Enter");
+    await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path.startsWith("internal/wiki/sessions/Garden Log edition "), undefined, { timeout: 10_000 });
+    const edition = await obsidian.read(await activePath());
+    expect(edition).toContain("[[wiki/sources/Tomatoes (source)|Tomatoes (source)]]");
+    expect(edition).toContain("[[internal/journals/policies/Journal sources|Journal sources]]");
+
+    // Return: a checkout made with the librarian's tool, a copy edited by the user, and the return command.
+    const made = await page().evaluate(async () => {
+      const app = (window as any).app;
+      if (!app.vault.getFolderByPath("wiki/topics")) await app.vault.createFolder("wiki/topics");
+      await app.vault.create("wiki/topics/Compost.md", "---\ntype: topic\ndescription: Rotted plant matter.\n---\nCompost feeds the soil.\n");
+      const tool = (window as any).yami.claude.preferences.tools.tools.find((t: any) => t.name === "librarian_checkout");
+      return JSON.parse(await tool.run({ request: "the material on compost", name: "Compost", documents: [{ path: "wiki/topics/Compost.md", why: "the basics" }] }, { signal: new AbortController().signal }));
+    });
+    await page().evaluate(async (copy) => {
+      const app = (window as any).app;
+      await app.vault.modify(app.vault.getFileByPath(copy), (await app.vault.read(app.vault.getFileByPath(copy))).replace("feeds the soil", "feeds the soil and holds water"));
+    }, made.copies[0]);
+    await page().evaluate((file) => (window as any).app.workspace.getLeaf().openFile((window as any).app.vault.getFileByPath(file)), made.session);
+    await page().waitForFunction((file) => (window as any).app.metadataCache.getFileCache((window as any).app.vault.getFileByPath(file))?.frontmatter?.status === "out", made.session);
+    await command("yami:librarian-return");
+    await obsidian.waitForNote(made.session, (text) => text.includes("status: returned"), 15_000);
+    expect(await obsidian.read("wiki/topics/Compost.md")).toContain("Compost feeds the soil and holds water.");
+    expect(existsSync(path.join(obsidian.vault, made.copies[0]))).toBe(false);
+  });
+
   it("installs the hello module when it loads", async () => {
     for (const file of ["Yami.base", "hello/sessions.base", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
       await obsidian.waitForNote(file, (text) => text.length > 0, 10_000);
