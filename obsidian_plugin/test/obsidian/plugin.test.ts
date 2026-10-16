@@ -402,6 +402,28 @@ describe("Yami in Obsidian", () => {
     expect(text).toMatch(/\nplum\.?\n\n$/i);
   });
 
+  it("colors each module's folder, its internal folder muted, and internal/ gray", async () => {
+    const colors = await page().evaluate(async () => {
+      const app = (window as any).app;
+      const yami = app.plugins.plugins.yami.yami;
+      for (const folder of ["hello", "librarian", "wiki"]) if (!app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
+      const explorer = app.workspace.getLeavesOfType("file-explorer")[0].view;
+      explorer.revealInFolder(app.vault.getFileByPath("internal/hello/hello.md"));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const shown = (path: string) => {
+        const title = document.querySelector(`.nav-folder-title[data-path="${path}"]`);
+        return title ? getComputedStyle(title).color : "no title";
+      };
+      const hello = yami.module("hello").colors;
+      return {
+        shown: ["internal", "hello", "internal/hello", "librarian", "wiki"].map(shown),
+        expected: ["#8a8a8a", hello.folder, hello.internal, "#a0522d", "#00a2c7"],
+      };
+    });
+    const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
+    expect(colors.shown).toEqual(colors.expected.map(rgb));
+  });
+
   it("offers the commands of the sessions, the templates, and the actions", async () => {
     const ids = await page().evaluate(() => Object.keys((window as any).app.commands.commands).filter((id) => id.startsWith("yami:")));
     for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search"]) {

@@ -153,6 +153,7 @@ A module is a subclass of `YamiModule`. Its fields declare it, and builders in i
 | `ledgerViews` | Tables that the module adds to its ledger. |
 | `instructions` | Text added to the first prompt of each run. |
 | `checks` | Checks that the module's promises can name, ahead of the core checks of the same name. A check gets the vault, the wiki, the session's `path`, and its properties. |
+| `color` | The color of the module's folder, as a hex code such as `#3e63dd`. Without one, the module takes a color of `MODULE_COLORS` chosen by its id, the same on every start, and one that no other module has while one is free. `module.colors` gives the folder's color and the internal folder's, which is the color muted halfway toward the gray of `internal/` (`mute`). The wiki is cyan, `WIKI_COLOR`. |
 
 | Builder | Makes |
 | --- | --- |
@@ -473,6 +474,7 @@ The Obsidian layer. It holds what needs the Obsidian API: `createYami`, the vaul
 | `idleMinutes` | 15 | Minutes after which an agent process with no open message box closes. |
 | `commands` | every group | `{ conversations, sessions, wiki }`: the groups of commands to add. The commands of the modules' templates and actions are always added. |
 | `statusBar` | `true` | A status bar item that says which agents work. |
+| `folderColors` | `true` | Each module's folder in the module's color in the file explorer, its internal folder muted, and `internal/` gray (`INTERNAL_COLOR`). `folderColorRules(yami)` gives the CSS. |
 
 It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations, and removes the shared-document hub.
 

@@ -51,6 +51,8 @@ export class Librarian extends YamiModule {
   readonly id = "librarian";
   readonly name = "Librarian";
   readonly description = "Checkouts of the wiki's material on a subject: a reading list in reading order, and a copy of each document for the user to read and mark up.";
+  /** The color of `librarian/` in the file explorer. The other modules of this plugin take a default color. */
+  readonly color = "#a0522d";
   readonly schema: Schema = {
     /** The user's request, in their words. */
     request: { type: "text" },

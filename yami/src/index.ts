@@ -24,6 +24,7 @@ export {
   type TemplateOptions,
 } from "./module/module.js";
 export { Session, type NewSession, type RunOptions, type SessionStatus } from "./module/session.js";
+export { assignColors, hexColor, INTERNAL_COLOR, MODULE_COLORS, mute, WIKI_COLOR, type ModuleColors } from "./module/colors.js";
 export type { RunResult } from "./module/run.js";
 export { checks, expand, runCheck, type Check, type CheckContext, type CheckResult } from "./module/checks.js";
 export { moduleTools, TOOL_SET } from "./module/tools.js";

@@ -68,6 +68,7 @@ internal/wiki/              the wiki module's own: its sessions and ledger, the 
 2. A session may keep the files it produces in a folder with its own name, beside its document: `librarian/<session>.md` and `librarian/<session>/`. Nothing else goes in a module's folder.
 3. Everything else that a module needs goes under `internal/<module>/`.
 4. The paths come from `YamiModule.layout` in `yami/src/module/module.ts`. No other code builds these paths. The wiki folders are constants in `yami/src/wiki/folders.ts`, which assume the module id `wiki`.
+5. Each module has a color, so a person sees which folders belong together. The module's folder takes the color; its internal folder takes the color muted halfway toward gray, because a person reads it less; `internal/` is gray. A module sets its own `color`, or takes a basic color chosen by its id, so the color is the same on every start. The wiki is cyan. The colors are in `yami/src/module/colors.ts`; `yami/obsidian` shows them in the file explorer.
 
 ## Ledgers
 
@@ -104,7 +105,7 @@ yami/esbuild          the esbuild options of a plugin (a build tool, not in the 
 
 ## Modules
 
-A module is a subclass of `YamiModule`. Its fields declare it: `id`, `name`, `description`, `schema` (the session fields), `sessionsIn`, `ledgerIn`, `ledgerViews`, `instructions`, and `checks`. Builders in its field initializers make its parts, and each returns a handle that the other parts take:
+A module is a subclass of `YamiModule`. Its fields declare it: `id`, `name`, `description`, `schema` (the session fields), `sessionsIn`, `ledgerIn`, `ledgerViews`, `instructions`, `checks`, and `color`. Builders in its field initializers make its parts, and each returns a handle that the other parts take:
 
 - `this.skill(markdown, files)`, `this.policy(name, markdown)`, `this.promise(name, markdown)`, `this.article(name, markdown)`, and `this.agent(markdown)` make its documents. The markdown holds the properties as frontmatter: a skill's `name` and `description`, a promise's `check` and the properties the check reads, an agent's `name`, `description`, and `tools`. A plugin keeps them as `.md` files and imports them as text (`yami/esbuild` and `yami/testing` load `.md` that way). An agent is a Claude Code subagent with its own tool list; Codex has no subagents.
 - `this.template({ id, name, skills, policies, promises, articles, maxIterations, access, instructions, fields, body })` makes a kind of session. `template.create({ name, fields, add })` writes a session document that links the template's documents. `access: "read-only"` makes a session's agent unable to change any file except through the tools, which is how a module makes its tools the only way to write.

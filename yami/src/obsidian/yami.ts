@@ -9,6 +9,7 @@ import { Yami } from "../module/yami.js";
 import type { WikiOptions } from "../wiki/wiki.js";
 import { vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
+import { showFolderColors } from "./colors.js";
 import { addConversationCommands, addModuleCommands, addSessionCommands, addWikiCommands } from "./commands.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
@@ -45,6 +46,8 @@ export interface YamiPluginOptions {
   commands?: Partial<Record<CommandGroup, boolean>>;
   /** A status bar item that says which agents work. Default true. */
   statusBar?: boolean;
+  /** Each module's folders in the module's colors in the file explorer, and `internal/` in gray. Default true. */
+  folderColors?: boolean;
 }
 
 /**
@@ -127,6 +130,7 @@ export class ObsidianYami extends Yami {
     if (groups.sessions) addSessionCommands(this);
     if (groups.wiki) addWikiCommands(this);
     addModuleCommands(this);
+    if (options.folderColors ?? true) showFolderColors(this, plugin);
     if (options.statusBar ?? true) {
       this.#status = plugin.addStatusBarItem();
       this.#status.addClass("yami-status");

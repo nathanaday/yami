@@ -5,6 +5,7 @@ import { timestamp, type Schema } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
 import type { Check } from "./checks.js";
+import { mute, type ModuleColors } from "./colors.js";
 import type { NewSession, Session } from "./session.js";
 import type { Yami } from "./yami.js";
 
@@ -249,12 +250,19 @@ export abstract class YamiModule {
   readonly instructions?: string;
   /** Checks that the module's promises can name. They come before the core checks of the same name. */
   readonly checks?: Record<string, Check>;
+  /**
+   * The color of the module's own folder, as a hex code such as `#3e63dd`. Its internal folder takes the
+   * color muted toward gray. Default: a basic color chosen by the module's id, which no other module of the
+   * Yami has while one is free.
+   */
+  readonly color?: string;
 
   /** Every document of the module, in the order the builders made them. */
   readonly documents: ModuleDocument[] = [];
   readonly templates: SessionTemplate[] = [];
   readonly actions: ModuleAction[] = [];
   #yami: Yami | undefined;
+  #color: string | undefined;
 
   /** The vault's Yami. It is set when the module is added to a Yami. */
   get yami(): Yami {
@@ -269,6 +277,12 @@ export abstract class YamiModule {
   /** The vault's one wiki. */
   get wiki(): Wiki {
     return this.yami.wiki;
+  }
+
+  /** The colors of the module's folders, set when the module is added to a Yami. */
+  get colors(): ModuleColors {
+    if (!this.#color) throw new Error(`The ${this.id} module is not added to a Yami yet.`);
+    return { folder: this.#color, internal: mute(this.#color) };
   }
 
   get layout(): Layout {
@@ -299,11 +313,12 @@ export abstract class YamiModule {
     return id === undefined || id === null || id === "" ? this.templates[0] : this.templates.find((t) => t.id === id);
   }
 
-  /** Adds the module to a Yami. A Yami calls it once. */
-  attach(yami: Yami): void {
+  /** Adds the module to a Yami, with the color of its folder. A Yami calls it once. */
+  attach(yami: Yami, color: string): void {
     if (this.#yami && this.#yami !== yami) throw new Error(`The ${this.id} module is already added to another Yami.`);
     if (!ID.test(this.id)) throw new Error(`"${this.id}" cannot be a module id: use lower-case letters, digits, and dashes.`);
     this.#yami = yami;
+    this.#color = color;
   }
 
   /**

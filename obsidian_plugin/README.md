@@ -30,6 +30,8 @@ The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conver
 
 Each module is a folder in `src/modules/`: the class in `index.ts`, and its skills, policies, promises, and agents as markdown files beside it, which the build imports as text. When the plugin loads, each module writes the files that are missing under `internal/<module>/`. Files that exist stay as they are, so you can edit them in the vault.
 
+In the file explorer, each module's folder has the module's color, its folder under `internal/` the same color muted, and `internal/` is gray. The wiki is cyan. The librarian sets its color, `#a0522d`, with `readonly color`; the other modules take a basic color by their id.
+
 | Module | Folder | Templates | Actions |
 | --- | --- | --- | --- |
 | Hello world | `hello/` | Greeting | |

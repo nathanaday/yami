@@ -6,6 +6,7 @@ import { algorithms } from "../wiki/algorithms/index.js";
 import { InvalidPlan, type ChangePlan } from "../wiki/change.js";
 import { CHANGES, SNAPSHOTS, SOURCES, TOPICS, WIKI } from "../wiki/folders.js";
 import { sourceChunks } from "../wiki/source.js";
+import { WIKI_COLOR } from "./colors.js";
 import { YamiModule } from "./module.js";
 
 /** The folder of the ingest skill, where its reference files sit beside SKILL.md. */
@@ -147,6 +148,7 @@ export class WikiModule extends YamiModule {
   readonly name = "Wiki";
   readonly description = "The knowledge base of the vault: topics cited to sources, changed through plans, with a version for each change.";
   readonly sessionsIn = "internal";
+  readonly color = WIKI_COLOR;
   readonly schema: Schema = {
     /** The source notes this session absorbs. */
     sources: { type: "links", default: [] },

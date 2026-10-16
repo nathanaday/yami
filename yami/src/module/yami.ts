@@ -6,6 +6,7 @@ import { SESSION, timestamp, validate, withDefaults } from "../document/schema.j
 import type { Vault } from "../document/vault.js";
 import { captureSource, captureSources, readSources } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
+import { assignColors } from "./colors.js";
 import { checkName, moduleSkills, safeName, SessionTemplate, type LinkedKind, type ModuleDocument, type YamiModule } from "./module.js";
 import { Session, type NewSession, type SessionStatus } from "./session.js";
 import { moduleTools } from "./tools.js";
@@ -70,8 +71,9 @@ export class Yami {
       const core = Object.keys(module.schema ?? {}).filter((field) => field in SESSION);
       if (core.length) throw new Error(`The ${module.id} module's schema holds ${core.join(", ")}, the core session field${core.length === 1 ? "" : "s"} that Yami sets.`);
       ids.add(module.id);
-      module.attach(this);
     }
+    const colors = assignColors(this.modules);
+    for (const module of this.modules) module.attach(this, colors.get(module)!);
     this.#conversations = options.conversations ?? new FileConversations(this.vault);
     this.agents = options.agents ?? [];
     const tools = this.tools();
