@@ -504,7 +504,7 @@ describe("Yami in Obsidian", () => {
       page().evaluate(
         async ([name, state]) => {
           const app = (window as any).app;
-          const session = await app.plugins.plugins.yami.yami.module("hello").templates.find((t: any) => t.id === "greeting").create({ name });
+          const session = await app.plugins.plugins.yami.yami.module("hello").templateOf("greeting").create({ name });
           if (state) await app.fileManager.processFrontMatter(app.vault.getFileByPath(session.path), (fm: any) => (fm.state = state));
           return session.path as string;
         },

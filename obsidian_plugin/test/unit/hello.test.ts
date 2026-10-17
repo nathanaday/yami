@@ -27,7 +27,7 @@ describe("Hello as a vault module", () => {
     expect(module!.templates.map((template) => [template.id, template.label])).toEqual([["greeting", "New greeting"]]);
     expect(t.yami.problems).toEqual([]);
 
-    const session = await module!.templates[0]!.create({ name: "Ada" });
+    const session = await module!.templateOf("greeting")!.create({ name: "Ada" });
     expect((await readDocument(t.vault, session.path)).properties).toMatchObject({ greeting: "Hello", template: "greeting" });
     t.agent.queue(async (prompt) => {
       expect(prompt).toMatch(/^\/yami:run This is the Yami session "Ada"/);
@@ -52,7 +52,7 @@ describe("Hello as a vault module", () => {
   });
 
   it("sends a broken policy back to the worker, and ends done after the fix", async () => {
-    const session = await hello()!.templates[0]!.create({ name: "Bo" });
+    const session = await hello()!.templateOf("greeting")!.create({ name: "Bo" });
     t.agent.queue(
       () => t.vault.write("greetings/Bo.md", "Hi, Bo\n"),
       review({ "Always say hello": ["broken", "It began with Hi."] }),
