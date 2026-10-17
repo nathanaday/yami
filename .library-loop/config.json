@@ -1,0 +1,10 @@
+{
+  "library": "yami",
+  "consumer": "obsidian_plugin",
+  "shared": ["design.md"],
+  "docs": ["README.md", "CHANGELOG.md", "markdown.d.ts", "dist/**/*.d.ts"],
+  "checks": {
+    "library": ["npm run build", "npm test"],
+    "consumer": ["npm run build", "npm test"]
+  }
+}
