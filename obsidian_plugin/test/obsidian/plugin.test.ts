@@ -279,9 +279,7 @@ describe("Yami in Obsidian", () => {
     await page().waitForSelector('.yami-panel [data-key="module:threads"]');
     expect(await page().$('.yami-panel [data-key="module:hello"]')).toBeNull();
 
-    // library-loop: F1.6
-    const newModule = await page().evaluate(() => (window as any).app.commands.listCommands().find((c: any) => c.id.startsWith("yami:") && c.name.endsWith("New module"))?.id as string);
-    await run(newModule);
+    await run("yami:new-module");
     await page().waitForSelector(".modal-container input", { timeout: 5_000 });
     await page().keyboard.type("Hello");
     await page().keyboard.press("Enter");
@@ -592,6 +590,8 @@ describe("Yami in Obsidian", () => {
     await page().waitForFunction(() => document.querySelector(".yami-panel .yami-state-label")?.textContent === "Done", undefined, { timeout: 180_000, polling: 250 });
     expect(await page().textContent('.yami-panel .yami-row:has-text("Greeting note") .yami-row-note')).toBe("Met");
     expect(await page().textContent('.yami-panel .yami-row:has-text("Always say hello") .yami-row-note')).toBe("Followed");
+    expect(await page().textContent('.yami-panel .yami-row:has-text("Greeting note") .yami-row-desc')).toBe(`found greetings/${name}.md`);
+    expect((await page().textContent('.yami-panel .yami-row:has-text("Always say hello") .yami-row-desc'))?.length).toBeGreaterThan(0);
     expect(await page().textContent('.yami-panel .yami-section:has(h3:text-is("Policies")) .yami-section-count')).toBe("1 of 1 followed");
     expect(await page().$$eval(".yami-panel .yami-section-head h3", (els) => els.map((el) => el.textContent))).toEqual(["Promises", "Policies", "Skills", "Conversation", "Progress"]);
     expect(await page().$$eval('.yami-panel .yami-section:has(h3:text-is("Conversation")) .yami-row', (els) => els.map((el) => el.getAttribute("data-key")))).toEqual(["conversation", "review"]);

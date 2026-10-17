@@ -1,5 +1,3 @@
-import { cp } from "node:fs/promises";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { VaultModule } from "yami";
 import { readDocument, sectionText, updateDocument } from "yami/document";
@@ -13,12 +11,9 @@ let t: TestYami;
 let changes: number;
 
 beforeEach(async () => {
-  t = await testYami({ modules: [new Librarian()] });
+  t = await testYami({ modules: [new Librarian()], files: { "internal/hello": FIXTURE } });
   changes = 0;
   t.yami.onModulesChange(() => changes++);
-  // library-loop: F1.4
-  await cp(FIXTURE, path.join(t.root, "internal/hello"), { recursive: true });
-  await t.yami.discover();
 });
 afterEach(() => t.dispose());
 
@@ -31,7 +26,6 @@ describe("Hello as a vault module", () => {
     expect(module).toMatchObject({ name: "Hello world", icon: "hand", description: "Says hello, and writes the greeting to a note in the vault." });
     expect(module!.templates.map((template) => [template.id, template.label])).toEqual([["greeting", "New greeting"]]);
     expect(t.yami.problems).toEqual([]);
-    expect(changes).toBe(1);
 
     const session = await module!.templates[0]!.create({ name: "Ada" });
     expect((await readDocument(t.vault, session.path)).properties).toMatchObject({ greeting: "Hello", template: "greeting" });
@@ -51,9 +45,10 @@ describe("Hello as a vault module", () => {
       broken: [],
     });
     expect(sectionText(doc.body, "Review")).toContain("followed: [[internal/hello/policies/Always say hello|Always say hello]]");
+    expect(t.agent.started[1]!.prompts[0]).toContain("- [x] [[internal/hello/promises/Greeting note|Greeting note]] — found greetings/Ada.md");
     const details = await session.details();
-    expect(details.documents.find((d) => d.kind === "policies")).toMatchObject({ name: "Always say hello", followed: true });
-    expect(details.documents.find((d) => d.kind === "promises")).toMatchObject({ name: "Greeting note", met: true });
+    expect(details.documents.find((d) => d.kind === "policies")).toMatchObject({ name: "Always say hello", followed: true, reason: expect.any(String) });
+    expect(details.documents.find((d) => d.kind === "promises")).toMatchObject({ name: "Greeting note", met: true, judged: false, reason: "found greetings/Ada.md" });
   });
 
   it("sends a broken policy back to the worker, and ends done after the fix", async () => {
@@ -73,9 +68,9 @@ describe("Hello as a vault module", () => {
   it("reports a broken template, keeps the other modules working, and takes the template back once it is fixed", async () => {
     await updateDocument(t.vault, TEMPLATE, (d) => (d.properties.access = "readonly"));
     await t.yami.discover();
-    expect(t.yami.problems).toEqual([{ module: "hello", path: TEMPLATE, message: expect.stringContaining("access") }]);
+    expect(t.yami.problems).toEqual([{ module: "hello", path: TEMPLATE, document: TEMPLATE, message: expect.stringContaining("access") }]);
     expect(hello()?.templates ?? []).toEqual([]);
-    expect(changes).toBe(2);
+    expect(changes).toBe(1);
     expect(t.yami.modules.map((m) => m.id)).toEqual(["wiki", "librarian", "hello"]);
 
     // Another vault module still runs to done.

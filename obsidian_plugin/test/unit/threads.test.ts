@@ -341,7 +341,11 @@ describe("a thread session in the loop", () => {
         await call("round", { thread: "Divide", scope: "heads: calc@a1b2c3d.", results: [{ requirement: "R1", result: "pass", evidence: "ok" }, { requirement: "R2", result: "pass", evidence: "ok" }] });
         await call("close", { thread: "Divide", outcome: "closed", summary: "calc divides safely." });
       },
-      review(),
+      async (prompt, reviewer) => {
+        expect(JSON.parse((await reviewer.tool("threads_status", { thread: "Divide" })).text)).toMatchObject({ phase: "closed" });
+        await expect(reviewer.tool("threads_close", { thread: "Divide", outcome: "dropped", reason: "no" })).rejects.toThrow();
+        return review()(prompt, reviewer);
+      },
     );
     const result = await t.yami.session(PATH).start();
     expect(result).toMatchObject({ state: "done", iterations: 1 });

@@ -135,6 +135,7 @@ export class Threads extends YamiModule {
         name: "status",
         description: "One thread's phase, next step, plan counts, last round, and problems; or, with no thread, the open threads, the most urgent first. Reads only.",
         input: { thread: z.string().optional().describe("The thread: its title, a [[link]] to it, or its path.") },
+        readOnly: true,
         title: ({ thread: t }) => (t ? `Status of ${t.slice(0, 60)}` : "List the open threads"),
         run: async ({ thread: t }) => json(await status(vault, t)),
       }),

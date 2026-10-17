@@ -29,7 +29,7 @@ const COUNT_ORDER: SessionStatus[] = ["working", "checking", "reviewing", "needs
 export class YamiPanel extends ItemView {
   private place: Place = { level: "modules" };
   private ticket = 0;
-  private unsubscribe: (() => void)[] = [];
+  private unsubscribe?: () => void;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -61,12 +61,12 @@ export class YamiPanel extends ItemView {
         this.up();
       }
     });
-    this.unsubscribe = [this.yami.onSessionsChange(() => void this.render()), this.yami.onModulesChange(() => void this.render())];
+    this.unsubscribe = this.yami.onSessionsChange(() => void this.render());
     await this.render();
   }
 
   async onClose(): Promise<void> {
-    for (const stop of this.unsubscribe) stop();
+    this.unsubscribe?.();
   }
 
   /** Shows a place: the modules, one module, or one session. `focus` names the element to focus there. */
@@ -173,8 +173,7 @@ export class YamiPanel extends ItemView {
     const group = ui.section(page, "Problems", `${problems.length}`);
     group.addClass("yami-problems");
     for (const problem of problems) {
-      // library-loop: F1.3
-      const document = problem.path.endsWith(".md") ? problem.path : undefined;
+      const document = problem.document;
       const row = ui.row(group, `problem:${problem.path}:${problem.message}`, (evt) => document && void this.yami.open(document, modeOf(evt)));
       row.addClass("yami-problem-row");
       if (!document) row.addClass("is-missing");
@@ -303,11 +302,13 @@ export class YamiPanel extends ItemView {
     const passed = verdict(doc);
     const glyph = ui.icon(row, passed === undefined ? kindIcon : passed ? "check" : "x");
     if (passed !== undefined) glyph.addClass(passed ? "is-met" : "is-unmet");
-    row.createDiv({ cls: "yami-row-name", text: doc.name });
+    const text = row.createDiv({ cls: "yami-row-text" });
+    text.createDiv({ cls: "yami-row-name", text: doc.name });
+    if (doc.reason) text.createDiv({ cls: "yami-row-desc", text: doc.reason, attr: { title: doc.reason } });
     const note = !path
       ? "Missing"
       : doc.kind === "promises"
-        ? passed === undefined ? "Not checked" : passed ? "Met" : "Not met"
+        ? passed === undefined ? (doc.judged ? "Not reviewed" : "Not checked") : passed ? "Met" : "Not met"
         : doc.kind === "policies"
           ? passed === undefined ? "Not reviewed" : passed ? "Followed" : "Broken"
           : undefined;
