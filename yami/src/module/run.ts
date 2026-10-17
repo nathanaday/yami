@@ -24,6 +24,12 @@ import { isJudged, Review, reviewFeedback, reviewPrompt, type ReviewItem } from 
 import type { Yami } from "./yami.js";
 import { reviewTool } from "./yami-tools.js";
 
+/**
+ * How a run ended, as `session.start()` and `session.resume()` resolve.
+ * @example
+ * const result = await session.start();
+ * if (result.state !== "done") new Notice(`${result.state}: ${result.reason ?? ""}`);
+ */
 export interface RunResult {
   path: string;
   /** The state the run left in the session document. */
@@ -34,6 +40,12 @@ export interface RunResult {
   conversation?: string;
   /** The conversation note of the run's last review, when it had one. */
   review?: string;
+  /**
+   * Why the run ended `failed` or `needs-attention`: the line that it recorded last in the Progress section,
+   * without the time, such as `iteration 1: turn failed: …` or `iteration 3: 1 met, 1 unmet`. None for any
+   * other state.
+   */
+  reason?: string;
 }
 
 /** How a session handle and its run talk: the run reports its phase, and the handle asks it to stop. */
@@ -124,7 +136,12 @@ export async function runSession(
     ...judged.map((d): ReviewItem => ({ kind: "promise", name: documentName(d.path), path: d.path })),
   ];
   const kind = template ? `a "${template.name}" session of the module "${module.name}"` : `a session of the module "${module.name}"`;
-  const write = (outcome: Outcome) => record(vault, path, linked.promises, outcome);
+  // The last Progress line, which says why a run that did not end done ended.
+  let reason = "";
+  const write = (outcome: Outcome) => {
+    reason = oneLine(outcome.line);
+    return record(vault, path, linked.promises, outcome);
+  };
 
   let conversation: Conversation | undefined;
   let reviewNote: string | undefined;
@@ -252,7 +269,14 @@ export async function runSession(
     control.conversation = undefined;
     await conversation?.close();
   }
-  return { path, state, iterations: iteration - start, conversation: conversation?.path ?? earlier, ...(reviewNote && { review: reviewNote }) };
+  return {
+    path,
+    state,
+    iterations: iteration - start,
+    conversation: conversation?.path ?? earlier,
+    ...(reviewNote && { review: reviewNote }),
+    ...((state === "failed" || state === "needs-attention") && { reason }),
+  };
 }
 
 /**

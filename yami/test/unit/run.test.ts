@@ -37,6 +37,7 @@ describe("a run of the agent loop", () => {
     agent.queue(() => {}, write("second"), review());
     const result = await session.start();
     expect(result).toMatchObject({ state: "done", iterations: 2 });
+    expect(result.reason).toBeUndefined();
     const [first, second] = agent.started[0]!.prompts;
     expect(first).toContain('This is the Yami session "second", a "Greeting" session of the module "Hello world". The session document is hello/second.md.');
     expect(first).toContain("## Policies");
@@ -102,8 +103,8 @@ describe("a run of the agent loop", () => {
 
   it("needs attention when the iterations run out, by the template's count or the run's", async () => {
     const { session, vault, path } = await fresh("never");
-    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 3 });
-    expect(await session.start({ maxIterations: 1 })).toMatchObject({ state: "needs-attention", iterations: 1 });
+    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 3, reason: "iteration 3: 0 met, 1 unmet" });
+    expect(await session.start({ maxIterations: 1 })).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 4: 0 met, 1 unmet" });
     const doc = await vault.read(path);
     expect(doc).toContain("state: needs-attention");
     expect(doc).toContain("iteration: 4");
@@ -119,7 +120,7 @@ describe("a run of the agent loop", () => {
     const manual = new Manual();
     t = await testYami({ modules: [manual] });
     const session = await manual.judge.create({ name: "manual" });
-    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1 });
+    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 1: review: 0 met, 0 unmet; no verdict on Judged" });
     const doc = await t.vault.read(session.path);
     expect(doc).toContain("iteration 1: 0 met, 0 unmet");
     expect(doc).toContain("iteration 1: review: 0 met, 0 unmet; no verdict on Judged");
@@ -128,7 +129,7 @@ describe("a run of the agent loop", () => {
 
   it("fails when the harness fails", async () => {
     const { session, vault, path } = await fresh("broken", new Hello(), [() => ({ status: "failed", error: "boom" })]);
-    expect((await session.start()).state).toBe("failed");
+    expect(await session.start()).toMatchObject({ state: "failed", reason: "iteration 1: turn failed: boom" });
     const doc = await vault.read(path);
     expect(doc).toContain("state: failed");
     expect(doc).toContain("iteration 1: turn failed: boom");
@@ -429,7 +430,7 @@ describe("a note whose properties do not parse", () => {
 
   it("keeps a progress line on one line, whatever the error holds", async () => {
     const { session, vault, path } = await fresh("lines", new Hello(), [() => ({ status: "failed", error: "first line\n\n   second line\n   ^" })]);
-    await session.start();
+    expect((await session.start()).reason).toBe("iteration 1: turn failed: first line second line ^");
     const progress = (await vault.read(path)).split("## Progress\n")[1]!;
     expect(progress).toMatch(/^- \d\d:\d\d iteration 1: turn failed: first line second line \^\n$/);
   });

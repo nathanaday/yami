@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({}));
 
-import type { Properties } from "../../../src/index.js";
+import { BASE_SKILL, BASE_SKILL_TEXT, type Properties } from "../../../src/index.js";
 import { watchModules } from "../../../src/obsidian/discovery.js";
 import { testYami, type TestYami } from "../../../src/testing/index.js";
 
@@ -85,6 +85,25 @@ describe("watchModules", () => {
     obsidian.fire("delete", TEMPLATE);
     await change;
     expect(t.yami.module("notes")).toBeUndefined();
+    obsidian.unload();
+  });
+
+  it("discovers again a moment after the base skill changes, so its problem comes and goes", async () => {
+    t = await testYami();
+    const obsidian = fakeObsidian();
+    watchModules(obsidian.app, obsidian.component, t.yami);
+
+    await t.vault.write(BASE_SKILL, `${BASE_SKILL_TEXT}\nMy own rule.\n`);
+    let change = nextChange();
+    obsidian.fire("modify", BASE_SKILL);
+    await change;
+    expect(t.yami.problems.map((problem) => problem.path)).toEqual([BASE_SKILL]);
+
+    await t.vault.write(BASE_SKILL, BASE_SKILL_TEXT);
+    change = nextChange();
+    obsidian.fire("modify", BASE_SKILL);
+    await change;
+    expect(t.yami.problems).toEqual([]);
     obsidian.unload();
   });
 

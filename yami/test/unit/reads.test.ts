@@ -118,6 +118,14 @@ describe("what a view of the sessions reads", () => {
     expect(await start.run()).toBe("said: done after 1 iteration.");
   });
 
+  it("says why a run that an act began did not end done", async () => {
+    const { rich, agent } = await fresh();
+    const session = await rich.greet.create({ name: "sunk" });
+    agent.queue(() => ({ status: "failed", error: "boom" }));
+    const start = session.acts((await session.read()).properties)[0]!;
+    expect(await start.run()).toBe("sunk: failed after 1 iteration: iteration 1: turn failed: boom");
+  });
+
   it("keeps stop and kill for a live run whose document names a template the module lacks", async () => {
     const { rich, agent } = await fresh();
     const session = await rich.greet.create({ name: "odd" });

@@ -98,11 +98,18 @@ describe("the review step", () => {
   it("needs attention when the reviewer gives no verdict, and says on what", async () => {
     const { session, agent, vault, path } = await fresh("silent");
     agent.queue(write("silent"), () => ({ text: "Looks fine." }));
-    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1 });
+    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 1: review: 0 followed, 0 broken; no verdict on Always say hello" });
     const doc = await vault.read(path);
     expect(doc).toContain("iteration 1: review: 0 followed, 0 broken; no verdict on Always say hello");
     expect(doc).toContain(`## Review\n- no verdict: ${POLICY}`);
     expect(await session.status()).toBe("needs-attention");
+  });
+
+  it("fails when the reviewer's turn fails, and the result says why", async () => {
+    const { session, agent, vault, path } = await fresh("unreviewed");
+    agent.queue(write("unreviewed"), () => ({ status: "failed", error: "The session has no tool wiki_change." }));
+    expect(await session.start()).toMatchObject({ state: "failed", iterations: 1, reason: "iteration 1: review failed: The session has no tool wiki_change." });
+    expect(await vault.read(path)).toContain("iteration 1: review failed: The session has no tool wiki_change.");
   });
 
   it("needs attention when the review finds a policy broken on the last iteration", async () => {
@@ -123,7 +130,9 @@ describe("the review step", () => {
     expect(await session.status()).toBe("reviewing");
     expect((await yami.summaries())[0]!.status).toBe("reviewing");
     await session.stop();
-    expect(await run).toMatchObject({ state: "stopped", iterations: 1 });
+    const stopped = await run;
+    expect(stopped).toMatchObject({ state: "stopped", iterations: 1 });
+    expect(stopped.reason).toBeUndefined();
     expect(seen).toEqual(["working", "checking", "reviewing", "stopped"]);
     const doc = await vault.read(path);
     expect(doc).toContain("iteration 1: review stopped");

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0 · library-loop vault-modules round 3
+
+### Breaking
+- `yami.problems` can hold a problem of the module `yami`, which is no module of `yami.modules`: the base skill holds a person's edits. Its `path` and `document` are `BASE_SKILL`. Migrate a view that looks up each problem's module: `yami.module(problem.module)!` → `yami.module(problem.module)`, and show a problem with no module by its `document`.
+
+### Added
+- `RunResult.reason`: why a run ended `failed` or `needs-attention`, the same text as the last Progress line without its time. `expect(await session.start()).toMatchObject({ state: "done" })` now shows the reason in the diff of a failed test. A session act's message ends with it: `PR 12: failed after 1 iteration: iteration 1: turn failed: boom`.
+- `VERSION` from `yami`: the version of the package, `"0.4.0"`.
+
+### Changed
+- `yami.discover()`, and so `yami.enable()`, replaces the base skill when the file holds a text that an earlier version of Yami shipped, since the person never edited it. A vault that ran 0.2.0 gets the new text at the next start. A file with any other text stays, and `yami.problems` reports it. A deleted base skill comes back at the next `discover`.
+- `watchModules`, and so `createYami`, discovers again when the base skill changes, so its problem comes and goes with the edit.
+
 ## 0.3.0 · library-loop vault-modules round 2
 
 ### Breaking

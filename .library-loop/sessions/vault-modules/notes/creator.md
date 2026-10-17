@@ -14,7 +14,15 @@
 - Trigger audit: `watchModules(app, component, yami)` in `src/obsidian/discovery.ts`. `ChangeFeed` moved to `change-feed.ts`. Tests: `test/unit/obsidian/discovery.test.ts`.
 - Generic examples: the base skill uses `/<module>:<skill>`. README, module, and testing docs use `notes` and `code-review`, not hello.
 
+## Round 3 (0.4.0): decisions
+- F2.1: `RunResult.reason`, only for `failed` and `needs-attention`. It is the last `write` line, cut by `oneLine`, without the time. Named `reason`, not `error`, to match `SessionDocument.reason`. A session act's message ends with `: <reason>`.
+- F2.2: `installBaseSkill(vault)` in `base-skill.ts`, called at the start of each `#discover`. Missing, or a hash in `SHIPPED` → write. Another text → problem `{ module: "yami", path/document: BASE_SKILL }`. `SHIPPED` holds the hash of every shipped text, the current one too. A test fails when `BASE_SKILL_TEXT` changes until its hash is added. `watchModules` also fires on `BASE_SKILL`. Listed as Breaking: a problem's module may not be in `yami.modules`.
+- F2.3: `VERSION` in `src/version.ts`. A test compares it with `package.json`.
+- Policy proposal: an exception to Entities item 5 for the base skill.
+
 ## Watch next round
 - Showcase module tools that only read and that a reviewer needs must add `readOnly: true`.
 - The Deliverables detail of a check is not cut to one line. A multi-line check detail would break the `reason` parse and the checklist line.
 - Field-type conflict rule: the first template by file name wins.
+- Each version bump: `package.json`, `package-lock.json`, `src/version.ts`. Each change of the base skill text: add its hash to `SHIPPED`.
+- The overseer takes the update question for the documents of code modules to the user.

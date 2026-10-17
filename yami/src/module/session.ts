@@ -257,7 +257,7 @@ export class Session {
       return [];
     }
     const ended = (more: string) => (result: RunResult) =>
-      `${name}: ${STATUS_LABELS[result.state === "running" ? "stopped" : result.state].toLowerCase()} after ${result.iterations}${more} iteration${result.iterations === 1 ? "" : "s"}.`;
+      `${name}: ${STATUS_LABELS[result.state === "running" ? "stopped" : result.state].toLowerCase()} after ${result.iterations}${more} iteration${result.iterations === 1 ? "" : "s"}${result.reason ? `: ${result.reason}` : "."}`;
     const acts: SessionAct[] = this.yami.agents.map((agent) => ({
       kind: "start",
       label: `Run with ${capitalize(this.yami.agentName(agent))}`,

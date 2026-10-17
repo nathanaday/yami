@@ -40,6 +40,7 @@ export {
 } from "./module/session.js";
 export { VaultModule, type ModuleProblem } from "./module/vault-module.js";
 export { BASE_SKILL, BASE_SKILL_COMMAND, BASE_SKILL_TEXT } from "./module/base-skill.js";
+export { VERSION } from "./version.js";
 export type { ReviewItem, ReviewRecord, Verdict } from "./module/review.js";
 export { LINKED_KINDS, type LinkedDocument } from "./module/links.js";
 export { assignColors, hexColor, INTERNAL_COLOR, MODULE_COLORS, mute, WIKI_COLOR, type ModuleColors } from "./module/colors.js";

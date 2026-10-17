@@ -6,7 +6,7 @@ import { SESSION, timestamp, validate, withDefaults } from "../document/schema.j
 import type { Vault } from "../document/vault.js";
 import { captureSource, captureSources, readSources } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
-import { BASE_SKILL, BASE_SKILL_TEXT, YAMI_ID, YAMI_SKILLS } from "./base-skill.js";
+import { installBaseSkill, YAMI_ID, YAMI_SKILLS } from "./base-skill.js";
 import { assignColors } from "./colors.js";
 import { checkName, ID, idFromName, INTERNAL, moduleSkills, safeName, SessionTemplate, type DocumentRef, type LinkedKind, type YamiModule } from "./module.js";
 import { Session, type NewSession, type SessionStatus, type SessionSummary } from "./session.js";
@@ -100,8 +100,10 @@ export class Yami {
   }
 
   /**
-   * What keeps a vault module or a template out, from the last `discover`: each problem with its module,
-   * its file, and how to fix it. Code modules have none: a code module that is not valid throws when it is built.
+   * What a person must fix or know, from the last `discover`: each problem with its module, its file, and
+   * what to do. A problem of a vault module or a template keeps it out. A problem of the module `yami` says
+   * that the base skill holds a person's edits, so it lacks this version's text. Code modules have none: a
+   * code module that is not valid throws when it is built.
    */
   get problems(): readonly ModuleProblem[] {
     return this.#problems;
@@ -139,11 +141,13 @@ export class Yami {
   }
 
   /**
-   * Reads the vault modules again, and updates `modules` and `problems`. A module whose documents did not
+   * Writes the base skill when it is missing or holds a text that an earlier Yami shipped, reads the vault
+   * modules again, and updates `modules` and `problems`. A module whose documents did not
    * change keeps its object. A new module gets its ledger, the agents get the skill sets of the modules as
    * they are now, and the listeners of `onModulesChange` hear of any change. A live run keeps the module and
    * the template it started with. Calls run one after another. `enable` calls it, and `createYami` calls it
-   * when a module document or a template document changes, or a file is created, renamed, or removed.
+   * when a module document, a template document, or the base skill changes, or a file is created, renamed,
+   * or removed.
    */
   discover(): Promise<void> {
     const next = this.#discovery.then(() => this.#discover());
@@ -152,7 +156,9 @@ export class Yami {
   }
 
   async #discover(): Promise<void> {
-    const { definitions, problems } = await readVaultModules(this.vault, new Set(this.#code.map((m) => m.id)));
+    const skill = await installBaseSkill(this.vault);
+    const { definitions, problems: found } = await readVaultModules(this.vault, new Set(this.#code.map((m) => m.id)));
+    const problems = skill ? [skill, ...found] : found;
     let changed = JSON.stringify(problems) !== JSON.stringify(this.#problems) || definitions.length !== this.#vault.length;
     const added: VaultModule[] = [];
     const modules = definitions.map((definition) => {
@@ -232,8 +238,8 @@ export class Yami {
 
   /**
    * Writes the files of every code module that are missing (the ledgers, the module documents, and the
-   * module's documents) and the base skill, then finds the vault modules with `discover`. Files that exist
-   * stay as they are, so a host calls it on every start.
+   * module's documents), then writes the base skill and finds the vault modules with `discover`. Files that
+   * exist stay as they are, except a base skill that a person never edited, so a host calls it on every start.
    */
   async enable(): Promise<void> {
     const failed: string[] = [];
@@ -245,7 +251,6 @@ export class Yami {
       }
     }
     try {
-      if (!(await this.vault.exists(BASE_SKILL))) await this.vault.write(BASE_SKILL, BASE_SKILL_TEXT);
       await this.discover();
     } catch (error) {
       failed.push(`the vault modules: ${error instanceof Error ? error.message : String(error)}`);

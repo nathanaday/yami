@@ -6,9 +6,12 @@ import { hexColor } from "./colors.js";
 import { linkedDocuments } from "./links.js";
 import { ID, idFromName, INTERNAL, MODULE_ICON, moduleLayout, YamiModule, type DocumentKind, type DocumentRef, type LinkedKind, type TemplateOptions } from "./module.js";
 
-/** Something wrong with a vault module's documents, which keeps a module or a template out until a person fixes it. */
+/**
+ * Something wrong with a vault module's documents, which keeps a module or a template out until a person
+ * fixes it. Or, with the module `yami`, a base skill that holds a person's edits and not this version's text.
+ */
 export interface ModuleProblem {
-  /** The module's id: the name of its folder under `internal/`. */
+  /** The module's id: the name of its folder under `internal/`. `yami` for the base skill. */
   module: string;
   /** The vault path of the document with the problem, or of the module's folder. */
   path: string;

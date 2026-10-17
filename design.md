@@ -60,7 +60,7 @@ The showcase also has two views. The wiki navigator, `obsidian_plugin/src/naviga
 2. Links are the identity of documents. Yami generates no IDs. A session refers to its policies, promises, skills, and articles as `[[links]]` in its properties.
 3. A session is one document. It is the front page of the work: its properties hold the state, the links, the template, and the module's own fields; its body holds the deliverables checklist and the progress. There is no other record of a session's state. The exchange with the agent goes to a conversation note, linked from the document.
 4. A module declares its session fields as a schema, in the same form as the core schemas. Core field names (`type`, `module`, `template`, `state`, `created`, `iteration`, `harness`, `conversation`, `articles`, `policies`, `promises`, `skills`, `met`, `unmet`, `review`, `followed`, `broken`) are reserved: `Yami` refuses a schema that declares one, and a new session whose fields set one.
-5. A module installs its documents into the vault, and never overwrites a document that exists. Users read and edit them in Obsidian.
+5. A module installs its documents into the vault, and never overwrites a document that exists. Users read and edit them in Obsidian. Yami's own base skill is the one exception. When the file holds a text that an earlier version of Yami shipped, Yami replaces it, because the person never edited it. When the file holds any other text, Yami keeps it, and `yami.problems` reports that it differs from this version's text.
 6. A template sets the links of a new session. A session can link to different documents, and the loop uses the session's links, not the template's.
 
 ## Layout
