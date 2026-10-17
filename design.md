@@ -102,7 +102,8 @@ internal/wiki/              the wiki module's own: its sessions and ledger, the 
 
 ```
 obsidian_plugin       the showcase plugin: createYami with its agents and its modules
-  src/modules/*       the showcase modules: hello, threads, librarian, journals
+  src/modules/*       the showcase modules: threads, librarian, journals
+  test/fixtures/vault-modules/  hello, the showcase's vault module
   src/panel/          the showcase panel: a view over the read API and the acts
   src/navigator/      the wiki navigator: a view over the tag hierarchy
 yami/obsidian         the Obsidian layer: createYami, the Vault adapter, shared documents, conversation notes, prompts, commands
