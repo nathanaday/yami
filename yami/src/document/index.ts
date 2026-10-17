@@ -25,6 +25,7 @@ export {
   PROMISE,
   SESSION,
   SESSION_STATES,
+  TEMPLATE,
   timestamp,
   validate,
   withDefaults,

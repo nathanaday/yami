@@ -1,6 +1,6 @@
 import type { Properties } from "./vault.js";
 
-export type FieldType = "text" | "number" | "boolean" | "date" | "list" | "link" | "links";
+export type FieldType = "text" | "number" | "boolean" | "date" | "list" | "link" | "links" | "map";
 
 export interface Field {
   type: FieldType;
@@ -12,7 +12,7 @@ export interface Field {
 
 export type Schema = Record<string, Field>;
 
-export const DOCUMENT_TYPES = ["module", "session", "policy", "promise", "skill", "conversation", "topic", "source", "snapshot", "change"] as const;
+export const DOCUMENT_TYPES = ["module", "template", "session", "policy", "promise", "skill", "conversation", "topic", "source", "snapshot", "change"] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 export const SESSION_STATES = ["open", "running", "done", "failed", "needs-attention", "stopped"] as const;
@@ -27,6 +27,35 @@ export const MODULE: Schema = {
   name: { type: "text", required: true },
   description: { type: "text" },
   created: { type: "date" },
+  /** A vault module's icon, a name in the host's icon set. */
+  icon: { type: "text" },
+  /** A vault module's color, as a hex code such as `#3e63dd`. */
+  color: { type: "text" },
+  /** A vault module's instructions, added to the first prompt of each run. */
+  instructions: { type: "text" },
+};
+
+/** One kind of session of a vault module, in `internal/<id>/templates/`. Its body is the body of a new session. */
+export const TEMPLATE: Schema = {
+  type: typed("template"),
+  module: { type: "text" },
+  /** Default: the file name. */
+  name: { type: "text" },
+  description: { type: "text" },
+  /** The documents that a new session links. The first skill loads first. */
+  skills: links,
+  policies: links,
+  promises: links,
+  articles: links,
+  /** Agent turns in one run. Default 3. */
+  maxIterations: { type: "number" },
+  access: { type: "text", values: ["edit", "read-only"] },
+  /** Text added to the first prompt of a run, after the module's instructions. */
+  instructions: { type: "text" },
+  /** The session fields of a new session, each with its default. */
+  fields: { type: "map" },
+  /** Whether a host offers a command that creates a session. Default true. */
+  command: { type: "boolean" },
 };
 
 export const SESSION: Schema = {
@@ -46,6 +75,11 @@ export const SESSION: Schema = {
   skills: links,
   met: links,
   unmet: links,
+  /** The conversation note of the last review. */
+  review: { type: "link" },
+  /** The policies that the last review found followed, and broken. */
+  followed: links,
+  broken: links,
 };
 
 export const CONVERSATION: Schema = {
@@ -197,11 +231,13 @@ function matches(value: unknown, type: FieldType): boolean {
     case "list":
     case "links":
       return Array.isArray(value);
+    case "map":
+      return typeof value === "object" && !Array.isArray(value);
   }
 }
 
 function describe(type: FieldType): string {
-  return type === "list" || type === "links" ? "a list" : type === "number" ? "a number" : type === "boolean" ? "true or false" : "text";
+  return type === "list" || type === "links" ? "a list" : type === "map" ? "names with values" : type === "number" ? "a number" : type === "boolean" ? "true or false" : "text";
 }
 
 /** The current local time as `YYYY-MM-DDTHH:MM:SS`, the form that Obsidian shows as a date. */

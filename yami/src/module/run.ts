@@ -1,5 +1,5 @@
 import type { Agent } from "../agent/agent.js";
-import type { Conversation } from "../conversation/conversations.js";
+import type { Conversation, ConversationTurn } from "../conversation/conversations.js";
 import {
   basename,
   documentName,
@@ -16,9 +16,11 @@ import {
 import { timestamp, type SessionState } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
+import { BASE_SKILL, BASE_SKILL_COMMAND, BASE_SKILL_TEXT, YAMI_SKILLS } from "./base-skill.js";
 import { runCheck, type CheckResult } from "./checks.js";
 import { linkedDocuments } from "./links.js";
 import { skillCommand, type Layout, type LinkedKind, type SessionTemplate, type YamiModule } from "./module.js";
+import { isJudged, Review, reviewFeedback, reviewPrompt, type ReviewItem } from "./review.js";
 import type { Yami } from "./yami.js";
 
 export interface RunResult {
@@ -29,24 +31,45 @@ export interface RunResult {
   iterations: number;
   /** The conversation note that records the run. None when the run ended before it opened one. */
   conversation?: string;
+  /** The conversation note of the run's last review, when it had one. */
+  review?: string;
 }
 
 /** How a session handle and its run talk: the run reports its phase, and the handle asks it to stop. */
 export interface RunControl {
   /** Set by stop and kill. The run ends at its next step and records `stopped`. */
   stopping: boolean;
-  /** The conversation of the run, while it is open. */
+  /** The conversation that is live now: the worker's, or the reviewer's during a review. */
   conversation?: Conversation;
-  phase(phase: "working" | "checking"): void;
+  /** The review in progress, which `yami_review` records into. */
+  review?: Review;
+  phase(phase: "working" | "checking" | "reviewing"): void;
 }
 
 type Linked = Record<LinkedKind, Document[]>;
 
 interface Verification {
+  /** The results of the promises that have a check. */
   results: { promise: Document; result: CheckResult }[];
   met: string[];
   unmet: string[];
   review: string[];
+}
+
+/** One promise's check, as `session.check()` gives it. */
+export interface PromiseCheck extends CheckResult {
+  /** The promise, as a vault path. */
+  promise: string;
+  /** The promise's name. */
+  name: string;
+}
+
+/** The code checks of a session's promises now. */
+export interface SessionCheck {
+  /** Each promise that has a check, with its result. */
+  checks: PromiseCheck[];
+  /** The promises with no check, as vault paths: the review judges them after a turn. */
+  judged: string[];
 }
 
 /** The module and the template of a session document. */
@@ -60,10 +83,23 @@ export function sessionParts(yami: Yami, doc: Document): { module: YamiModule; t
   return { module, template };
 }
 
+/** Runs the code checks of a session's promises, and records nothing. */
+export async function checkSession(yami: Yami, path: string): Promise<SessionCheck> {
+  const doc = await readDocument(yami.vault, path);
+  const { module } = sessionParts(yami, doc);
+  const linked = await loadLinked(yami.vault, module.layout, doc);
+  const verification = await verify(yami.vault, yami.wiki, module, doc, linked.promises);
+  return {
+    checks: verification.results.map(({ promise, result }) => ({ promise: promise.path, name: documentName(promise.path), ...result })),
+    judged: linked.promises.filter(isJudged).map((promise) => promise.path),
+  };
+}
+
 /**
- * Runs the agent loop on a session document until every promise is met, the iterations run out, the
- * harness fails, or the person stops it. Each iteration is one agent turn and one verification, and the
- * document shows the state after each one. The exchange goes to a conversation note, linked from the
+ * Runs the agent loop on a session document until every promise is met and every policy followed, the
+ * iterations run out, the harness fails, or the person stops it. Each iteration is one agent turn and one
+ * verification, and a review when the checks pass and the session has something for a reviewer to judge.
+ * The document shows the state after each step. The exchange goes to a conversation note, linked from the
  * document. A resumed run checks the promises first, and continues the session's conversation.
  */
 export async function runSession(
@@ -83,81 +119,175 @@ export async function runSession(
   const last = start + turns;
   const recorded = options.resume ? linksOf(doc.properties.conversation)[0] : undefined;
   const earlier = recorded ? await resolveLink(vault, recorded, []) : undefined;
+  const judged = linked.promises.filter(isJudged);
+  const items: ReviewItem[] = [
+    ...linked.policies.map((d): ReviewItem => ({ kind: "policy", name: documentName(d.path), path: d.path })),
+    ...judged.map((d): ReviewItem => ({ kind: "promise", name: documentName(d.path), path: d.path })),
+  ];
+  const kind = template ? `a "${template.name}" session of the module "${module.name}"` : `a session of the module "${module.name}"`;
+  const write = (outcome: Outcome) => record(vault, path, linked.promises, outcome);
 
+  let conversation: Conversation | undefined;
+  let reviewNote: string | undefined;
   let feedback: string | undefined;
-  if (earlier) {
-    control.phase("checking");
-    const verification = await verify(vault, yami.wiki, module, doc, linked.promises);
-    if (!verification.unmet.length) {
-      const state = verification.review.length ? "needs-attention" : "done";
-      await record(vault, path, { iteration: start, line: `resumed: ${summary(verification)}`, verification, state });
-      return { path, state, iterations: 0, conversation: earlier };
-    }
-    feedback = feedbackPrompt(verification);
-  }
-
-  const conversation = await yami.openConversation({
-    agent,
-    name: `${module.id} ${basename(path)}`,
-    folder: yami.conversationFolder,
-    module: path,
-    approval: "accept-edits",
-    access: template?.access,
-    resume: earlier,
-  });
-  control.conversation = conversation;
-  // A conversation that kept its harness session needs only the feedback; any other gets the whole context first.
-  let prompt = conversation.continued && feedback ? feedback : [contextPrompt(vault, agent, module, template, doc, linked, path), feedback].filter(Boolean).join("\n\n");
-  await updateDocument(vault, path, (d) => {
-    d.properties.state = "running";
-    d.properties.harness = agent.harness;
-    d.properties.conversation = link(conversation.path);
-  });
-
+  let reply: string | undefined;
   let state: SessionState = "needs-attention";
   let iteration = start;
+  // A start begins with a turn; a resume checks first, so a session whose work is done needs no turn.
+  let turn = !earlier;
   try {
-    while (iteration < last) {
-      if (control.stopping) {
-        state = "stopped";
-        await record(vault, path, { iteration, line: "stopped", state });
-        break;
-      }
-      iteration += 1;
-      control.phase("working");
-      const result = await conversation.send(prompt);
-      if (result.status === "failed" && !control.stopping) {
-        state = "failed";
-        await record(vault, path, { iteration, line: `iteration ${iteration}: turn failed: ${result.error ?? "no details"}`, state });
-        break;
+    for (;;) {
+      let interrupted = false;
+      if (turn) {
+        if (control.stopping) {
+          state = "stopped";
+          await write({ iteration, line: "stopped", state });
+          break;
+        }
+        let prompt = feedback ?? "";
+        if (!conversation) {
+          conversation = await yami.openConversation({
+            agent,
+            name: `${module.id} ${basename(path)}`,
+            folder: yami.conversationFolder,
+            module: path,
+            approval: "accept-edits",
+            access: template?.access,
+            resume: earlier,
+          });
+          const opened = conversation;
+          await updateDocument(vault, path, (d) => {
+            d.properties.state = "running";
+            d.properties.harness = agent.harness;
+            d.properties.conversation = link(opened.path);
+          });
+          // A conversation that kept its harness session needs only the feedback; any other gets the whole context first.
+          if (!(conversation.continued && feedback)) prompt = [await contextPrompt(vault, agent, module, template, doc, linked, path, kind), feedback].filter(Boolean).join("\n\n");
+        }
+        control.conversation = conversation;
+        iteration += 1;
+        control.phase("working");
+        const result = await conversation.send(prompt);
+        reply = result.text;
+        if (result.status === "failed" && !control.stopping) {
+          state = "failed";
+          await write({ iteration, line: `iteration ${iteration}: turn failed: ${result.error ?? "no details"}`, state });
+          break;
+        }
+        interrupted = control.stopping || result.status === "interrupted";
       }
       control.phase("checking");
       // The agent's tools change the session's properties, for example its changes, so the checks read it again.
       doc = await readDocument(vault, path);
       const verification = await verify(vault, yami.wiki, module, doc, linked.promises);
-      const line = `iteration ${iteration}: ${summary(verification)}`;
-      if (verification.unmet.length === 0) {
-        state = verification.review.length === 0 ? "done" : "needs-attention";
-        await record(vault, path, { iteration, line, verification, state });
+      const step = turn ? `iteration ${iteration}` : "resumed";
+      const line = `${step}: ${summary(verification)}`;
+      if (verification.unmet.length) {
+        feedback = feedbackPrompt(verification);
+        if (!turn) {
+          turn = true;
+          continue;
+        }
+        if (interrupted) {
+          state = "stopped";
+          await write({ iteration, line: `${line}; stopped`, verification, state });
+          break;
+        }
+        state = iteration < last ? "running" : "needs-attention";
+        await write({ iteration, line, verification, state });
+        if (state === "running") continue;
+        break;
+      }
+      if (verification.review.length || !items.length) {
+        state = verification.review.length ? "needs-attention" : "done";
+        await write({ iteration, line, verification, state });
+        break;
+      }
+      if (interrupted || control.stopping) {
+        state = "stopped";
+        await write({ iteration, line: `${line}; stopped`, verification, state });
+        break;
+      }
+      await write({ iteration, line, verification, state: "running" });
+
+      control.phase("reviewing");
+      const review = new Review(items);
+      const prompt = reviewPrompt({ path, kind, conversation: conversation?.path ?? earlier, session: doc, reply, policies: linked.policies, promises: judged });
+      const { note, result } = await runReview(yami, agent, control, review, { path, name: `${module.id} ${basename(path)} review`, prompt, worker: conversation });
+      reviewNote = note;
+      if (result.status === "failed" && !control.stopping) {
+        state = "failed";
+        await write({ iteration, line: `${step}: review failed: ${result.error ?? "no details"}`, state });
         break;
       }
       if (control.stopping || result.status === "interrupted") {
         state = "stopped";
-        await record(vault, path, { iteration, line: `${line}; stopped`, verification, state });
+        await write({ iteration, line: `${step}: review stopped`, state });
         break;
       }
-      await record(vault, path, { iteration, line, verification, state: iteration < last ? "running" : "needs-attention" });
-      prompt = feedbackPrompt(verification);
+      const reviewLine = `${step}: ${review.summary()}`;
+      if (review.missing.length) {
+        state = "needs-attention";
+        await write({ iteration, line: reviewLine, verification, review, state });
+        break;
+      }
+      if (review.failed.length) {
+        feedback = reviewFeedback(review);
+        turn = true;
+        state = iteration < last ? "running" : "needs-attention";
+        await write({ iteration, line: reviewLine, verification, review, state });
+        if (state === "running") continue;
+        break;
+      }
+      state = "done";
+      await write({ iteration, line: reviewLine, verification, review, state });
+      break;
     }
   } catch (error) {
     // A run never leaves its document running: a kill can close the conversation in the middle of a step.
     state = control.stopping ? "stopped" : "failed";
-    await record(vault, path, { iteration, line: state === "stopped" ? "stopped" : `failed: ${error instanceof Error ? error.message : String(error)}`, state });
+    await write({ iteration, line: state === "stopped" ? "stopped" : `failed: ${error instanceof Error ? error.message : String(error)}`, state });
   } finally {
     control.conversation = undefined;
-    await conversation.close();
+    await conversation?.close();
   }
-  return { path, state, iterations: iteration - start, conversation: conversation.path };
+  return { path, state, iterations: iteration - start, conversation: conversation?.path ?? earlier, ...(reviewNote && { review: reviewNote }) };
+}
+
+/**
+ * The review: a new read-only conversation with the agent, which records its verdicts into `review` with
+ * `yami_review`. While it runs, it is the run's live conversation, so stop and kill reach it.
+ */
+async function runReview(
+  yami: Yami,
+  agent: Agent,
+  control: RunControl,
+  review: Review,
+  options: { path: string; name: string; prompt: string; worker: Conversation | undefined },
+): Promise<{ note: string; result: ConversationTurn }> {
+  const reviewer = await yami.openConversation({
+    agent,
+    name: options.name,
+    folder: yami.conversationFolder,
+    module: options.path,
+    approval: "accept-edits",
+    access: "read-only",
+  });
+  control.conversation = reviewer;
+  control.review = review;
+  try {
+    await updateDocument(yami.vault, options.path, (d) => {
+      d.properties.state = "running";
+      d.properties.review = link(reviewer.path);
+    });
+    // A stop that came while the conversation opened found no turn to interrupt.
+    const result: ConversationTurn = control.stopping ? { status: "interrupted", text: "" } : await reviewer.send(options.prompt);
+    return { note: reviewer.path, result };
+  } finally {
+    control.review = undefined;
+    control.conversation = options.worker;
+    await reviewer.close();
+  }
 }
 
 /** Reads every document the session links. A link that finds no note stops the run before it starts. */
@@ -170,11 +300,12 @@ async function loadLinked(vault: Vault, lay: Layout, doc: Document): Promise<Lin
   return linked;
 }
 
-/** Runs every check. The wiki reads the vault again first, so the checks see what the agent wrote. */
+/** Runs the check of each promise that has one. The wiki reads the vault again first, so the checks see what the agent wrote. */
 async function verify(vault: Vault, wiki: Wiki, module: YamiModule, doc: Document, promises: Document[]): Promise<Verification> {
   const verification: Verification = { results: [], met: [], unmet: [], review: [] };
-  if (promises.length) await wiki.refresh();
-  for (const promise of promises) {
+  const checked = promises.filter((promise) => !isJudged(promise));
+  if (checked.length) await wiki.refresh();
+  for (const promise of checked) {
     const result = await runCheck(promise, { vault, wiki, path: doc.path, properties: doc.properties }, module.checks);
     verification.results.push({ promise, result });
     verification[result.status].push(link(promise.path));
@@ -186,62 +317,103 @@ function summary(verification: Verification): string {
   return `${verification.met.length} met, ${verification.unmet.length} unmet${verification.review.length ? `, ${verification.review.length} for review` : ""}`;
 }
 
-/** Writes an outcome to the session document: the state, the deliverables, and a line of progress. */
-async function record(vault: Vault, path: string, outcome: { iteration: number; line: string; verification?: Verification; state: SessionState }) {
+interface Outcome {
+  iteration: number;
+  line: string;
+  state: SessionState;
+  verification?: Verification;
+  review?: Review;
+}
+
+/**
+ * Writes an outcome to the session document: the state, the deliverables, a line of progress, and the
+ * verdicts of a review. A promise with no check is unmet until a review finds it met.
+ */
+async function record(vault: Vault, path: string, promises: Document[], outcome: Outcome) {
   await updateDocument(vault, path, (doc) => {
     doc.properties.iteration = outcome.iteration;
     doc.properties.state = outcome.state;
-    const verification = outcome.verification;
+    const { verification, review } = outcome;
     if (verification) {
-      doc.properties.met = verification.met;
-      doc.properties.unmet = [...verification.unmet, ...verification.review];
-      const deliverables = verification.results
-        .map(({ promise, result }) => `- [${result.status === "met" ? "x" : " "}] ${link(promise.path)} — ${result.detail}`)
-        .join("\n");
-      doc.body = replaceSection(doc.body, "Deliverables", deliverables);
+      const met: string[] = [];
+      const unmet: string[] = [];
+      const lines: string[] = [];
+      for (const promise of promises) {
+        const checked = verification.results.find((r) => r.promise === promise)?.result;
+        const verdict = review?.verdicts.get(promise.path);
+        const ok = checked ? checked.status === "met" : verdict ? Review.passes(verdict.verdict) : false;
+        const detail = checked ? checked.detail : verdict ? `review: ${verdict.reason}` : "the review judges it";
+        (ok ? met : unmet).push(link(promise.path));
+        lines.push(`- [${ok ? "x" : " "}] ${link(promise.path)} — ${detail}`);
+      }
+      doc.properties.met = met;
+      doc.properties.unmet = unmet;
+      doc.body = replaceSection(doc.body, "Deliverables", lines.join("\n") || "- none");
+    }
+    if (review) {
+      const policies = review.items.filter((item) => item.kind === "policy");
+      const passed = (item: ReviewItem) => {
+        const verdict = review.verdicts.get(item.path);
+        return verdict && Review.passes(verdict.verdict);
+      };
+      doc.properties.followed = policies.filter(passed).map((item) => link(item.path));
+      doc.properties.broken = policies.filter((item) => review.verdicts.get(item.path)?.verdict === "broken").map((item) => link(item.path));
+      const verdicts = review.items.map((item) => {
+        const verdict = review.verdicts.get(item.path);
+        return verdict ? `- ${verdict.verdict}: ${link(item.path)} — ${oneLine(verdict.reason)}` : `- no verdict: ${link(item.path)}`;
+      });
+      doc.body = replaceSection(doc.body, "Review", verdicts.join("\n"));
     }
     const progress = sectionText(doc.body, "Progress");
-    // A progress line is one line, so an error with many lines cannot break the section.
-    const text = outcome.line.replace(/\s+/g, " ").trim();
-    const line = `- ${timestamp().slice(11, 16)} ${text.length > 300 ? `${text.slice(0, 299)}…` : text}`;
+    const line = `- ${timestamp().slice(11, 16)} ${oneLine(outcome.line)}`;
     doc.body = replaceSection(doc.body, "Progress", progress ? `${progress}\n${line}` : line);
   });
 }
 
+/** A text on one line of at most 300 characters, so a line of a section holds whatever the text holds. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 300 ? `${flat.slice(0, 299)}…` : flat;
+}
+
 /**
- * The first prompt. A linked skill that the agent has as a skill set goes by its command: the prompt
- * starts with the first one, so the harness loads it, and names the others to load. A skill the agent
- * does not have is inlined.
+ * The first prompt: what is particular to the session. The base skill holds how every session runs. An
+ * agent with Yami's skill set invokes it, `/yami:run`; any other agent gets its text first. A linked skill
+ * that the agent has as a skill set goes by its command, and the skill tells the agent to load the first
+ * one; a skill the agent does not have is inlined.
  */
-function contextPrompt(vault: Vault, agent: Agent, module: YamiModule, template: SessionTemplate | undefined, doc: Document, linked: Linked, path: string): string {
+async function contextPrompt(vault: Vault, agent: Agent, module: YamiModule, template: SessionTemplate | undefined, doc: Document, linked: Linked, path: string, kind: string): Promise<string> {
   const fields = Object.keys(module.schema ?? {})
     .map((field) => `- ${field}: ${String(doc.properties[field] ?? "")}`)
     .join("\n");
   const section = (title: string, docs: Document[], render: (d: Document) => string) =>
     docs.length ? `## ${title}\n\n${docs.map((d) => `### ${documentName(d.path)}\n\n${render(d)}`).join("\n\n")}` : "";
   const promise = (d: Document) =>
-    Object.entries(d.properties)
-      .filter(([key]) => !["type", "module"].includes(key))
-      .map(([key, value]) => `- ${key}: ${String(value)}`)
-      .join("\n") + `\n\n${d.body.trim()}`;
-  const sets = new Set((agent.preferences.skills ?? []).map((root) => root.replace(/\/$/, "")));
+    [
+      ...Object.entries(d.properties)
+        .filter(([key]) => !["type", "module"].includes(key))
+        .map(([key, value]) => `- ${key}: ${String(value)}`),
+      ...(isJudged(d) ? ["- The review judges this promise: it has no check."] : []),
+    ].join("\n") + `\n\n${d.body.trim()}`;
+  const root = vault.root.replace(/\/$/, "");
+  const sets = new Set((agent.preferences.skills ?? []).map((set) => set.replace(/\/$/, "")));
   const attached: { command: string; doc: Document }[] = [];
   const inlined: Document[] = [];
   for (const skill of linked.skills) {
     const named = skillCommand(skill.path);
-    if (named && sets.has(`${vault.root.replace(/\/$/, "")}/${named.root}`)) attached.push({ command: named.command, doc: skill });
+    if (named && sets.has(`${root}/${named.root}`)) attached.push({ command: named.command, doc: skill });
     else inlined.push(skill);
   }
   const listed = attached.length
-    ? `## Skills\n\nThis session's skills, which you have as skills of your own. The first is loaded for you; load the others when you need them.\n\n${attached
+    ? `## Skills\n\nThis session's skills, which you have as skills of your own. Load the first one now, and the others when you need them.\n\n${attached
         .map(({ command, doc }) => `- \`${command}\`: ${String(doc.properties.description ?? "")} Its folder: ${doc.path.slice(0, doc.path.lastIndexOf("/"))}/`)
         .join("\n")}`
     : "";
-  const kind = template ? `a "${template.name}" session of the module "${module.name}"` : `a session of the module "${module.name}"`;
+  const invoked = sets.has(`${root}/${YAMI_SKILLS}`) && (await vault.exists(BASE_SKILL));
+  const base = invoked ? "" : `## How to run a Yami session\n\n${parseDocument(vault, BASE_SKILL, (await vault.exists(BASE_SKILL)) ? await vault.read(BASE_SKILL) : BASE_SKILL_TEXT).body.trim()}`;
   const body = [
-    `You are running the Yami session "${basename(path)}", ${kind}.\n` +
-      `The working directory is the vault. Paths are relative to it. The session document is ${path}; Yami maintains its properties and its Deliverables and Progress sections, so do not edit that file.\n` +
-      `Follow every policy. The session ends when every promise is met. After each of your turns, Yami checks the promises and tells you what is still unmet.`,
+    base,
+    `This is the Yami session "${basename(path)}", ${kind}. The session document is ${path}.`,
     module.instructions,
     template?.instructions,
     fields && `## Session properties\n\n${fields}`,
@@ -254,7 +426,7 @@ function contextPrompt(vault: Vault, agent: Agent, module: YamiModule, template:
   ]
     .filter(Boolean)
     .join("\n\n");
-  return attached.length ? `/${attached[0]!.command} ${body}` : body;
+  return invoked ? `/${BASE_SKILL_COMMAND} ${body}` : body;
 }
 
 function feedbackPrompt(verification: Verification): string {

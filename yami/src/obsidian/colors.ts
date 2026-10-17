@@ -17,8 +17,12 @@ export function folderColorRules(yami: Yami): string {
   return [rule(INTERNAL, INTERNAL_COLOR), ...yami.modules.flatMap((module) => [rule(module.layout.folder, module.colors.folder), rule(module.layout.internal, module.colors.internal)])].join("\n");
 }
 
-/** Adds the folder colors to the window until the component unloads. */
+/** Adds the folder colors to the window until the component unloads, and updates them when the modules change. */
 export function showFolderColors(yami: Yami, component: Component): void {
   const style = document.head.createEl("style", { attr: { id: "yami-folder-colors" }, text: folderColorRules(yami) });
-  component.register(() => style.remove());
+  const off = yami.onModulesChange(() => style.setText(folderColorRules(yami)));
+  component.register(() => {
+    off();
+    style.remove();
+  });
 }

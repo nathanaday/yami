@@ -1,4 +1,4 @@
-import { type App, type Component, FuzzySuggestModal, MarkdownView, TFile } from "obsidian";
+import { type App, type Component, FuzzySuggestModal, MarkdownView, SuggestModal, TFile } from "obsidian";
 import type { Wiki } from "../../wiki/wiki.js";
 
 /** How a chosen note opens: in this tab, in a new tab, or as a link at the cursor of the active editor. */
@@ -43,6 +43,33 @@ export function watchWiki(app: App, component: Component, wiki: Wiki): void {
 export function chooseSelected(modal: object, evt: KeyboardEvent): false {
   (modal as { chooser: { useSelectedItem(evt: KeyboardEvent): void } }).chooser.useSelectedItem(evt);
   return false;
+}
+
+/** Lets the person type one line. Resolves with the text, trimmed, or with nothing when the person closes the prompt. */
+export function askText(app: App, placeholder: string, hint: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    let given = false;
+    const modal = new (class extends SuggestModal<string> {
+      getSuggestions(query: string) {
+        return query.trim() ? [query.trim()] : [];
+      }
+      renderSuggestion(text: string, el: HTMLElement) {
+        el.setText(`${hint}: ${text}`);
+      }
+      onChooseSuggestion(text: string) {
+        given = true;
+        resolve(text);
+      }
+      onClose() {
+        setTimeout(() => {
+          if (!given) resolve(undefined);
+        }, 0);
+      }
+    })(app);
+    modal.setPlaceholder(placeholder);
+    modal.emptyStateText = "Type a name.";
+    modal.open();
+  });
 }
 
 /** Lets the user pick one item by typing. Resolves with nothing when the user closes the list. */

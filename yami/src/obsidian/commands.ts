@@ -1,12 +1,14 @@
-import { Notice } from "obsidian";
+import { Notice, type Command } from "obsidian";
 import { basename } from "../document/document.js";
 import type { Agent } from "../agent/agent.js";
+import type { YamiModule } from "../module/module.js";
 import type { SessionAct } from "../module/session.js";
 import { WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
 import type { ConversationAgent } from "./agents.js";
 import { moduleIcon } from "./icons.js";
 import { WikiCompareModal } from "./wiki/compare-modal.js";
 import { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
+import { askText } from "./wiki/open.js";
 import { WikiSearchModal } from "./wiki/search-modal.js";
 import type { ObsidianYami } from "./yami.js";
 
@@ -97,34 +99,73 @@ export function addSessionCommands(yami: ObsidianYami): void {
   add("kill-session", "Kill this session's agent", "kill");
 }
 
-/** For each module: a command for each of its acts (a new session, an action on no session), and one for each action on a session. */
-export function addModuleCommands(yami: ObsidianYami): void {
-  for (const module of yami.modules) {
-    const icon = moduleIcon(module);
-    for (const act of module.acts()) {
-      yami.plugin.addCommand({
-        id: act.kind === "new" ? `${module.id}-new-${act.template.id}` : `${module.id}-${act.action.id}`,
-        name: `${module.name}: ${act.kind === "new" ? `${act.label.charAt(0).toLowerCase()}${act.label.slice(1)}` : act.label}`,
-        icon,
-        callback: () => void yami.runModuleAct(act),
-      });
+/**
+ * For each module: a command for each of its acts (a new session, an action on no session), and one for
+ * each action on a session. Returns the function that brings the commands up to date with `yami.modules`:
+ * it adds the commands of a module that is new or changed, and removes those of a module, a template, or
+ * an action that is gone. `createYami` calls it when the modules change.
+ */
+export function addModuleCommands(yami: ObsidianYami): () => void {
+  const added = new Map<string, YamiModule>();
+  const sync = () => {
+    const wanted = new Map<string, { module: YamiModule; command: Command }>();
+    for (const module of yami.modules) {
+      const icon = moduleIcon(module);
+      for (const act of module.acts()) {
+        const id = act.kind === "new" ? `${module.id}-new-${act.template.id}` : `${module.id}-${act.action.id}`;
+        const name = `${module.name}: ${act.kind === "new" ? `${act.label.charAt(0).toLowerCase()}${act.label.slice(1)}` : act.label}`;
+        wanted.set(id, { module, command: { id, name, icon, callback: () => void yami.runModuleAct(act) } });
+      }
+      for (const action of module.actions) {
+        if (!("on" in action)) continue;
+        const id = `${module.id}-${action.id}`;
+        wanted.set(id, {
+          module,
+          command: {
+            id,
+            name: `${module.name}: ${action.name}`,
+            icon,
+            checkCallback: (checking) => {
+              const session = yami.activeSession(action.on);
+              const act = session?.acts(yami.properties(session.path)).find((a) => a.action === action);
+              if (!act) return false;
+              if (!checking) void yami.notify(act.run());
+              return true;
+            },
+          },
+        });
+      }
     }
-    for (const action of module.actions) {
-      if (!("on" in action)) continue;
-      yami.plugin.addCommand({
-        id: `${module.id}-${action.id}`,
-        name: `${module.name}: ${action.name}`,
-        icon,
-        checkCallback: (checking) => {
-          const session = yami.activeSession(action.on);
-          const act = session?.acts(yami.properties(session.path)).find((a) => a.action === action);
-          if (!act) return false;
-          if (!checking) void yami.notify(act.run());
-          return true;
-        },
-      });
+    for (const [id, module] of added) {
+      if (wanted.get(id)?.module === module) continue;
+      yami.plugin.removeCommand(id);
+      added.delete(id);
     }
-  }
+    for (const [id, { module, command }] of wanted) {
+      if (added.has(id)) continue;
+      yami.plugin.addCommand(command);
+      added.set(id, module);
+    }
+  };
+  sync();
+  return sync;
+}
+
+/** New module: asks for a name, and creates a vault module from the starter. */
+export function addNewModuleCommand(yami: ObsidianYami): void {
+  yami.plugin.addCommand({
+    id: "new-module",
+    name: "New module",
+    icon: "package-plus",
+    callback: () =>
+      void yami.notify(
+        askText(yami.app, "The name of the new module, such as Code review", "Create the module").then(async (name) => {
+          if (!name) return;
+          const module = await yami.createModule(name);
+          return { message: `Created the module ${module.name} in ${module.layout.internal}/.`, open: module.document };
+        }),
+      ),
+  });
 }
 
 /** The wiki in the command palette: search, related notes, the algorithms side by side, match, lint, versions, and ingest. */

@@ -6,9 +6,13 @@ export function moduleIcon(module: YamiModule): string {
   return getIcon(module.icon) ? module.icon : MODULE_ICON;
 }
 
-/** Warns in the console of each module whose icon Obsidian does not have. */
+const checked = new WeakSet<YamiModule>();
+
+/** Warns in the console of each module whose icon Obsidian does not have, once for each module object. */
 export function checkModuleIcons(modules: YamiModule[]): void {
   for (const module of modules) {
+    if (checked.has(module)) continue;
+    checked.add(module);
     if (!getIcon(module.icon)) console.warn(`Yami: Obsidian has no icon "${module.icon}" for the ${module.id} module, so it shows "${MODULE_ICON}". Use a Lucide name, or add the icon with addIcon.`);
   }
 }

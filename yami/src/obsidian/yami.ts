@@ -5,13 +5,14 @@ import { CONVERSATION_FOLDER } from "../conversation/conversations.js";
 import { basename } from "../document/document.js";
 import { SessionTemplate, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
 import type { Session } from "../module/session.js";
+import { definesModule } from "../module/vault-module.js";
 import { Yami } from "../module/yami.js";
 import type { WikiOptions } from "../wiki/wiki.js";
 import { vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
 import { showFolderColors } from "./colors.js";
 import { checkModuleIcons } from "./icons.js";
-import { addConversationCommands, addModuleCommands, addSessionCommands, addWikiCommands } from "./commands.js";
+import { addConversationCommands, addModuleCommands, addNewModuleCommand, addSessionCommands, addWikiCommands } from "./commands.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
 import { PermissionPrompts } from "./prompts/permission-modal.js";
@@ -30,7 +31,7 @@ export interface AgentEntry {
   color?: string;
 }
 
-export type CommandGroup = "conversations" | "sessions" | "wiki";
+export type CommandGroup = "conversations" | "sessions" | "wiki" | "modules";
 
 export interface YamiPluginOptions {
   /** The plugin's agents. The first is the default. Yami sets their working directory, tools, and skills. */
@@ -43,7 +44,10 @@ export interface YamiPluginOptions {
   conversationFolder?: string;
   /** Minutes after which an agent process with no open message box closes. Default 15. */
   idleMinutes?: number;
-  /** The groups of commands to add. Default: every group. The commands of the modules' templates and actions are always added. */
+  /**
+   * The groups of commands to add. Default: every group. `modules` is the New module command. The commands
+   * of the modules' templates and actions are always added.
+   */
   commands?: Partial<Record<CommandGroup, boolean>>;
   /** A status bar item that says which agents work. Default true. */
   statusBar?: boolean;
@@ -73,6 +77,7 @@ export class ObsidianYami extends Yami {
   #status: HTMLElement | undefined;
   readonly #sessionsFeed = new ChangeFeed("sessions", 150);
   readonly #wikiFeed = new ChangeFeed("wiki", 300);
+  readonly #discovery = new ChangeFeed("modules", 300);
 
   constructor(plugin: Plugin, options: YamiPluginOptions) {
     const app = plugin.app;
@@ -113,6 +118,16 @@ export class ObsidianYami extends Yami {
 
     conversations.install(plugin);
     watchWiki(app, plugin, this.wiki);
+    this.#discovery.on(() => void this.discover().catch((error) => console.error("yami: could not read the vault modules", error)));
+    // A created, renamed, or removed file can change what a template's link finds; a changed file only
+    // matters when it is a module document or a template document.
+    const discover = (file: TAbstractFile, old?: string) => {
+      if (old !== undefined || definesModule(file.path)) this.#discovery.changed();
+    };
+    plugin.registerEvent(app.vault.on("create", (file) => discover(file, "")));
+    plugin.registerEvent(app.vault.on("delete", (file) => discover(file, "")));
+    plugin.registerEvent(app.vault.on("rename", (file, old) => discover(file, old)));
+    plugin.registerEvent(app.vault.on("modify", (file) => discover(file)));
     const watch = (file: TAbstractFile, old?: string) => {
       const paths = old ? [file.path, old] : [file.path];
       if (paths.some((path) => this.concernsSessions(path))) this.#sessionsFeed.changed();
@@ -128,6 +143,7 @@ export class ObsidianYami extends Yami {
     plugin.register(() => {
       this.#sessionsFeed.stop();
       this.#wikiFeed.stop();
+      this.#discovery.stop();
     });
     app.workspace.onLayoutReady(() =>
       this.enable().catch((error: Error) => {
@@ -144,12 +160,20 @@ export class ObsidianYami extends Yami {
         .finally(() => uninstallCollab(hub));
     });
 
-    const groups = { conversations: true, sessions: true, wiki: true, ...options.commands };
+    const groups = { conversations: true, sessions: true, wiki: true, modules: true, ...options.commands };
     if (groups.conversations) addConversationCommands(this);
     if (groups.sessions) addSessionCommands(this);
     if (groups.wiki) addWikiCommands(this);
+    if (groups.modules) addNewModuleCommand(this);
     checkModuleIcons(this.modules);
-    addModuleCommands(this);
+    const syncCommands = addModuleCommands(this);
+    plugin.register(
+      this.onModulesChange(() => {
+        checkModuleIcons(this.modules);
+        syncCommands();
+        this.#sessionsFeed.changed();
+      }),
+    );
     if (options.folderColors ?? true) showFolderColors(this, plugin);
     if (options.statusBar ?? true) {
       this.#status = plugin.addStatusBarItem();

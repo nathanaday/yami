@@ -246,14 +246,14 @@ describe("the tools and skills of the modules", () => {
       readonly name = "None";
     }
     const { yami, agent, root } = await fresh(new Hello(), new Two(), new None());
-    const set = yami.tools()!;
+    const set = yami.tools();
     expect(set.name).toBe("yami");
-    expect(set.description).toBe("Tools of the Yami modules in this vault: Wiki, Hello world, Two.");
-    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "hello_greet_user", "hello_two_greet_user"]);
+    expect(set.description).toBe("Tools of Yami. Tools of the Yami modules in this vault: Wiki, Hello world, Two.");
+    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_review", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "hello_greet_user", "hello_two_greet_user"]);
     expect(await runTool(set.tools.find((tool: AgentTool) => tool.name === "hello_greet_user")!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
     expect(agent.preferences.cwd).toBe(root);
     expect(agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(set.tools.map((tool) => tool.name));
-    expect(agent.preferences.skills).toEqual([`${root}/internal/wiki`, `${root}/internal/hello`, `${root}/internal/hello-two`]);
+    expect(agent.preferences.skills).toEqual([`${root}/internal/yami`, `${root}/internal/wiki`, `${root}/internal/hello`, `${root}/internal/hello-two`]);
   });
 
   it("names each module's internal folder as a skill set, and each skill by /<module>:<skill>", async () => {

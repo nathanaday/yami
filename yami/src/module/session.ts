@@ -4,21 +4,23 @@ import { basename, linksOf, readDocument, resolveLink, sectionText, type Documen
 import { SESSION_STATES, type SessionState } from "../document/schema.js";
 import type { Properties } from "../document/vault.js";
 import { linkedDocuments, type LinkedDocument } from "./links.js";
-import type { ActionResult, ModuleDocument, SessionAction, SessionTemplate, YamiModule } from "./module.js";
-import { runSession, sessionParts, type RunControl, type RunResult } from "./run.js";
+import type { ActionResult, DocumentRef, SessionAction, SessionTemplate, YamiModule } from "./module.js";
+import { checkSession, runSession, sessionParts, type RunControl, type RunResult, type SessionCheck } from "./run.js";
 import type { Yami } from "./yami.js";
 
 /**
- * What a session does now. While a run is live: `working` (an agent turn) or `checking` (the promises).
- * Otherwise the state that the document records: `open`, `done`, `needs-attention`, `failed`, or `stopped`.
+ * What a session does now. While a run is live: `working` (an agent turn), `checking` (the promises), or
+ * `reviewing` (a reviewer judges the policies and the promises with no check). Otherwise the state that the
+ * document records: `open`, `done`, `needs-attention`, `failed`, or `stopped`.
  */
-export type SessionStatus = Exclude<SessionState, "running"> | "working" | "checking";
+export type SessionStatus = Exclude<SessionState, "running"> | "working" | "checking" | "reviewing";
 
 /** How a person reads each status, in a list, a button, or a notice. */
 export const STATUS_LABELS: Record<SessionStatus, string> = {
   open: "Not started",
   working: "Working",
   checking: "Checking",
+  reviewing: "Reviewing",
   done: "Done",
   "needs-attention": "Needs attention",
   failed: "Failed",
@@ -45,9 +47,13 @@ export interface SessionSummary {
   properties: Properties;
 }
 
-/** A linked document of a session. A promise also says whether the last check met it: undefined before any check. */
+/**
+ * A linked document of a session. A promise also says whether the last check or review met it, and a
+ * policy whether the last review found it followed: undefined before any.
+ */
 export interface SessionDocument extends LinkedDocument {
   met?: boolean;
+  followed?: boolean;
 }
 
 /** All of a session: what a page about one session shows. */
@@ -56,6 +62,8 @@ export interface SessionDetails extends SessionSummary {
   documents: SessionDocument[];
   /** The conversation note that records the runs, when one exists. */
   conversation: string | undefined;
+  /** The conversation note of the last review, when one exists. */
+  review: string | undefined;
   /** The harness of the last run. */
   harness: string | undefined;
   /** The lines of the Progress section, oldest first, each with its time. */
@@ -90,13 +98,20 @@ export interface NewSession {
   /** The module's session fields. */
   fields?: Properties;
   /** Documents linked on top of the template's, for example a policy of another module. */
-  add?: ModuleDocument[];
+  add?: DocumentRef[];
 }
 
 interface LiveRun {
   promise: Promise<RunResult>;
   control: RunControl;
-  phase: "working" | "checking";
+  phase: "working" | "checking" | "reviewing";
+}
+
+const controls = new WeakMap<Session, RunControl>();
+
+/** The control of a session's live run, for the tools of Yami. */
+export function liveControl(session: Session): RunControl | undefined {
+  return controls.get(session);
 }
 
 /**
@@ -178,12 +193,17 @@ export class Session {
     const summary = this.summarize(doc);
     // The loop records each promise by its path, so a promise linked by its name still finds its mark.
     const paths = async (field: string) => new Set(await Promise.all(linksOf(doc.properties[field]).map((target) => resolveLink(this.yami.vault, target, []))));
-    const met = await paths("met");
-    const unmet = await paths("unmet");
+    const marks = async (yes: string, no: string) => {
+      const [y, n] = [await paths(yes), await paths(no)];
+      return (path: string) => (y.has(path) ? true : n.has(path) ? false : undefined);
+    };
+    const met = await marks("met", "unmet");
+    const followed = await marks("followed", "broken");
     const documents = (await linkedDocuments(this.yami.vault, summary.module.layout, doc.properties)).map((d): SessionDocument =>
-      d.kind !== "promises" || !d.path ? d : { ...d, met: met.has(d.path) ? true : unmet.has(d.path) ? false : undefined },
+      !d.path ? d : d.kind === "promises" ? { ...d, met: met(d.path) } : d.kind === "policies" ? { ...d, followed: followed(d.path) } : d,
     );
     const target = linksOf(doc.properties.conversation)[0];
+    const review = linksOf(doc.properties.review)[0];
     const progress = sectionText(doc.body, "Progress")
       .split("\n")
       .map((line) => /^- (\d\d:\d\d) (.*)$/.exec(line))
@@ -193,6 +213,7 @@ export class Session {
       ...summary,
       documents,
       conversation: target ? await resolveLink(this.yami.vault, target, []) : undefined,
+      review: review ? await resolveLink(this.yami.vault, review, []) : undefined,
       harness: typeof doc.properties.harness === "string" ? doc.properties.harness : undefined,
       progress,
     };
@@ -233,6 +254,14 @@ export class Session {
     return acts;
   }
 
+  /**
+   * Runs the checks of the session's promises now, and records nothing: what the self-check tool,
+   * `yami_check`, returns to an agent. A promise with no check is in `judged`, for the review.
+   */
+  check(): Promise<SessionCheck> {
+    return checkSession(this.yami, this.path);
+  }
+
   /** Calls the listener at each change of status. Returns the function that stops it. */
   on(listener: (status: SessionStatus) => void): () => void {
     this.#listeners.add(listener);
@@ -258,7 +287,7 @@ export class Session {
     return this.run(true, named ? { ...options, agent: named } : options);
   }
 
-  /** Interrupts the agent's turn and ends the run as `stopped`. A later resume continues it. */
+  /** Interrupts the agent's turn, or the reviewer's during a review, and ends the run as `stopped`. A later resume continues it. */
   async stop(): Promise<void> {
     const run = this.#run;
     if (!run) return;
@@ -267,7 +296,7 @@ export class Session {
     await run.promise.catch(() => undefined);
   }
 
-  /** Closes the agent's harness session at once, without waiting for the turn to stop, and ends the run as `stopped`. */
+  /** Closes the harness session of the live turn at once, the worker's or the reviewer's, without waiting for the turn to stop, and ends the run as `stopped`. */
   async kill(): Promise<void> {
     const run = this.#run;
     if (!run) return;
@@ -294,15 +323,18 @@ export class Session {
     };
     const live: LiveRun = { control, phase: resume ? "checking" : "working", promise: undefined as unknown as Promise<RunResult> };
     this.#run = live;
+    controls.set(this, control);
     live.promise = runSession(this.yami, this.path, agent, control, { resume, maxIterations: options.maxIterations });
     this.emit(live.phase);
     live.promise.then(
       (result) => {
         this.#run = undefined;
+        if (controls.get(this) === control) controls.delete(this);
         this.emit(result.state === "running" ? "stopped" : result.state);
       },
       () => {
         this.#run = undefined;
+        if (controls.get(this) === control) controls.delete(this);
         // The run threw before it changed the document, so the document says what the session is.
         void this.status().then((status) => !this.#run && this.emit(status), () => undefined);
       },

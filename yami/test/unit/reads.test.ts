@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { copyStyles } from "../../src/build/esbuild.js";
 import { STATUS_LABELS, type Session } from "../../src/index.js";
-import { ScriptedAgent, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
+import { review, ScriptedAgent, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
 import { Hello } from "../fixtures/hello.js";
 
 let t: TestYami | undefined;
@@ -35,7 +35,7 @@ describe("what a view of the sessions reads", () => {
   it("summarizes each session in one read, newest first, for one module or template", async () => {
     const { yami, rich, agent } = await fresh();
     await rich.greet.create({ name: "a" });
-    agent.queue(write("b"));
+    agent.queue(write("b"), review());
     const b = await rich.greet.create({ name: "b" });
     await b.start();
     await rich.tidy.create({ name: "c" });
@@ -92,7 +92,7 @@ describe("what a view of the sessions reads", () => {
     expect(kinds(session, (await session.read()).properties)).toEqual(["start:Run with Claude", "start:Run with Claude 2"]);
 
     let release!: () => void;
-    agent.queue(() => new Promise<void>((resolve) => (release = resolve)), write("acts"));
+    agent.queue(() => new Promise<void>((resolve) => (release = resolve)), write("acts"), review());
     const run = session.start({ maxIterations: 2 });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(kinds(session, (await session.read()).properties)).toEqual(["stop:Stop", "kill:Kill the agent"]);
@@ -112,7 +112,7 @@ describe("what a view of the sessions reads", () => {
   it("runs an act and says how it ended", async () => {
     const { rich, agent } = await fresh();
     const session = await rich.greet.create({ name: "said" });
-    agent.queue(write("said"));
+    agent.queue(write("said"), review());
     const start = session.acts((await session.read()).properties)[0]!;
     expect(start.agent).toBe(agent);
     expect(await start.run()).toBe("said: done after 1 iteration.");
@@ -175,7 +175,7 @@ describe("what a view of the sessions reads", () => {
   });
 
   it("names each status for a person", () => {
-    expect(STATUS_LABELS).toEqual({ open: "Not started", working: "Working", checking: "Checking", done: "Done", "needs-attention": "Needs attention", failed: "Failed", stopped: "Stopped" });
+    expect(STATUS_LABELS).toEqual({ open: "Not started", working: "Working", checking: "Checking", reviewing: "Reviewing", done: "Done", "needs-attention": "Needs attention", failed: "Failed", stopped: "Stopped" });
   });
 });
 

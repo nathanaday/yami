@@ -38,13 +38,28 @@ export interface Layout {
   agents: string;
 }
 
-const ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** The form of a module, template, or action id: lower-case letters, digits, and dashes. */
+export const ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/**
+ * A document that a template links: a module's own document, or any document of the vault that a vault
+ * template links. `ModuleDocument` is one.
+ */
+export interface DocumentRef<K extends DocumentKind = DocumentKind> {
+  readonly kind: K;
+  /** What the document is called: its file name, or the folder name of a skill. */
+  readonly name: string;
+  /** The vault path of the document. */
+  readonly path: string;
+  /** The document as a link, the form a session's properties hold. */
+  readonly link: string;
+}
 
 /**
  * A document that a module installs into its internal folder: a policy, a promise, a skill, an article,
  * or a subagent. The module writes it only when no file is at its path, so the user can edit it in the vault.
  */
-export class ModuleDocument<K extends DocumentKind = DocumentKind> {
+export class ModuleDocument<K extends DocumentKind = DocumentKind> implements DocumentRef<K> {
   constructor(
     readonly module: YamiModule,
     readonly kind: K,
@@ -98,13 +113,13 @@ export interface TemplateOptions {
   name: string;
   description?: string;
   /** The skills of a new session. The first is loaded at the start of a run. */
-  skills?: ModuleDocument<"skill">[];
-  /** The rules a session follows. */
-  policies?: ModuleDocument<"policy">[];
-  /** What a session delivers. The session is done when every promise is met. */
-  promises?: ModuleDocument<"promise">[];
+  skills?: DocumentRef<"skill">[];
+  /** The rules a session follows. A review judges them after the checks pass. */
+  policies?: DocumentRef<"policy">[];
+  /** What a session delivers. The session is done when every promise is met: by its check, or by the review when it has none. */
+  promises?: DocumentRef<"promise">[];
   /** Notes whose content is context for the agent. */
-  articles?: ModuleDocument<"article">[];
+  articles?: DocumentRef<"article">[];
   /** Agent turns in one run. Default 3. */
   maxIterations?: number;
   /** `read-only`: the agent changes no file except through the tools. Default `edit`. */
@@ -128,10 +143,10 @@ export class SessionTemplate {
   readonly id: string;
   readonly name: string;
   readonly description: string | undefined;
-  readonly skills: ModuleDocument<"skill">[];
-  readonly policies: ModuleDocument<"policy">[];
-  readonly promises: ModuleDocument<"promise">[];
-  readonly articles: ModuleDocument<"article">[];
+  readonly skills: DocumentRef<"skill">[];
+  readonly policies: DocumentRef<"policy">[];
+  readonly promises: DocumentRef<"promise">[];
+  readonly articles: DocumentRef<"article">[];
   readonly maxIterations: number;
   readonly access: "edit" | "read-only";
   readonly instructions: string | undefined;
@@ -165,7 +180,7 @@ export class SessionTemplate {
   }
 
   /** The documents that a new session links, by the session field that holds them. */
-  links(): Record<LinkedKind, ModuleDocument[]> {
+  links(): Record<LinkedKind, DocumentRef[]> {
     return { skills: this.skills, policies: this.policies, promises: this.promises, articles: this.articles };
   }
 
@@ -304,21 +319,7 @@ export abstract class YamiModule {
   }
 
   get layout(): Layout {
-    const internal = `${INTERNAL}/${this.id}`;
-    return {
-      folder: this.id,
-      internal,
-      sessions: this.sessionsIn === "internal" ? `${internal}/sessions` : this.id,
-      ledger: `${this.ledgerIn === "folder" ? this.id : internal}/sessions.base`,
-      moduleDoc: `${internal}/${this.id}.md`,
-      folders: {
-        articles: `${internal}/articles`,
-        policies: `${internal}/policies`,
-        promises: `${internal}/promises`,
-        skills: `${internal}/skills`,
-      },
-      agents: `${internal}/agents`,
-    };
+    return moduleLayout(this.id, this.sessionsIn, this.ledgerIn);
   }
 
   /** What a person can do with the module itself: a new session from each template that offers one, then each action on no session. */
@@ -328,6 +329,11 @@ export abstract class YamiModule {
       ...templates.map((template): ModuleAct => ({ kind: "new", label: template.label, template })),
       ...this.actions.filter((a): a is ChoiceAction<any> | PlainAction => !("on" in a)).map((action): ModuleAct => ({ kind: "action", label: action.name, action })),
     ];
+  }
+
+  /** Whether the module's internal folder holds skills, so that Yami gives it to the agents as a skill set. */
+  get hasSkills(): boolean {
+    return this.documents.some((doc) => doc.kind === "skill");
   }
 
   /** The tools that every agent of the vault gets, named `<module id>_<tool name>`. They run in the host. */
@@ -440,6 +446,38 @@ export abstract class YamiModule {
   }
 }
 
+/** The vault paths of a module with an id, from where it keeps its sessions and its ledger. */
+export function moduleLayout(id: string, sessionsIn: Place | "none" = "folder", ledgerIn: Place = "internal"): Layout {
+  const internal = `${INTERNAL}/${id}`;
+  return {
+    folder: id,
+    internal,
+    sessions: sessionsIn === "internal" ? `${internal}/sessions` : id,
+    ledger: `${ledgerIn === "folder" ? id : internal}/sessions.base`,
+    moduleDoc: `${internal}/${id}.md`,
+    folders: {
+      articles: `${internal}/articles`,
+      policies: `${internal}/policies`,
+      promises: `${internal}/promises`,
+      skills: `${internal}/skills`,
+    },
+    agents: `${internal}/agents`,
+  };
+}
+
+/**
+ * The id that a name gives: lower case, with accents left out, and each run of other characters than
+ * letters and digits as one dash. `Code review` gives `code-review`. Empty when the name has no letter or digit.
+ */
+export function idFromName(name: string): string {
+  return name
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 /** The `name` in a markdown file's frontmatter. */
 function frontmatterName(text: string): string | undefined {
   const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
@@ -459,7 +497,7 @@ export function skillPath(lay: Layout, name: string): string {
  * holds its skills, as an absolute path. An agent invokes a skill as `/<module id>:<skill>`.
  */
 export function moduleSkills(vault: Vault, modules: YamiModule[]): string[] {
-  return modules.filter((module) => module.documents.some((doc) => doc.kind === "skill")).map((module) => `${vault.root.replace(/\/$/, "")}/${module.layout.internal}`);
+  return modules.filter((module) => module.hasSkills).map((module) => `${vault.root.replace(/\/$/, "")}/${module.layout.internal}`);
 }
 
 /** The command of a module skill's `SKILL.md`, as a vault path: `internal/wiki/skills/ingest/SKILL.md` is `wiki:ingest`. */

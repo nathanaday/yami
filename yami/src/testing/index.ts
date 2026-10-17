@@ -10,7 +10,7 @@ import { FsVault } from "./fs-vault.js";
 import { ScriptedAgent, type Turn } from "./scripted-agent.js";
 
 export { FsVault } from "./fs-vault.js";
-export { ScriptedAgent, ScriptedSession, type Turn } from "./scripted-agent.js";
+export { review, ScriptedAgent, ScriptedSession, type ScriptedVerdict, type Turn } from "./scripted-agent.js";
 
 export interface TestYami {
   yami: Yami;

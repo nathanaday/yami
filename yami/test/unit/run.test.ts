@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, readDocument } from "../../src/document/index.js";
 import { Yami, YamiModule, type SessionStatus } from "../../src/index.js";
-import { ScriptedAgent, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
+import { review, ScriptedAgent, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
 import { Hello } from "../fixtures/hello.js";
 
 let t: TestYami | undefined;
@@ -34,11 +34,11 @@ function hold(): { turn: Turn; begun: Promise<void> } {
 describe("a run of the agent loop", () => {
   it("meets the promise on the second iteration and records both", async () => {
     const { session, vault, agent, path } = await fresh("second");
-    agent.queue(() => {}, write("second"));
+    agent.queue(() => {}, write("second"), review());
     const result = await session.start();
     expect(result).toMatchObject({ state: "done", iterations: 2 });
-    const [first, second] = agent.last!.prompts;
-    expect(first).toContain('You are running the Yami session "second", a "Greeting" session of the module "Hello world".');
+    const [first, second] = agent.started[0]!.prompts;
+    expect(first).toContain('This is the Yami session "second", a "Greeting" session of the module "Hello world". The session document is hello/second.md.');
     expect(first).toContain("## Policies");
     expect(first).toContain("## Promises");
     expect(first).toContain("- greeting: Hello");
@@ -47,6 +47,7 @@ describe("a run of the agent loop", () => {
     const doc = await vault.read(path);
     expect(doc).toContain("iteration 1: 0 met, 1 unmet");
     expect(doc).toContain("iteration 2: 1 met, 0 unmet");
+    expect(doc).toContain("iteration 2: review: 1 followed, 0 broken");
     expect(doc).toContain("- [x] [[internal/hello/promises/Greeting note|Greeting note]]");
     expect(doc).toContain("state: done");
     expect(doc).toContain('conversation: "[[conversations/hello second|hello second]]"');
@@ -59,22 +60,25 @@ describe("a run of the agent loop", () => {
     expect(record.trim().endsWith("ok")).toBe(true);
   });
 
-  it("invokes the session's skill by command, since the Yami gives its agents the module skill sets", async () => {
+  it("invokes the base skill by command, and lists the session's skills to load, since the Yami gives its agents the skill sets", async () => {
     const { session, agent } = await fresh("invoked");
-    agent.queue(write("invoked"));
+    agent.queue(write("invoked"), review());
     await session.start();
-    const [first] = agent.last!.prompts;
-    expect(first!.startsWith('/hello:greeting You are running the Yami session "invoked"')).toBe(true);
+    const [first] = agent.started[0]!.prompts;
+    expect(first!.startsWith('/yami:run This is the Yami session "invoked"')).toBe(true);
+    expect(first).toContain("Load the first one now, and the others when you need them.");
     expect(first).toContain("- `hello:greeting`: How to greet a person or a session by name. Its folder: internal/hello/skills/greeting/");
     expect(first).not.toContain("Keep it to one line");
+    expect(first).not.toContain("Check the work before the turn ends");
   });
 
   it("inlines a skill for an agent that does not have the module's skill set", async () => {
     const { session } = await fresh("inlined");
     const outside = new ScriptedAgent([write("inlined")]);
     await session.start({ agent: outside });
-    const [first] = outside.last!.prompts;
-    expect(first!.startsWith("You are running")).toBe(true);
+    const [first] = outside.started[0]!.prompts;
+    expect(first!.startsWith("## How to run a Yami session\n\n# Run a Yami session")).toBe(true);
+    expect(first).toContain("Check the work before the turn ends");
     expect(first).toContain("## Skills\n\n### greeting\n\n# Greeting");
     expect(first).toContain("Keep it to one line");
   });
@@ -106,7 +110,7 @@ describe("a run of the agent loop", () => {
     expect(doc).toContain('unmet:\n  - "[[internal/hello/promises/Greeting note|Greeting note]]"');
   });
 
-  it("needs attention when a promise has no check", async () => {
+  it("needs attention when the reviewer gives no verdict on a promise with no check", async () => {
     class Manual extends Hello {
       readonly id = "manual";
       readonly judged = this.promise("Judged", "A person decides.");
@@ -116,7 +120,10 @@ describe("a run of the agent loop", () => {
     t = await testYami({ modules: [manual] });
     const session = await manual.judge.create({ name: "manual" });
     expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1 });
-    expect(await t.vault.read(session.path)).toContain("0 met, 0 unmet, 1 for review");
+    const doc = await t.vault.read(session.path);
+    expect(doc).toContain("iteration 1: 0 met, 0 unmet");
+    expect(doc).toContain("iteration 1: review: 0 met, 0 unmet; no verdict on Judged");
+    expect(doc).toContain("- no verdict: [[internal/manual/promises/Judged|Judged]]");
   });
 
   it("fails when the harness fails", async () => {
@@ -131,7 +138,7 @@ describe("a run of the agent loop", () => {
   it("continues the iteration count on a later run", async () => {
     const { session, vault, path, agent } = await fresh("again");
     await session.start({ maxIterations: 1 });
-    agent.queue(write("again"));
+    agent.queue(write("again"), review());
     expect((await session.start({ maxIterations: 1 })).state).toBe("done");
     const doc = await vault.read(path);
     expect(doc).toContain("iteration: 2");
@@ -143,7 +150,7 @@ describe("a run of the agent loop", () => {
       readonly id = "own";
       readonly checks = { exists: async () => ({ status: "met" as const, detail: "the module's own check" }) };
     }
-    const { session, vault, path } = await fresh("own", new Own());
+    const { session, vault, path } = await fresh("own", new Own(), [() => {}, review()]);
     expect((await session.start({ maxIterations: 1 })).state).toBe("done");
     expect(await vault.read(path)).toContain("the module's own check");
   });
@@ -171,10 +178,10 @@ describe("the status of a session", () => {
       expect(session.running).toBe(true);
       expect(yami.running).toEqual([session]);
       expect(await session.status()).toBe("working");
-    }, write("watched"));
+    }, write("watched"), review());
     await session.start();
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(seen).toEqual(["working", "checking", "working", "checking", "done"]);
+    expect(seen).toEqual(["working", "checking", "working", "checking", "reviewing", "done"]);
     expect(all.at(-1)).toBe("hello/watched.md done");
     expect(session.running).toBe(false);
     expect(yami.running).toEqual([]);
@@ -214,12 +221,12 @@ describe("stop, kill, and resume", () => {
     expect(await session.status()).toBe("stopped");
     expect(await vault.read(path)).toContain("iteration 1: 0 met, 1 unmet; stopped");
 
-    agent.queue(write("paused"));
+    agent.queue(write("paused"), review());
     const resumed = await session.resume();
     expect(resumed).toMatchObject({ state: "done", iterations: 1, conversation: stopped.conversation });
-    expect(agent.started).toHaveLength(2);
-    expect(agent.last!.id).toBe(agent.started[0]!.id);
-    expect(agent.last!.prompts[0]).toMatch(/^Yami checked the promises/);
+    expect(agent.started).toHaveLength(3);
+    expect(agent.started[1]!.id).toBe(agent.started[0]!.id);
+    expect(agent.started[1]!.prompts[0]).toMatch(/^Yami checked the promises/);
     const record = await vault.read(stopped.conversation!);
     expect(record.match(/> \[!user\]/g)).toHaveLength(2);
     expect(record).toContain("status: active");
@@ -238,20 +245,24 @@ describe("stop, kill, and resume", () => {
     expect(await session.status()).toBe("stopped");
   });
 
-  it("ends a resume with no turn when the promises are met already, as by the person's own hand", async () => {
+  it("ends a resume with no worker turn when the work is done already, as by the person's own hand, once the review passes", async () => {
     const { session, vault, path, agent } = await fresh("by-hand");
     await session.start({ maxIterations: 1 });
     await write("by-hand")();
+    agent.queue(review());
     expect(await session.resume()).toMatchObject({ state: "done", iterations: 0 });
-    expect(agent.started).toHaveLength(1);
-    expect(await vault.read(path)).toContain("resumed: 1 met, 0 unmet");
+    expect(agent.started).toHaveLength(2);
+    expect(agent.last!.options.access).toBe("read-only");
+    const doc = await vault.read(path);
+    expect(doc).toContain("resumed: 1 met, 0 unmet");
+    expect(doc).toContain("resumed: review: 1 followed, 0 broken");
   });
 
   it("starts a session with no conversation when asked to resume it", async () => {
     const { session, agent } = await fresh("never-ran");
-    agent.queue(write("never-ran"));
+    agent.queue(write("never-ran"), review());
     expect(await session.resume()).toMatchObject({ state: "done", iterations: 1 });
-    expect(agent.last!.prompts[0]).toContain("You are running the Yami session");
+    expect(agent.started[0]!.prompts[0]).toContain("This is the Yami session");
   });
 
   it("ends stopped when the person interrupts the turn in the conversation", async () => {
@@ -295,12 +306,13 @@ describe("the wiki, built in", () => {
         new AbortController().signal,
       );
       if (result.isError) throw new Error(result.text);
-    });
+    }, review());
     const result = await session.start({ maxIterations: 2 });
     const doc = await vault.read(session.path);
     expect(result, doc).toMatchObject({ state: "done", iterations: 1 });
     expect(doc).toContain("iteration 1: 3 met, 0 unmet");
-    expect(agent.last!.options.access).toBe("read-only");
+    expect(doc).toContain("iteration 1: review: 3 followed, 0 broken");
+    expect(agent.started[0]!.options.access).toBe("read-only");
   });
 
   it("names an ingest by its folder or its files, and adds the policies it is given", async () => {
@@ -334,11 +346,11 @@ describe("what review found", () => {
     const { session, agent } = await fresh("lost");
     await session.start({ maxIterations: 1 });
     agent.forget();
-    agent.queue(write("lost"));
+    agent.queue(write("lost"), review());
     expect(await session.resume()).toMatchObject({ state: "done", iterations: 1 });
-    expect(agent.last!.id).not.toBe(agent.started[0]!.id);
-    const [prompt] = agent.last!.prompts;
-    expect(prompt).toMatch(/^\/hello:greeting You are running the Yami session "lost"/);
+    expect(agent.started[1]!.id).not.toBe(agent.started[0]!.id);
+    const [prompt] = agent.started[1]!.prompts;
+    expect(prompt).toMatch(/^\/yami:run This is the Yami session "lost"/);
     expect(prompt).toContain("Yami checked the promises after your last turn.");
   });
 
@@ -370,10 +382,10 @@ describe("what review found", () => {
     const seen: SessionStatus[] = [];
     session.on((status) => seen.push(status));
     await session.start({ maxIterations: 1 });
-    agent.queue(write("twice"));
+    agent.queue(write("twice"), review());
     await session.start({ maxIterations: 1 });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(seen).toEqual(["working", "checking", "needs-attention", "working", "checking", "done"]);
+    expect(seen).toEqual(["working", "checking", "needs-attention", "working", "checking", "reviewing", "done"]);
   });
 
   it("refuses fields and a schema that set a core field of a session", async () => {
@@ -394,7 +406,7 @@ describe("a note whose properties do not parse", () => {
   it("anywhere in the vault, does not fail a session that never links it", async () => {
     const { session, vault, agent, path } = await fresh("unrelated");
     await vault.write("tool/sessions/old.md", broken);
-    agent.queue(write("unrelated"));
+    agent.queue(write("unrelated"), review());
     expect(await session.start()).toMatchObject({ state: "done", iterations: 1 });
     expect(await vault.read(path)).toContain("iteration 1: 1 met, 0 unmet");
   });

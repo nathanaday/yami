@@ -3,6 +3,7 @@
 export { Yami, type IngestOptions, type SessionListener, type YamiOptions } from "./module/yami.js";
 export {
   checkName,
+  idFromName,
   INTERNAL,
   MODULE_ICON,
   ModuleDocument,
@@ -16,6 +17,7 @@ export {
   type Choice,
   type ChoiceAction,
   type DocumentKind,
+  type DocumentRef,
   type Layout,
   type LinkedKind,
   type ModuleAct,
@@ -36,9 +38,12 @@ export {
   type SessionStatus,
   type SessionSummary,
 } from "./module/session.js";
+export { VaultModule, type ModuleProblem } from "./module/vault-module.js";
+export { BASE_SKILL, BASE_SKILL_COMMAND, BASE_SKILL_TEXT } from "./module/base-skill.js";
+export type { ReviewItem, ReviewRecord, Verdict } from "./module/review.js";
 export { LINKED_KINDS, type LinkedDocument } from "./module/links.js";
 export { assignColors, hexColor, INTERNAL_COLOR, MODULE_COLORS, mute, WIKI_COLOR, type ModuleColors } from "./module/colors.js";
-export type { RunResult } from "./module/run.js";
+export type { PromiseCheck, RunResult, SessionCheck } from "./module/run.js";
 export { checks, expand, runCheck, type Check, type CheckContext, type CheckResult } from "./module/checks.js";
 export { moduleTools, TOOL_SET } from "./module/tools.js";
 export { WikiModule } from "./module/wiki.js";

@@ -11,5 +11,11 @@
     "navigator",
     "showcase"
   ],
-  "rounds": []
+  "rounds": [
+    {
+      "n": 1,
+      "base": "bbc9cddacace9c92dba03e9cab503ab823f1c005",
+      "started": "2026-10-17T18:59:18.346Z"
+    }
+  ]
 }

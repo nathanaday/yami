@@ -1,7 +1,11 @@
-import { Agent, type ActiveTurn, type AgentInfo, type AgentSession, BaseSession, type SessionOptions, type TurnResult } from "../agent/index.js";
+import { Agent, type ActiveTurn, type AgentInfo, type AgentSession, BaseSession, runTool, type SessionOptions, type TurnResult } from "../agent/index.js";
+import type { Verdict } from "../module/review.js";
 
-/** What the agent does in one turn: any work on the vault, and the result, by default completed. */
-export type Turn = (prompt: string) => Promise<Partial<TurnResult> | void> | Partial<TurnResult> | void;
+/**
+ * What the agent does in one turn: any work on the vault, and the result, by default completed. It gets
+ * the turn's message, and the session, whose `tool` calls a tool as the agent would.
+ */
+export type Turn = (prompt: string, session: ScriptedSession) => Promise<Partial<TurnResult> | void> | Partial<TurnResult> | void;
 
 /** A session that takes the next turn of its agent's script for each message. */
 export class ScriptedSession extends BaseSession {
@@ -21,8 +25,18 @@ export class ScriptedSession extends BaseSession {
   protected async startTurn(prompt: string, turn: ActiveTurn) {
     this.prompts.push(prompt);
     const behavior = this.agent.turns.shift() ?? (() => ({}));
-    const outcome = (await behavior(prompt)) ?? {};
+    const outcome = (await behavior(prompt, this)) ?? {};
     turn.finish({ status: "completed", text: "ok", ...outcome });
+  }
+
+  /**
+   * Calls a tool of the session's tool set by its full name, such as `wiki_search` or `yami_review`, as the
+   * harness would: the input is checked against the tool's schema. Throws when the session has no such tool.
+   */
+  async tool(name: string, input: unknown): Promise<{ text: string; isError: boolean }> {
+    const tool = this.options.tools?.tools.find((t) => t.name === name);
+    if (!tool) throw new Error(`The session has no tool ${name}.`);
+    return runTool(tool, input, new AbortController().signal);
   }
 
   protected async interruptTurn(turn: ActiveTurn) {
@@ -88,4 +102,36 @@ export class ScriptedAgent extends Agent {
     this.started.push(session);
     return session;
   }
+}
+
+/** A verdict for `review`: the verdict, or the verdict and its reason. */
+export type ScriptedVerdict = Verdict | [Verdict, string];
+
+/**
+ * A turn that plays the reviewer of a session: it records a verdict with `yami_review` for each policy and
+ * each promise of the review. An item that `verdicts` names, by its name or its path, gets that verdict;
+ * any other is followed or met. A reviewer that records nothing is a turn that does nothing, `() => {}`.
+ *
+ * ```ts
+ * t.agent.queue(writeTheNote, review({ "Always say hello": ["broken", "It said hi."] }), fixIt, review());
+ * ```
+ */
+export function review(verdicts: Record<string, ScriptedVerdict> = {}): Turn {
+  return async (prompt, session) => {
+    const path = /^The session document is (.+?\.md)\./m.exec(prompt)?.[1];
+    if (!path) throw new Error("The turn is no review: its message names no session document.");
+    const call = async (list: { item: string; verdict: Verdict; reason: string }[]) => {
+      const result = await session.tool("yami_review", { session: path, verdicts: list });
+      if (result.isError) throw new Error(result.text);
+      return JSON.parse(result.text) as { remaining: { kind: "policy" | "promise"; name: string; path: string }[] };
+    };
+    const { remaining } = await call([]);
+    await call(
+      remaining.map((item) => {
+        const given = verdicts[item.name] ?? verdicts[item.path];
+        const [verdict, reason] = Array.isArray(given) ? given : [given ?? (item.kind === "policy" ? "followed" : "met"), undefined];
+        return { item: item.path, verdict, reason: reason ?? `The scripted reviewer finds it ${verdict}.` };
+      }),
+    );
+  };
 }
