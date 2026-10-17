@@ -1,4 +1,6 @@
 ---
+type: promise
+module: hello
 check: exists
 path: greetings/{{session}}.md
 ---

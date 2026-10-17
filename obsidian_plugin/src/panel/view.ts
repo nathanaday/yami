@@ -1,5 +1,5 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
-import { LINKED_KINDS, STATUS_LABELS, type LinkedKind, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
+import { LINKED_KINDS, STATUS_LABELS, type LinkedKind, type ModuleProblem, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
 import { basename } from "yami/document";
 import { modeOf, moduleIcon, type ObsidianYami } from "yami/obsidian";
 import * as ui from "../ui";
@@ -18,17 +18,18 @@ const KIND_LOOK: Record<LinkedKind, { title: string; icon: string }> = {
 };
 
 /** The order of the status counts on a module's row: what needs a look first. */
-const COUNT_ORDER: SessionStatus[] = ["working", "checking", "needs-attention", "failed", "stopped", "open", "done"];
+const COUNT_ORDER: SessionStatus[] = ["working", "checking", "reviewing", "needs-attention", "failed", "stopped", "open", "done"];
 
 /**
  * A sidebar view of the vault's Yami: the modules, the sessions of a module, and one session with what it
- * links and what a person can do with it. The view only lays out what the library gives: the summaries,
- * the details, the acts, and the change feed.
+ * links and what a person can do with it, and what keeps a module of the vault out. The view only lays out
+ * what the library gives: the modules and their problems, the summaries, the details, the acts, and the
+ * change feeds.
  */
 export class YamiPanel extends ItemView {
   private place: Place = { level: "modules" };
   private ticket = 0;
-  private unsubscribe: (() => void) | undefined;
+  private unsubscribe: (() => void)[] = [];
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -60,12 +61,12 @@ export class YamiPanel extends ItemView {
         this.up();
       }
     });
-    this.unsubscribe = this.yami.onSessionsChange(() => void this.render());
+    this.unsubscribe = [this.yami.onSessionsChange(() => void this.render()), this.yami.onModulesChange(() => void this.render())];
     await this.render();
   }
 
   async onClose(): Promise<void> {
-    this.unsubscribe?.();
+    for (const stop of this.unsubscribe) stop();
   }
 
   /** Shows a place: the modules, one module, or one session. `focus` names the element to focus there. */
@@ -133,7 +134,7 @@ export class YamiPanel extends ItemView {
     this.breadcrumb(page, []);
     page.createEl("h2", { cls: "yami-panel-title", text: "Modules" });
 
-    const live = summaries.filter((s) => s.status === "working" || s.status === "checking");
+    const live = summaries.filter((s) => s.session.running);
     if (live.length) {
       const group = ui.section(page, "Working now", `${live.length}`);
       for (const summary of live) {
@@ -163,6 +164,25 @@ export class YamiPanel extends ItemView {
       if (waiting) row.createSpan({ cls: "yami-badge", text: `${waiting}`, attr: { title: counts(mine, ["needs-attention"]), "aria-hidden": "true" } });
       setIcon(row.createSpan({ cls: "yami-row-chevron" }), "chevron-right");
     }
+    this.problems(page, this.yami.problems);
+  }
+
+  /** What keeps a vault module or a template out, with the file to fix. */
+  private problems(page: HTMLElement, problems: readonly ModuleProblem[]): void {
+    if (!problems.length) return;
+    const group = ui.section(page, "Problems", `${problems.length}`);
+    group.addClass("yami-problems");
+    for (const problem of problems) {
+      // library-loop: F1.3
+      const document = problem.path.endsWith(".md") ? problem.path : undefined;
+      const row = ui.row(group, `problem:${problem.path}:${problem.message}`, (evt) => document && void this.yami.open(document, modeOf(evt)));
+      row.addClass("yami-problem-row");
+      if (!document) row.addClass("is-missing");
+      ui.icon(row, "alert-triangle");
+      const text = row.createDiv({ cls: "yami-row-text" });
+      text.createDiv({ cls: "yami-row-name", text: problem.path, attr: { title: problem.path } });
+      text.createDiv({ cls: "yami-row-desc", text: problem.message });
+    }
   }
 
   private async drawModule(page: HTMLElement, module: YamiModule): Promise<void> {
@@ -171,6 +191,7 @@ export class YamiPanel extends ItemView {
     setIcon(head.createSpan({ cls: "yami-module-icon" }), moduleIcon(module));
     head.createEl("h2", { cls: "yami-panel-title", text: module.name });
     if (module.description) page.createEl("p", { cls: "yami-panel-lede", text: module.description });
+    this.problems(page, this.yami.problems.filter((p) => p.module === module.id));
 
     const bar = page.createDiv({ cls: "yami-actions" });
     const acts = module.acts();
@@ -197,6 +218,7 @@ export class YamiPanel extends ItemView {
   private sessionRow(list: HTMLElement, summary: SessionSummary, showTemplate: boolean): void {
     // The row and its quick button sit side by side: a button never holds another.
     const item = list.createDiv({ cls: "yami-session-item", attr: { "data-status": summary.status } });
+    item.toggleClass("is-live", summary.session.running);
     const row = ui.row(item, `session:${summary.path}`, () => this.go({ level: "session", module: summary.module.id, path: summary.path }));
     row.addClass("yami-session-row");
     row.setAttribute("aria-label", `${summary.name}, ${STATUS_LABELS[summary.status].toLowerCase()}`);
@@ -242,17 +264,25 @@ export class YamiPanel extends ItemView {
       const { title: heading, icon } = KIND_LOOK[kind];
       const documents = details.documents.filter((d) => d.kind === kind);
       if (!documents.length) continue;
-      const count = kind === "promises" && documents.some((d) => d.met !== undefined) ? `${documents.filter((d) => d.met).length} of ${documents.length} met` : `${documents.length}`;
+      const judged = documents.filter((d) => verdict(d) !== undefined);
+      const count = judged.length ? `${judged.filter((d) => verdict(d)).length} of ${documents.length} ${kind === "policies" ? "followed" : "met"}` : `${documents.length}`;
       const group = ui.section(page, heading, count);
       for (const doc of documents) this.documentRow(group, doc, icon);
     }
 
-    if (details.conversation) {
+    if (details.conversation || details.review) {
       const group = ui.section(page, "Conversation");
-      const conversation = details.conversation;
-      const row = ui.row(group, "conversation", (evt) => void this.yami.open(conversation, modeOf(evt)));
-      ui.icon(row, "message-square");
-      row.createDiv({ cls: "yami-row-name", text: basename(conversation) });
+      const notes: [string, string | undefined, string, string | undefined][] = [
+        ["conversation", details.conversation, "message-square", undefined],
+        ["review", details.review, "scale", details.status === "reviewing" ? "Reviewing" : "Review"],
+      ];
+      for (const [key, note, icon, label] of notes) {
+        if (!note) continue;
+        const row = ui.row(group, key, (evt) => void this.yami.open(note, modeOf(evt)));
+        ui.icon(row, icon);
+        row.createDiv({ cls: "yami-row-name", text: basename(note) });
+        if (label) row.createDiv({ cls: "yami-row-note", text: label });
+      }
     }
 
     if (details.progress.length) {
@@ -270,10 +300,17 @@ export class YamiPanel extends ItemView {
     const path = doc.path;
     const row = ui.row(group, `doc:${doc.kind}:${doc.target}`, (evt) => path && void this.yami.open(path, modeOf(evt)));
     if (!path) row.addClass("is-missing");
-    const glyph = ui.icon(row, doc.kind === "promises" && doc.met !== undefined ? (doc.met ? "check" : "x") : kindIcon);
-    if (doc.kind === "promises" && doc.met !== undefined) glyph.addClass(doc.met ? "is-met" : "is-unmet");
+    const passed = verdict(doc);
+    const glyph = ui.icon(row, passed === undefined ? kindIcon : passed ? "check" : "x");
+    if (passed !== undefined) glyph.addClass(passed ? "is-met" : "is-unmet");
     row.createDiv({ cls: "yami-row-name", text: doc.name });
-    const note = !path ? "Missing" : doc.kind === "promises" ? (doc.met === undefined ? "Not checked" : doc.met ? "Met" : "Not met") : undefined;
+    const note = !path
+      ? "Missing"
+      : doc.kind === "promises"
+        ? passed === undefined ? "Not checked" : passed ? "Met" : "Not met"
+        : doc.kind === "policies"
+          ? passed === undefined ? "Not reviewed" : passed ? "Followed" : "Broken"
+          : undefined;
     if (note) row.createDiv({ cls: "yami-row-note", text: note });
   }
 
@@ -338,6 +375,11 @@ function counts(sessions: SessionSummary[], statuses: SessionStatus[]): string {
       return n ? [`${n} ${STATUS_LABELS[status].toLowerCase()}`] : [];
     })
     .join(" · ");
+}
+
+/** A promise's last check or review, or a policy's last review: undefined before any. */
+function verdict(doc: SessionDocument): boolean | undefined {
+  return doc.kind === "promises" ? doc.met : doc.kind === "policies" ? doc.followed : undefined;
 }
 
 function actIcon(act: SessionAct): string | undefined {

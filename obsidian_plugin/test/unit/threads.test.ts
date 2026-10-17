@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCheck } from "yami";
 import { runTool, type ToolSet } from "yami/agent";
 import { readDocument, sectionText, updateDocument } from "yami/document";
-import { testYami, type FsVault, type TestYami } from "yami/testing";
+import { review, testYami, type FsVault, type TestYami } from "yami/testing";
 import type { Wiki } from "yami/wiki";
 import { Threads } from "../../src/modules/threads/index.js";
 import { assemble, parse } from "../../src/modules/threads/thread.js";
@@ -341,6 +341,7 @@ describe("a thread session in the loop", () => {
         await call("round", { thread: "Divide", scope: "heads: calc@a1b2c3d.", results: [{ requirement: "R1", result: "pass", evidence: "ok" }, { requirement: "R2", result: "pass", evidence: "ok" }] });
         await call("close", { thread: "Divide", outcome: "closed", summary: "calc divides safely." });
       },
+      review(),
     );
     const result = await t.yami.session(PATH).start();
     expect(result).toMatchObject({ state: "done", iterations: 1 });

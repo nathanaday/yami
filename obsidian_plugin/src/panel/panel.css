@@ -240,6 +240,14 @@
   color: var(--color-orange);
 }
 
+.yami-problem-row {
+  align-items: flex-start;
+}
+
+.yami-problem-row .yami-row-icon {
+  color: var(--color-orange);
+}
+
 /* Small text in a module's color mixes with the theme's text color, so it reads in light and dark themes. */
 .yami-module-name {
   color: color-mix(in srgb, var(--yami-module-color) 60%, var(--text-normal));
@@ -372,8 +380,7 @@
 
 .yami-session-item:hover .yami-quick,
 .yami-session-item:focus-within .yami-quick,
-.yami-session-item[data-status="working"] .yami-quick,
-.yami-session-item[data-status="checking"] .yami-quick {
+.yami-session-item.is-live .yami-quick {
   opacity: 1;
 }
 
@@ -475,6 +482,11 @@
 
 .yami-mark[data-status="checking"] {
   background: linear-gradient(to right, currentColor 50%, transparent 50%);
+  color: var(--yami-module-color);
+}
+
+.yami-mark[data-status="reviewing"] {
+  background: radial-gradient(circle, currentColor 32%, transparent 38%);
   color: var(--yami-module-color);
 }
 

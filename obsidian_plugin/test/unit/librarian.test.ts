@@ -190,7 +190,8 @@ describe("a checkout as a session", () => {
     const session = await librarian.checkout.create({ name: "RL" });
     expect(await vault.read(session.path)).toContain("## Request\n\nWhat you want to read about, in your words.\n\n## Deliverables\n- [ ] [[internal/librarian/promises/Reading list made|Reading list made]]");
     t.agent.queue(async (prompt) => {
-      expect(prompt).toMatch(/^\/librarian:checkout /);
+      expect(prompt).toMatch(/^\/yami:run This is the Yami session "RL"/);
+      expect(prompt).toContain("`librarian:checkout`");
       const result = await runTool(checkoutTool(), { ...order, name: undefined, session: session.path }, new AbortController().signal);
       if (result.isError) throw new Error(result.text);
     });

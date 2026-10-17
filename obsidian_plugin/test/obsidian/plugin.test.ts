@@ -1,9 +1,19 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { launchObsidian, type ObsidianInstance } from "./harness.js";
 
 const TIMEOUT = 240_000;
+const HELLO = "test/fixtures/vault-modules/hello";
+
+/** The Hello fixture as vault paths and texts, as a person would write the files in `internal/hello/`: the template last, after what it links. */
+function helloFiles(): Record<string, string> {
+  const files = readdirSync(HELLO, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.relative(HELLO, path.join(entry.parentPath, entry.name)))
+    .sort((a, b) => Number(a.startsWith("templates/")) - Number(b.startsWith("templates/")));
+  return Object.fromEntries(files.map((file) => [`internal/hello/${file}`, readFileSync(path.join(HELLO, file), "utf8")]));
+}
 
 describe("Yami in Obsidian", () => {
   let obsidian: ObsidianInstance;
@@ -261,12 +271,42 @@ describe("Yami in Obsidian", () => {
     expect(existsSync(path.join(obsidian.vault, made.copies[0]))).toBe(false);
   });
 
-  it("installs the hello module when it loads", async () => {
-    for (const file of ["Yami.base", "internal/hello/sessions.base", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
-      await obsidian.waitForNote(file, (text) => text.length > 0, 10_000);
-    }
+  it("creates the hello module with New module, and the panel shows it with no reload", { timeout: 60_000 }, async () => {
+    await obsidian.waitForNote("Yami.base", (text) => text.length > 0, 10_000);
     // A file at the vault root has no folder to create. A slice to the last slash once made "Yami.bas".
     expect(existsSync(path.join(obsidian.vault, "Yami.bas"))).toBe(false);
+    await run("yami:open-panel");
+    await page().waitForSelector('.yami-panel [data-key="module:threads"]');
+    expect(await page().$('.yami-panel [data-key="module:hello"]')).toBeNull();
+
+    // library-loop: F1.6
+    const newModule = await page().evaluate(() => (window as any).app.commands.listCommands().find((c: any) => c.id.startsWith("yami:") && c.name.endsWith("New module"))?.id as string);
+    await run(newModule);
+    await page().waitForSelector(".modal-container input", { timeout: 5_000 });
+    await page().keyboard.type("Hello");
+    await page().keyboard.press("Enter");
+    await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path === "internal/hello/hello.md", undefined, { timeout: 10_000 });
+    await page().waitForSelector('.yami-panel [data-key="module:hello"]', { timeout: 10_000 });
+
+    // The person writes Hello over the starter, and removes the starter's template.
+    await page().evaluate(async (files) => {
+      const vault = (window as any).app.vault;
+      for (const [path, text] of Object.entries(files)) {
+        const folder = path.slice(0, path.lastIndexOf("/"));
+        if (!vault.getFolderByPath(folder)) await vault.createFolder(folder);
+        const file = vault.getFileByPath(path);
+        if (file) await vault.modify(file, text);
+        else await vault.create(path, text);
+      }
+      await vault.delete(vault.getFileByPath("internal/hello/templates/Task.md"));
+    }, helloFiles());
+    await page().waitForSelector('.yami-panel [data-key="module:hello"] .yami-row-name:text-is("Hello world")', { timeout: 10_000 });
+    expect(await page().$eval('.yami-panel [data-key="module:hello"] .yami-module-icon svg', (el) => el.classList.contains("lucide-hand"))).toBe(true);
+    await page().waitForFunction(() => {
+      const commands = (window as any).app.commands.commands;
+      return Boolean(commands["yami:hello-new-greeting"]) && !commands["yami:hello-new-task"];
+    }, undefined, { timeout: 10_000 });
+    expect(await page().$$(".yami-panel .yami-problem-row")).toHaveLength(0);
   });
 
   it("writes the exchange into the note and names the note", { timeout: TIMEOUT }, async () => {
@@ -382,15 +422,15 @@ describe("Yami in Obsidian", () => {
   it("calls a module tool from both agents", { timeout: TIMEOUT }, async () => {
     for (const command of ["yami:new-conversation-claude", "yami:new-conversation-codex"]) {
       await newConversation(command);
-      await send("Call the greet_user tool of the hello module with the name Ada, then reply with exactly the text the tool returned.");
+      await send("Call the status tool of the threads module with no thread, then reply with only the number of open threads that it listed, as a digit.");
       await idle();
       const text = await obsidian.waitForNote(await activePath(), () => true);
-      // Codex sometimes calls the tool twice, or first reads the module's greeting skill, which needs no approval;
+      // Codex sometimes calls the tool twice, or first reads a module skill, which needs no approval;
       // the plumbing, not the count, is under test.
       expect(text, command).toMatch(/> \[!activity\]- (.+ · )?Used (a tool|\d tools)\n/);
-      expect(text, command).toContain("> - `Greet Ada`\n");
+      expect(text, command).toContain("> - `List the open threads`\n");
       expect(text, command).not.toContain("yami-permission");
-      expect(text, command).toMatch(/\nHello, Ada!\n\n$/);
+      expect(text, command).toMatch(/\n0\.?\n\n$/);
     }
   });
 
@@ -545,10 +585,17 @@ describe("Yami in Obsidian", () => {
     await page().waitForSelector('.yami-panel .yami-state .yami-mark[data-status="working"]', { timeout: 30_000 });
     // Run became Stop; the focus moved to it instead of leaving the panel.
     await page().waitForFunction(() => document.activeElement?.textContent === "Stop", undefined, { timeout: 5_000 });
+    // The checks pass, then a reviewer judges the policy, and the page shows the review as it goes.
+    await page().waitForSelector('.yami-panel .yami-state .yami-mark[data-status="reviewing"]', { timeout: 180_000 });
+    expect(await page().textContent(".yami-panel .yami-state-label")).toBe("Reviewing");
+    await page().waitForSelector('.yami-panel [data-key="review"]', { timeout: 30_000 });
     await page().waitForFunction(() => document.querySelector(".yami-panel .yami-state-label")?.textContent === "Done", undefined, { timeout: 180_000, polling: 250 });
     expect(await page().textContent('.yami-panel .yami-row:has-text("Greeting note") .yami-row-note')).toBe("Met");
+    expect(await page().textContent('.yami-panel .yami-row:has-text("Always say hello") .yami-row-note')).toBe("Followed");
+    expect(await page().textContent('.yami-panel .yami-section:has(h3:text-is("Policies")) .yami-section-count')).toBe("1 of 1 followed");
     expect(await page().$$eval(".yami-panel .yami-section-head h3", (els) => els.map((el) => el.textContent))).toEqual(["Promises", "Policies", "Skills", "Conversation", "Progress"]);
-    expect(await page().textContent(".yami-panel .yami-progress li")).toContain("iteration 1: 1 met, 0 unmet");
+    expect(await page().$$eval('.yami-panel .yami-section:has(h3:text-is("Conversation")) .yami-row', (els) => els.map((el) => el.getAttribute("data-key")))).toEqual(["conversation", "review"]);
+    expect(await page().textContent(".yami-panel .yami-progress li")).toContain("iteration 1: review: 1 followed, 0 broken");
     expect(await page().$$eval(".yami-panel .yami-action", (els) => els.map((el) => el.textContent))).toEqual(["Run with Claude", "Run with Codex", "Resume"]);
 
     // Every icon drew: a name Obsidian does not know leaves an empty element.
@@ -674,6 +721,9 @@ describe("Yami in Obsidian", () => {
     expect(doc).toContain("state: done");
     expect(doc).toContain("template: greeting");
     expect(doc).toMatch(/- \[x\] \[\[internal\/hello\/promises\/Greeting note\|Greeting note\]\]/);
+    expect(doc).toMatch(/\nfollowed:\n  - "\[\[internal\/hello\/policies\/Always say hello\|Always say hello\]\]"\n/);
+    expect(doc).toMatch(/\nreview: "\[\[conversations\//);
+    expect(doc).toMatch(/## Review\n- followed: \[\[internal\/hello\/policies\/Always say hello\|Always say hello\]\] — /);
     const conversation = doc.match(/\nconversation: "\[\[(conversations\/[^|\]]+)\|/)?.[1];
     expect(conversation).toBeTruthy();
     const record = await obsidian.waitForNote(`${conversation}.md`, (text) => text.includes("> [!user]"), 10_000);
@@ -754,5 +804,28 @@ describe("Yami in Obsidian", () => {
     } finally {
       await page().evaluate(() => clearInterval((window as any).__allow));
     }
+  });
+
+  it("shows a broken template's problem in the panel, and drops the module when its folder goes, with no reload", { timeout: 60_000 }, async () => {
+    await run("yami:open-panel");
+    await page().evaluate(() => (window as any).app.workspace.getLeavesOfType("yami-panel")[0].view.go({ level: "modules" }));
+    await page().waitForSelector('.yami-panel [data-key="module:hello"]');
+    const template = "internal/hello/templates/Greeting.md";
+    const edit = (from: string, to: string) =>
+      page().evaluate(([path, a, b]) => (window as any).app.vault.process((window as any).app.vault.getFileByPath(path), (text: string) => text.replace(a, b)), [template, from, to] as const);
+
+    await edit("module: hello\n", "module: hello\naccess: readonly\n");
+    await page().waitForSelector(`.yami-panel .yami-problem-row[data-key^="problem:${template}:"]`, { timeout: 10_000 });
+    expect(await page().textContent(".yami-panel .yami-problem-row .yami-row-desc")).toContain("access");
+    await page().waitForFunction(() => !(window as any).app.commands.commands["yami:hello-new-greeting"], undefined, { timeout: 10_000 });
+    expect(await page().$('.yami-panel [data-key="module:threads"]')).not.toBeNull();
+    await edit("access: readonly\n", "");
+    await page().waitForSelector(".yami-panel .yami-problem-row", { state: "detached", timeout: 10_000 });
+    await page().waitForFunction(() => Boolean((window as any).app.commands.commands["yami:hello-new-greeting"]), undefined, { timeout: 10_000 });
+
+    await page().evaluate(() => (window as any).app.vault.delete((window as any).app.vault.getFolderByPath("internal/hello"), true));
+    await page().waitForSelector('.yami-panel [data-key="module:hello"]', { state: "detached", timeout: 10_000 });
+    await page().waitForFunction(() => !Object.keys((window as any).app.commands.commands).some((id) => id.startsWith("yami:hello-")), undefined, { timeout: 10_000 });
+    expect(await page().evaluate(() => (window as any).app.plugins.plugins.yami.yami.module("hello"))).toBeUndefined();
   });
 });
