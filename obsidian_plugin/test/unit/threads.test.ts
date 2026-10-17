@@ -357,7 +357,7 @@ describe("a thread session in the loop", () => {
     await specify({ budget: 1, user_asked: "one round only" });
     t.agent.queue(async () => void (await fail()));
     const result = await t.yami.session(PATH).start();
-    expect(result).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 1: 0 met, 0 unmet, 1 for review" });
+    expect(result).toMatchObject({ state: "needs-attention", iterations: 1, reason: expect.stringContaining("iteration 1: 0 met, 0 unmet, 1 for review: Thread closed — ask the user: the thread used its 1 rounds") });
   });
 });
 

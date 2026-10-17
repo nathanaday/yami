@@ -504,7 +504,7 @@ describe("Yami in Obsidian", () => {
       page().evaluate(
         async ([name, state]) => {
           const app = (window as any).app;
-          const session = await app.plugins.plugins.yami.yami.module("hello").greet.create({ name });
+          const session = await app.plugins.plugins.yami.yami.module("hello").templates.find((t: any) => t.id === "greeting").create({ name });
           if (state) await app.fileManager.processFrontMatter(app.vault.getFileByPath(session.path), (fm: any) => (fm.state = state));
           return session.path as string;
         },
@@ -799,9 +799,11 @@ describe("Yami in Obsidian", () => {
       const done = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
       expect(done).toContain("state: done");
       expect(done).toContain(`conversation: "[[${conversation}|`);
+      // The run's prompt, then the resume's check feedback. A later turn that misses a check, or a review that finds a policy broken, sends its feedback too.
       const record = await obsidian.read(`${conversation}.md`);
-      expect(record).toContain("> [!user]\n> Yami checked the promises");
-      expect(record.match(/> \[!user\]/g)).toHaveLength(2);
+      const prompts = [...record.matchAll(/> \[!user\]\n> (.*)/g)].map((m) => m[1]);
+      expect(prompts.slice(0, 2), record).toEqual([expect.stringMatching(/^\/yami:run This is the Yami session/), "Yami checked the promises after your last turn."]);
+      for (const prompt of prompts.slice(2)) expect(["Yami checked the promises after your last turn.", "A reviewer judged your work after your last turn."], record).toContain(prompt);
     } finally {
       await page().evaluate(() => clearInterval((window as any).__allow));
     }
