@@ -43,8 +43,8 @@ describe("a run of the agent loop", () => {
     expect(first).toContain("## Policies");
     expect(first).toContain("## Promises");
     expect(first).toContain("- greeting: Hello");
-    expect(second).toMatch(/^Yami checked/);
-    expect(second).toContain("no file at greetings/second.md");
+    // The README quotes this text, so a host or a test can tell check feedback in a conversation record.
+    expect(second).toBe("Yami checked the promises after your last turn.\n\n- Greeting note: unmet, no file at greetings/second.md\n\nMeet the unmet promises. Follow the policies.");
     const doc = await vault.read(path);
     expect(doc).toContain("iteration 1: 0 met, 1 unmet");
     expect(doc).toContain("iteration 2: 1 met, 0 unmet");

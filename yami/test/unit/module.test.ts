@@ -214,6 +214,18 @@ describe("creating a session from a template", () => {
     await expect(hello.greet.create({ fields: { greeting: 3 } })).rejects.toThrow("greeting must be text");
   });
 
+  it("finds a template by its id, the first for no id, and none for an id no template has", () => {
+    class Two extends Hello {
+      readonly id = "two";
+      readonly other = this.template({ id: "other", name: "Other" });
+    }
+    const two = new Two();
+    expect(two.templateOf("other")).toBe(two.other);
+    expect(two.templateOf("greet")).toBe(two.greet);
+    for (const none of [undefined, null, ""]) expect(two.templateOf(none)).toBe(two.greet);
+    for (const unknown of ["missing", 3, ["other"]]) expect(two.templateOf(unknown)).toBeUndefined();
+  });
+
   it("lists the session documents of the vault, of a module, or of a template", async () => {
     class Two extends Hello {
       readonly id = "two";

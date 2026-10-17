@@ -341,7 +341,13 @@ export abstract class YamiModule {
     return [];
   }
 
-  /** The template that a session document's `template` property names. A document that names none takes the module's first template. */
+  /**
+   * The template with this id, or `undefined` when no template has it. `undefined`, `null`, and `""` give the
+   * first template, as for a session document with no `template` property.
+   * @example
+   * const template = yami.module("code-review")?.templateOf("review-a-change");
+   * if (template) await template.create({ name: "PR 12" });
+   */
   templateOf(id: unknown): SessionTemplate | undefined {
     return id === undefined || id === null || id === "" ? this.templates[0] : this.templates.find((t) => t.id === id);
   }

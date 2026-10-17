@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1 · library-loop vault-modules round 5
+
+### Changed
+- The README quotes the two feedback prompts of the loop, `Yami checked the promises after your last turn.` and `A reviewer judged your work after your last turn.`, with their item lines, and says how they appear in a conversation note. A test pins each text, so a change to one is a change of the documented contract.
+- The README and the doc comment document `module.templateOf(id)`: the template with that id, the first template for no id, and `undefined` for an id that no template has. A host that stored a template id calls `module.templateOf("review-a-change")?.create({ name })`.
+
 ## 0.5.0 · library-loop vault-modules round 4
 
 ### Breaking

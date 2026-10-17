@@ -14,7 +14,7 @@ The Yami library. The design policy is in [`design.md`](../design.md).
 | `yami/esbuild` | The esbuild options of an Obsidian plugin built on Yami. |
 | `yami/markdown` | The type of a `.md` file imported as text. |
 
-`VERSION` from `yami` is the version of the package, such as `"0.5.0"`. A host can show it, for example in a bug report.
+`VERSION` from `yami` is the version of the package, such as `"0.5.1"`. A host can show it, for example in a bug report.
 
 `yami/obsidian` is the one module that uses the Obsidian API, CodeMirror, and the DOM. The other modules are plain TypeScript, and the build checks that they stay so. A plugin's modules import `yami`, so they and their tests run in Node.
 
@@ -176,6 +176,13 @@ A module is a subclass of `YamiModule`. Its fields declare it, and builders in i
 
 `module.hasSkills` says whether the module's internal folder holds skills, so that Yami gives it to the agents as a skill set.
 
+`module.templates` lists the module's templates. `module.templateOf(id)` gives the template with that id, for example one that a host stored in a setting or a URI. It gives `undefined` for an id that no template has, and the first template for `undefined`, `null`, or `""`, as for a session document with no `template` property. It never throws.
+
+```ts
+const template = yami.module("code-review")?.templateOf("review-a-change");
+if (template) await template.create({ name: "PR 12" });
+```
+
 `tools()` returns the module's tools, made with `defineTool({ name, description, input: { text: z.string() }, readOnly, title, run })`. The agent sees a tool as `<module id>_<tool name>`, with each dash of the id as an underscore: `code-review` and `post_comment` give `code_review_post_comment`. Set `readOnly: true` on a tool that changes nothing, no file and no state of the host, so that a reviewer gets it too; a tool without it is one that can change things, and a review does not get it. Once the module is added to a Yami, `this.yami`, `this.vault`, `this.wiki`, and `this.layout` are available to its tools, checks, and actions.
 
 A module writes its files when the Yami enables it, and only the files that do not exist, so edits in the vault stay. The template's documents go under `internal/<id>/`: `policies/`, `promises/`, `articles/`, `skills/<name>/SKILL.md`, and `agents/`. A template's `skills`, `policies`, `promises`, and `articles` take any `DocumentRef`, `{ kind, name, path, link }`, of which `ModuleDocument` is one.
@@ -300,6 +307,28 @@ Each iteration is one agent turn, one verification, and a review when the checks
 2. **Action.** One turn on a harness session with `accept-edits` approval, the template's access, and the vault as the working directory. The agent can call `yami_check` to run the checks itself before it ends the turn.
 3. **Verification.** Yami reads the session document again, since the agent's tools can change its properties, and runs the `check` of each promise that has one. It updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document. If a promise is unmet, the next prompt says which, and why.
 4. **Review.** When every check is met, and the session links a policy or a promise with no `check`, Yami opens a new conversation with the same agent, read-only, and the status is `reviewing`. The reviewer gets the session document, the policies, the promises to judge, the names of those items as the only ones to judge, the worker's last message, and the run's conversation note, which records every tool call. It gives each policy the verdict `followed` or `broken`, and each promise `met` or `unmet`, each with a reason, and records them with `yami_review`. The reviewer changes nothing: its access is read-only, and its tools are only those whose `readOnly` is true, with its own `yami_review`, which no other agent has and which refuses once the review ends. A broken policy or an unmet promise goes back to the worker as the next prompt, the same as an unmet check. The session document records the verdicts: `followed` and `broken` list the policies, `met` and `unmet` include the judged promises, the Review section gives each verdict with its reason, and `review` links the review's conversation note.
+
+The feedback prompt has one of two forms, so a host or a test that reads a conversation record can tell them apart by the first line. After an unmet check (`<detail>` is the check's detail, and a check that returned `review` gives `review` in place of `unmet`):
+
+```
+Yami checked the promises after your last turn.
+
+- <promise name>: unmet, <detail>
+
+Meet the unmet promises. Follow the policies.
+```
+
+After a review that found a broken policy or an unmet promise (`<kind>` is `policy` or `promise`):
+
+```
+A reviewer judged your work after your last turn.
+
+- <name> (<kind>): broken|unmet, <reason>
+
+Fix what is broken or unmet. Follow the policies.
+```
+
+Each promise that is not met, and each item that the review failed, has one line. When a resume finds that the harness no longer has the session, the prompt starts with the whole context, and the feedback comes after it. In the conversation note, each prompt is a `> [!user]` callout, so its first line is `> Yami checked the promises after your last turn.` or `> A reviewer judged your work after your last turn.`.
 
 The exchange goes to a conversation note in `conversations/`, linked from the session document as `conversation`, with the session document linked back as `module`. The note records the prompts, the agent's replies, and its tool calls, and a person can continue it after the run. Each review is a note of its own, `<module> <session> review`.
 

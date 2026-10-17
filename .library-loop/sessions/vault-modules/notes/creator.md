@@ -28,6 +28,12 @@
 - The review prompt names the items to judge ("and only these: …").
 - Policy proposal: the loop's `failed` covers Yami's own faults.
 
+## Round 5 (0.5.1): decisions
+- F4.1: the README quotes both feedback prompts in full (ruling: docs, no constants). `run.test.ts` now pins the full check feedback with `toBe`; `review.test.ts` already pinned the review feedback. A change to either text needs a README edit.
+- F4.2: documented `templateOf(id)` (README "A module", doc comment with example) and added a test. No new method (ruling).
+- F4.3: closed, no change.
+- Ruled the last round.
+
 ## Watch next round
 - Showcase module tools that only read and that a reviewer needs must add `readOnly: true`.
 - The Deliverables detail of a check is not cut to one line. A multi-line check detail would break the `reason` parse and the checklist line. The Progress line now holds check details too (flattened by `oneLine`).
