@@ -34,7 +34,7 @@ export function reviewTool(review: Review): AgentTool {
   return defineTool({
     name: `${YAMI_ID}_review`,
     description:
-      "Records the verdicts of this review. A policy takes `followed` or `broken`, a promise `met` or `unmet`, each with a reason that names the evidence. A later verdict on an item replaces the earlier one. Returns what it recorded, the errors, and the items still to judge; call it with no verdicts to see them.",
+      "Records the verdicts of this review. A policy takes `followed` or `broken`, a promise `met` or `unmet`, each with a reason that names the evidence. A later verdict on an item replaces the earlier one. Returns what it recorded, the errors, and the items still to judge; call it with no `verdicts` to see them.",
     input: {
       verdicts: z
         .array(
@@ -44,9 +44,10 @@ export function reviewTool(review: Review): AgentTool {
             reason: z.string().min(1).describe("One or two sentences that name the evidence."),
           }),
         )
-        .describe("One verdict for each policy and each promise of the review."),
+        .default([])
+        .describe("One verdict for each policy and each promise of the review. Leave it out to see the items still to judge."),
     },
-    title: ({ verdicts }) => `Record ${verdicts.length} verdict(s)`,
+    title: ({ verdicts }) => (verdicts.length ? `Record ${verdicts.length} verdict(s)` : "List the items to judge"),
     run: async ({ verdicts }) => {
       if (!review.open) return { text: "This review has ended. A verdict counts only while its review runs.", isError: true };
       const result = review.record(verdicts);

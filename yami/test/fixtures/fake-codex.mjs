@@ -81,10 +81,13 @@ async function runTurn(prompt) {
     case 'turn-settings':
       reply(JSON.stringify({ model: lastTurn.model, effort: lastTurn.effort }));
       return complete();
-    case 'tool': {
-      const item = { type: 'dynamicToolCall', id: 'dt-1', namespace: 'note', tool: 'append', arguments: { text: 'hi' }, status: 'inProgress', contentItems: null, success: null };
+    case 'tool':
+    case 'tool-no-input': {
+      // tool-no-input: the model calls the tool with an input that its schema refuses.
+      const args = prompt === 'tool' ? { text: 'hi' } : {};
+      const item = { type: 'dynamicToolCall', id: 'dt-1', namespace: 'note', tool: 'append', arguments: args, status: 'inProgress', contentItems: null, success: null };
       notify('item/started', { turnId: activeTurn, item });
-      const response = await request('item/tool/call', { callId: 'dt-1', namespace: 'note', tool: 'append', arguments: { text: 'hi' } });
+      const response = await request('item/tool/call', { callId: 'dt-1', namespace: 'note', tool: 'append', arguments: args });
       notify('item/completed', { turnId: activeTurn, item: { ...item, status: 'completed', ...response.result } });
       reply(JSON.stringify(response.result));
       return complete();

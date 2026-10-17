@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { runTool } from "../../src/agent/index.js";
+import { runTool, toolTitle } from "../../src/agent/index.js";
 import { readDocument } from "../../src/document/index.js";
 import { defineTool, type AgentTool, type SessionStatus } from "../../src/index.js";
 import { review, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
@@ -64,6 +64,7 @@ describe("the review step", () => {
     expect(prompt).toContain("## Policies\n\n### Always say hello\n\nPath: internal/judged/policies/Always say hello.md");
     expect(prompt).toContain("## The worker's last message\n\nI wrote greetings/all.md.");
     expect(prompt).not.toContain("## Promises");
+    expect(prompt).toContain("Judge each policy and each promise below, and only these: Always say hello. Yami's checks decided the other promises of the session.");
     // The reviewer sees the session as the verification left it.
     expect(prompt).toContain("- [x] [[internal/judged/promises/Greeting note|Greeting note]] — found greetings/all.md");
     expect(prompt).toContain("iteration 1: 1 met, 0 unmet");
@@ -110,6 +111,21 @@ describe("the review step", () => {
     agent.queue(write("unreviewed"), () => ({ status: "failed", error: "The session has no tool wiki_change." }));
     expect(await session.start()).toMatchObject({ state: "failed", iterations: 1, reason: "iteration 1: review failed: The session has no tool wiki_change." });
     expect(await vault.read(path)).toContain("iteration 1: review failed: The session has no tool wiki_change.");
+  });
+
+  it("fails when Yami's own code throws during the review, and the reason names the error and where it was thrown", async () => {
+    const { session, agent, vault, path, yami } = await fresh("faulty");
+    agent.queue(write("faulty"));
+    const open = yami.openConversation.bind(yami);
+    let opened = 0;
+    yami.openConversation = async (options) => {
+      if (++opened === 2) throw new TypeError("Cannot read properties of undefined (reading 'length')");
+      return open(options);
+    };
+    const result = await session.start();
+    expect(result).toMatchObject({ state: "failed", iterations: 1 });
+    expect(result.reason).toMatch(/^iteration 1: review failed: TypeError: Cannot read properties of undefined \(reading 'length'\) \(at .*\(review\.test\.ts:\d+:\d+\)\)$/);
+    expect(await vault.read(path)).toContain("iteration 1: review failed: TypeError: Cannot read properties");
   });
 
   it("needs attention when the review finds a policy broken on the last iteration", async () => {
@@ -207,9 +223,10 @@ describe("the review step", () => {
 
   it("needs attention with no review when a check returns review, as an unknown check does", async () => {
     const { session, agent, vault, path } = await fresh("unknown", (m) => m.unknown);
-    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1 });
+    const reason = 'iteration 1: 0 met, 0 unmet, 1 for review: Odd check — unknown check "nonesuch"';
+    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason });
     expect(agent.started).toHaveLength(1);
-    expect(await vault.read(path)).toContain("iteration 1: 0 met, 0 unmet, 1 for review");
+    expect(await vault.read(path)).toContain(reason);
   });
 
   it("gives the reviewer only the tools that change nothing, and the review tool, which no other agent has", async () => {
@@ -252,6 +269,23 @@ describe("the review step", () => {
         remaining: [item],
       },
       { recorded: 1, errors: [], remaining: [] },
+    ]);
+  });
+
+  it("lists the items still to judge when the reviewer calls the review tool with no verdicts, as its description says", async () => {
+    const { session, agent } = await fresh("look");
+    const calls: { title: string; result: { text: string; isError: boolean } }[] = [];
+    agent.queue(write("look"), async (_prompt, reviewer) => {
+      const tool = reviewer.options.tools!.tools.find((candidate) => candidate.name === "yami_review")!;
+      calls.push({ title: toolTitle(tool, {}), result: await reviewer.tool("yami_review", {}) });
+      await reviewer.tool("yami_review", { verdicts: [{ item: "Always say hello", verdict: "followed", reason: "It said hello." }] });
+    });
+    expect(await session.start()).toMatchObject({ state: "done" });
+    expect(calls).toEqual([
+      {
+        title: "List the items to judge",
+        result: { isError: false, text: JSON.stringify({ recorded: 0, errors: [], remaining: [{ kind: "policy", name: "Always say hello", path: "internal/judged/policies/Always say hello.md" }] }) },
+      },
     ]);
   });
 

@@ -20,9 +20,18 @@
 - F2.3: `VERSION` in `src/version.ts`. A test compares it with `package.json`.
 - Policy proposal: an exception to Entities item 5 for the base skill.
 
+## Round 4 (0.5.0): decisions
+- Review crash: the cause was not the broken note. The Claude transcript (`~/.claude/projects/-private-var-folders-...-yami-plugin-*-vault/*.jsonl`) showed `yami_review {}`. `describeTool` called `title` with the raw input, the throw left the pump, and the session closed. The fix is `toolTitle(tool, input)` in `agent/types.ts`, exported from `yami/agent` and used by both adapters. `yami_review.verdicts` has `.default([])`.
+- New `test/fixtures/fake-claude.mjs` and `test/unit/claude.test.ts`: the first unit tests of the Claude adapter. Prompts: `tool <name> <json>` and `bad-result`.
+- Fault of Yami's code: `failed`, with `errorText(error)` (kind, message, first frame without folders). runReview `.catch` → the `review failed:` branch. The Claude pump catches `handle` errors separately: `Yami could not read a message of Claude Code: …`, then closes the query.
+- F3.1: `summary()` appends `: <name> — <detail>; …` for promises for review. Listed as Breaking (text change).
+- The review prompt names the items to judge ("and only these: …").
+- Policy proposal: the loop's `failed` covers Yami's own faults.
+
 ## Watch next round
 - Showcase module tools that only read and that a reviewer needs must add `readOnly: true`.
-- The Deliverables detail of a check is not cut to one line. A multi-line check detail would break the `reason` parse and the checklist line.
+- The Deliverables detail of a check is not cut to one line. A multi-line check detail would break the `reason` parse and the checklist line. The Progress line now holds check details too (flattened by `oneLine`).
+- When a live failure is unclear, read the harness transcript first; it shows the model's real tool inputs.
 - Field-type conflict rule: the first template by file name wins.
 - Each version bump: `package.json`, `package-lock.json`, `src/version.ts`. Each change of the base skill text: add its hash to `SHIPPED`.
 - The overseer takes the update question for the documents of code modules to the user.

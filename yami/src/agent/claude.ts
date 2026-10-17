@@ -35,7 +35,9 @@ import {
   type PermissionKind,
   type Question,
   type QuestionAnswers,
+  errorText,
   runTool,
+  toolTitle,
   type SessionOptions,
   type SessionSettings,
   type ToolSet,
@@ -319,7 +321,17 @@ export class ClaudeSession extends BaseSession {
   private async pump(): Promise<void> {
     let error: string | undefined;
     try {
-      for await (const message of this.query) this.handle(message);
+      for await (const message of this.query) {
+        try {
+          this.handle(message);
+        } catch (thrown) {
+          // A fault of the adapter, not of Claude Code: the reason says where, and the session closes.
+          error = `Yami could not read a message of Claude Code: ${errorText(thrown)}`;
+          this.input.end();
+          this.query.close();
+          break;
+        }
+      }
     } catch (thrown) {
       error = this.closeMessage(thrown instanceof Error ? thrown.message : String(thrown));
     }
@@ -485,7 +497,7 @@ export class ClaudeSession extends BaseSession {
 
   private describeTool(name: string, input: unknown): string {
     const appTool = this.appTools.get(name);
-    if (appTool) return appTool.title?.(input as never) ?? appTool.name;
+    if (appTool) return toolTitle(appTool, input);
     const fields = (input ?? {}) as Record<string, unknown>;
     if (name === "AskUserQuestion") return "Asked you questions";
     // A subagent's title names its type, so the record shows which agent did the work.

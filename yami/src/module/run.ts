@@ -1,4 +1,5 @@
 import type { Agent } from "../agent/agent.js";
+import { errorText } from "../agent/types.js";
 import type { Conversation, ConversationTurn } from "../conversation/conversations.js";
 import {
   basename,
@@ -42,8 +43,11 @@ export interface RunResult {
   review?: string;
   /**
    * Why the run ended `failed` or `needs-attention`: the line that it recorded last in the Progress section,
-   * without the time, such as `iteration 1: turn failed: …` or `iteration 3: 1 met, 1 unmet`. None for any
-   * other state.
+   * without the time, such as `iteration 1: turn failed: …`, `iteration 3: 1 met, 1 unmet`, or
+   * `iteration 1: 0 met, 0 unmet, 1 for review: Approved — ask the user`, which names each promise for
+   * review with its check's reason. A fault of Yami's own code gives the error's kind, its message, and
+   * where it was thrown: `failed: TypeError: … (at …)`, or `iteration 1: review failed: TypeError: … (at …)`
+   * during a review. None for any other state.
    */
   reason?: string;
 }
@@ -231,8 +235,11 @@ export async function runSession(
       control.phase("reviewing");
       const review = new Review(items);
       const prompt = reviewPrompt({ path, kind, conversation: conversation?.path ?? earlier, session: doc, reply, policies: linked.policies, promises: judged });
-      const { note, result } = await runReview(yami, agent, control, review, { path, name: `${module.id} ${basename(path)} review`, prompt, worker: conversation });
-      reviewNote = note;
+      // A fault of Yami's own code in the review fails it as a harness failure does, with where it was thrown.
+      const { note, result } = await runReview(yami, agent, control, review, { path, name: `${module.id} ${basename(path)} review`, prompt, worker: conversation }).catch(
+        (error: unknown) => ({ note: undefined, result: { status: "failed", text: "", error: errorText(error) } as ConversationTurn }),
+      );
+      reviewNote = note ?? reviewNote;
       if (result.status === "failed" && !control.stopping) {
         state = "failed";
         await write({ iteration, line: `${step}: review failed: ${result.error ?? "no details"}`, state });
@@ -264,7 +271,7 @@ export async function runSession(
   } catch (error) {
     // A run never leaves its document running: a kill can close the conversation in the middle of a step.
     state = control.stopping ? "stopped" : "failed";
-    await write({ iteration, line: state === "stopped" ? "stopped" : `failed: ${error instanceof Error ? error.message : String(error)}`, state });
+    await write({ iteration, line: state === "stopped" ? "stopped" : `failed: ${errorText(error)}`, state });
   } finally {
     control.conversation = undefined;
     await conversation?.close();
@@ -340,8 +347,10 @@ async function verify(vault: Vault, wiki: Wiki, module: YamiModule, doc: Documen
   return verification;
 }
 
+/** The counts of the checks, and each promise for review with its check's reason: what a person must decide. */
 function summary(verification: Verification): string {
-  return `${verification.met.length} met, ${verification.unmet.length} unmet${verification.review.length ? `, ${verification.review.length} for review` : ""}`;
+  const review = verification.results.filter(({ result }) => result.status === "review").map(({ promise, result }) => `${documentName(promise.path)} — ${result.detail}`);
+  return `${verification.met.length} met, ${verification.unmet.length} unmet${review.length ? `, ${review.length} for review: ${review.join("; ")}` : ""}`;
 }
 
 interface Outcome {

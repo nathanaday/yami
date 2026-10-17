@@ -206,6 +206,29 @@ describe("codex adapter", () => {
     expect(setup.dynamicTools[0].tools[0].inputSchema.properties.text).toEqual({ type: "string" });
   });
 
+  it("titles an app tool call whose input the schema refuses by the tool's name", async () => {
+    const tools = {
+      name: "note",
+      description: "Edit the note.",
+      tools: [
+        defineTool({
+          name: "append",
+          description: "Appends lines.",
+          input: { lines: z.array(z.string()) },
+          title: ({ lines }) => `Append ${lines.length} line(s)`,
+          run: async ({ lines }) => `appended ${lines.length}`,
+        }),
+      ],
+    };
+    const events: AgentEvent[] = [];
+    session = await startCodexSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, tools });
+    session.on((event) => events.push(event));
+    const result = await session.send("tool-no-input");
+    expect(result.status).toBe("completed");
+    expect(JSON.parse(result.text)).toMatchObject({ success: false });
+    expect(events).toContainEqual(expect.objectContaining({ type: "tool-start", tool: "note.append", title: "append" }));
+  });
+
   it("reports an error result when an app tool throws", async () => {
     const tools = {
       name: "note",

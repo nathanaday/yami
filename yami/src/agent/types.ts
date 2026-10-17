@@ -96,9 +96,7 @@ export function defineTool<Shape extends z.ZodRawShape>(tool: AgentTool<Shape>):
  * that removes a property, stays. An invalid input, or a thrown error, becomes an error result.
  */
 export async function runTool(tool: AgentTool, input: unknown, signal: AbortSignal): Promise<{ text: string; isError: boolean }> {
-  const schema = z.object(tool.input);
-  let parsed = schema.safeParse(input);
-  if (!parsed.success) parsed = schema.safeParse(withoutNulls(input));
+  const parsed = parseInput(tool, input);
   if (!parsed.success) return { text: `The input is not valid:\n${z.prettifyError(parsed.error)}`, isError: true };
   try {
     const output = await tool.run(parsed.data as never, { signal });
@@ -106,6 +104,43 @@ export async function runTool(tool: AgentTool, input: unknown, signal: AbortSign
   } catch (error) {
     return { text: error instanceof Error ? error.message : String(error), isError: true };
   }
+}
+
+/**
+ * The title of an app tool call, for its `tool-start` event. A harness reports a call before the input is
+ * checked, so `title` gets only an input that the schema accepts. The tool's name stands in for an input
+ * that the schema refuses, for a tool with no `title`, and for a `title` that throws.
+ */
+export function toolTitle(tool: AgentTool, input: unknown): string {
+  const parsed = tool.title && parseInput(tool, input);
+  if (!parsed?.success) return tool.name;
+  try {
+    return tool.title!(parsed.data as never);
+  } catch {
+    return tool.name;
+  }
+}
+
+/**
+ * An error as one line for a person: the message, with the error's kind when it is not a plain `Error`,
+ * and the first frame of the stack without its folders, so the line says where code failed.
+ */
+export function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const text = error.name === "Error" ? error.message : `${error.name}: ${error.message}`;
+  const frame = error.stack
+    ?.split("\n")
+    .find((line) => /^\s*at /.test(line))
+    ?.trim()
+    .slice(3)
+    .replace(/[^\s()]*\//g, "");
+  return frame ? `${text} (at ${frame})` : text;
+}
+
+function parseInput(tool: AgentTool, input: unknown) {
+  const schema = z.object(tool.input);
+  const parsed = schema.safeParse(input);
+  return parsed.success ? parsed : schema.safeParse(withoutNulls(input));
 }
 
 function withoutNulls(value: unknown): unknown {

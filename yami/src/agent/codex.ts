@@ -36,6 +36,7 @@ import {
   type ModelOption,
   type PermissionDecision,
   runTool,
+  toolTitle,
   type SessionOptions,
   type SessionSettings,
 } from "./types.js";
@@ -604,7 +605,7 @@ export class CodexSession extends BaseSession {
       case "dynamicToolCall": {
         if (!("tool" in item)) return "Tool";
         const appTool = item.namespace === this.options.tools?.name ? this.appTools.get(item.tool) : undefined;
-        return appTool?.title?.(item.arguments as never) ?? item.tool;
+        return appTool ? toolTitle(appTool, item.arguments) : item.tool;
       }
       default:
         return undefined;

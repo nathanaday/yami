@@ -136,6 +136,17 @@ describe("a run of the agent loop", () => {
     expect(await session.status()).toBe("failed");
   });
 
+  it("fails when Yami's own code throws, and the reason names the error and where it was thrown", async () => {
+    const { session, vault, path, yami } = await fresh("faulty");
+    yami.openConversation = async () => {
+      throw new TypeError("no conversations");
+    };
+    const result = await session.start();
+    expect(result.state).toBe("failed");
+    expect(result.reason).toMatch(/^failed: TypeError: no conversations \(at .*\(run\.test\.ts:\d+:\d+\)\)$/);
+    expect(await vault.read(path)).toContain(result.reason);
+  });
+
   it("continues the iteration count on a later run", async () => {
     const { session, vault, path, agent } = await fresh("again");
     await session.start({ maxIterations: 1 });

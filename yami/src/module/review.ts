@@ -107,7 +107,7 @@ export function reviewPrompt(options: {
   return [
     `You review the Yami session "${basename(path)}", ${options.kind}. You judge the work, and you change no file.`,
     `The session document is ${path}. ${options.conversation ? `The conversation note ${options.conversation} records the run: the worker's messages and its tool calls. ` : ""}Read the files that the work changed, and any other file that you need.`,
-    `Judge each policy and each promise below. A policy is \`followed\` or \`broken\`. A promise is \`met\` or \`unmet\`. Give each verdict a reason of one or two sentences that names the evidence. Record the verdicts with the tool \`yami_review\`. An item with no recorded verdict is not judged, and then a person must look at the session.`,
+    `Judge each policy and each promise below, and only these: ${[...policies, ...promises].map((d) => documentName(d.path)).join(", ")}. Yami's checks decided the other promises of the session. A policy is \`followed\` or \`broken\`. A promise is \`met\` or \`unmet\`. Give each verdict a reason of one or two sentences that names the evidence. Record the verdicts with the tool \`yami_review\`. An item with no recorded verdict is not judged, and then a person must look at the session.`,
     `## Session\n\n${session.body.trim()}`,
     options.reply?.trim() ? `## The worker's last message\n\n${options.reply.trim()}` : "",
     section("Policies", policies),
