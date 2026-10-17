@@ -1,12 +1,14 @@
-# Yami design
+# Yami design policy
 
 This document is the design policy of the repository. When code and this document disagree, the code is wrong, or this document needs a change that is agreed first. The package READMEs describe what each package does; this document says what every package must keep true.
 
-Yami replaces Almagest. Almagest implemented each feature (ingest, changes, checkouts, journals, navigation) with its own state file, its own frontmatter schema, and its own ledger. Yami has one set of entities, one loop, and one place for each kind of code: a new workflow is a module, and what workflows share is part of the library.
+### Base Concepts
 
-Yami is a library for Obsidian plugins that run agent workflows. The center of each workflow is the session document: one note that links the skills, policies, promises, and articles of the work, and records its state. An agent reads the session document to know what to do, how, and how its work is checked. The wiki is the one module built into Yami. A plugin defines its own modules on the session API.
+Yami is a Typescript library designed to enable agents in Obsidian plugins. Yami ships its own concept of how agent work integrates with an Obsidian vault, and this concept is based on a session document and a few extra entities that link to that session document, such as policies, promises, and skills.
 
-This repository holds the library, `yami/`, and a showcase plugin, `obsidian_plugin/`. The showcase shows what a plugin built on Yami can do, with four modules: hello, threads, the librarian, and journals. The library is the product; the showcase is an example of its use.
+An agent reads the session document to know what to do, how, and how its work is checked. Everything else can be customized around it in the plugin: by importing and using the Yami library, you can create your own module that carries it's own set of MCP tools, skills, and front end UI surfaces. Yami exposes an API that makes it easy to work with these session entities, manage session state, and manage the agents as they run. Yami also has a built in set of wiki tools to enable an obsidian-based LLM wiki directly in the vault, so all custom modules and agent flows and use the vault as a knowledge source.
+
+This repository holds the library, `yami/`, and a showcase plugin, `obsidian_plugin/`. The showcase shows what a plugin built on Yami can do. The library is the product; the showcase is an example of its use.
 
 ## Terms
 
@@ -16,7 +18,8 @@ This repository holds the library, `yami/`, and a showcase plugin, `obsidian_plu
 | Plugin | An Obsidian plugin built on Yami. It chooses the agents and the modules. `obsidian_plugin` is the showcase. |
 | Host | The program that builds a Yami and runs its sessions: a plugin, or a test. |
 | Yami | The runtime of one vault: its modules, its wiki, its agents, and the handles of its sessions. A plugin builds one with `createYami`. |
-| Module | One agent workflow in the vault, as a subclass of `YamiModule`: its documents, templates, tools, checks, and actions. The wiki is built into Yami; a plugin defines the others. |
+| Module | One agent workflow in the vault, as a subclass of `YamiModule`: its documents, templates, tools, checks, and actions. |
+| Wiki | An LLM knowledge base built on obsidian links; The wiki is built into Yami; all modules have the ability to use this shared knowledge base for their workflows |
 | Template | One kind of session of a module: the documents that a new session links, and how a run goes (iterations, access, instructions). |
 | Session | One piece of work of a module. One markdown document that links its skills, policies, promises, and articles, and records its state. |
 | Run | One pass of the agent loop over a session: from a start or a resume to `done`, `needs-attention`, `failed`, or `stopped`. |
@@ -46,13 +49,6 @@ This repository holds the library, `yami/`, and a showcase plugin, `obsidian_plu
 3. **A gap in a plugin is a gap in the library.** When a plugin needs setup, a helper, a command, or a constant that a second plugin would need too, the library gets it, with a test, and the plugin uses it. The plugin does not keep its own copy until later.
 4. **A plugin uses the public API only.** It imports the package entries (`yami`, `yami/obsidian`, `yami/wiki`, `yami/document`, `yami/agent`, `yami/testing`, `yami/esbuild`), never a file of `yami/src`. The `yami` README documents each entry.
 5. **Each showcase module shows a part of the API.** A new part of the API gets a use in the showcase, so the Obsidian tests run it in the real app.
-
-| Module | What it shows |
-| --- | --- |
-| hello | The smallest module: one skill, one policy, one promise, one template, one session field, and one tool. |
-| threads | A module's own check, tools that write the session document, subagents with no edit tool, a skill with files beside it, and a template with no command. |
-| librarian | A template that a person creates and runs, a tool that a plain conversation can also call, an action on the open session, a check of the module's own, and a color of its own. |
-| journals | A module with no sessions, an action that asks the person to choose, and an ingest with a policy of the module on top of the wiki's. |
 
 The showcase also has two views. The wiki navigator, `obsidian_plugin/src/navigator/`, walks the wiki by its tags with `wiki.neighbors` and `wiki.tag`, and follows the open note. The panel, `obsidian_plugin/src/panel/`, shows the modules, the sessions of a module, and one session with its documents, its conversation, its progress, and its acts as buttons. Each view's needs became library features: the panel found the summaries, the details, the acts of a session and of a module, the change feed, the template's label, and the plugin stylesheet of `copyStyles`; the navigator found each note's own tags, the tag hierarchy, the wiki's change feed, and the rule of which notes the index holds.
 
