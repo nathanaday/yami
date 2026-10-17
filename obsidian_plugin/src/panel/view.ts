@@ -167,7 +167,7 @@ export class YamiPanel extends ItemView {
     this.problems(page, this.yami.problems);
   }
 
-  /** What keeps a vault module or a template out, with the file to fix. */
+  /** What a person must fix or know: a vault module or a template that stays out, or an edited base skill, with the file to open. */
   private problems(page: HTMLElement, problems: readonly ModuleProblem[]): void {
     if (!problems.length) return;
     const group = ui.section(page, "Problems", `${problems.length}`);

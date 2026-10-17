@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { BASE_SKILL, BASE_SKILL_TEXT, VERSION } from "yami";
 import { launchObsidian, type ObsidianInstance } from "./harness.js";
 
 const TIMEOUT = 240_000;
@@ -806,7 +807,7 @@ describe("Yami in Obsidian", () => {
     }
   });
 
-  it("shows a broken template's problem in the panel, and drops the module when its folder goes, with no reload", { timeout: 60_000 }, async () => {
+  it("shows a broken template's problem and an edited base skill in the panel, and drops the module when its folder goes, with no reload", { timeout: 60_000 }, async () => {
     await run("yami:open-panel");
     await page().evaluate(() => (window as any).app.workspace.getLeavesOfType("yami-panel")[0].view.go({ level: "modules" }));
     await page().waitForSelector('.yami-panel [data-key="module:hello"]');
@@ -822,6 +823,14 @@ describe("Yami in Obsidian", () => {
     await edit("access: readonly\n", "");
     await page().waitForSelector(".yami-panel .yami-problem-row", { state: "detached", timeout: 10_000 });
     await page().waitForFunction(() => Boolean((window as any).app.commands.commands["yami:hello-new-greeting"]), undefined, { timeout: 10_000 });
+
+    // A person edits the base skill: the panel says so, and a delete brings back this version's text.
+    await page().evaluate((file) => (window as any).app.vault.process((window as any).app.vault.getFileByPath(file), (text: string) => `${text}\nAlways answer in French.\n`), BASE_SKILL);
+    await page().waitForSelector(`.yami-panel .yami-problem-row[data-key^="problem:${BASE_SKILL}:"]`, { timeout: 10_000 });
+    expect(await page().textContent(".yami-panel .yami-problem-row .yami-row-desc")).toContain(VERSION);
+    await page().evaluate((file) => (window as any).app.vault.delete((window as any).app.vault.getFileByPath(file)), BASE_SKILL);
+    await page().waitForSelector(".yami-panel .yami-problem-row", { state: "detached", timeout: 10_000 });
+    await obsidian.waitForNote(BASE_SKILL, (text) => text === BASE_SKILL_TEXT, 10_000);
 
     await page().evaluate(() => (window as any).app.vault.delete((window as any).app.vault.getFolderByPath("internal/hello"), true));
     await page().waitForSelector('.yami-panel [data-key="module:hello"]', { state: "detached", timeout: 10_000 });
