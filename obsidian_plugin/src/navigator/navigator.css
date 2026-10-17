@@ -1,0 +1,32 @@
+/* The wiki navigator. It shares the panel's rows, sections, and spine, in the wiki's color. */
+
+.yami-navigator .yami-back:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.yami-tag-trail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2-2);
+  margin-top: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.yami-tag-above {
+  color: var(--text-faint);
+}
+
+.yami-navigator .yami-note-row {
+  align-items: flex-start;
+}
+
+.yami-navigator .yami-note-row .yami-row-icon {
+  margin-top: 2px;
+}
+
+.yami-navigator .yami-row.is-active {
+  background: var(--background-modifier-active-hover);
+}

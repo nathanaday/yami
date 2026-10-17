@@ -51,6 +51,16 @@ To add a module, write its folder and add an instance to `modules` in `src/main.
 
 Backspace goes up a level. The panel follows the vault: a session that an agent creates, a run that starts, and a promise that is met show at once. The panel is the plugin's own code, `src/panel/`, over the library's read API.
 
+## The wiki navigator
+
+**Open the wiki navigator**, from the ribbon or the command palette, walks the wiki by its tags, where `ml/vision` is below `ml`. It follows the note open in the editor:
+
+- **A note**: the tags above its own (**Above**), its own tags (**Tags**), and the tags one level below them (**Below**), each with its count of notes.
+- **A tag**: the tags above it, the tags one level below it, and the notes that hold it. The note open in the editor is marked.
+- **Wiki**: the top tags.
+
+Click a tag to go to it, and a note to open it; the navigator follows. Back, or Backspace, returns to the place before. A note with no tags, or one the wiki leaves out, says so. Tags come from each note's `tags` property only: no tag pages and no links between notes.
+
 ## Conversations
 
 Run **New conversation** from the ribbon, or **New conversation with claude** or **with codex** from the command palette. You get a note in `conversations/` with a message box at the bottom. Press Enter to send. The note records the conversation: your messages, the agent's replies, and its tool calls in collapsed sections. The note gets its name from your first message.

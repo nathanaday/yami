@@ -70,8 +70,8 @@ export class ObsidianYami extends Yami {
   /** The agents with their names and colors, as conversations show them. */
   readonly registered: ConversationAgent[];
   #status: HTMLElement | undefined;
-  readonly #changeListeners = new Set<() => void>();
-  #changeTimer: number | undefined;
+  readonly #sessionsFeed = new ChangeFeed("sessions", 150);
+  readonly #wikiFeed = new ChangeFeed("wiki", 300);
 
   constructor(plugin: Plugin, options: YamiPluginOptions) {
     const app = plugin.app;
@@ -113,15 +113,21 @@ export class ObsidianYami extends Yami {
     conversations.install(plugin);
     watchWiki(app, plugin, this.wiki);
     const watch = (file: TAbstractFile, old?: string) => {
-      if (this.concernsSessions(file.path) || (old && this.concernsSessions(old))) this.sessionsChanged();
+      const paths = old ? [file.path, old] : [file.path];
+      if (paths.some((path) => this.concernsSessions(path))) this.#sessionsFeed.changed();
+      // A change to a note the index leaves out, such as a conversation, cannot change the wiki.
+      if (paths.some((path) => this.wiki.note(path) !== undefined || this.wiki.holds(path, this.app.metadataCache.getCache(path)?.frontmatter ?? {}))) this.#wikiFeed.changed();
     };
     plugin.registerEvent(app.vault.on("create", watch));
     plugin.registerEvent(app.vault.on("modify", watch));
     plugin.registerEvent(app.vault.on("delete", watch));
     plugin.registerEvent(app.vault.on("rename", watch));
     plugin.registerEvent(app.metadataCache.on("changed", (file) => watch(file)));
-    this.onSession(() => this.sessionsChanged());
-    plugin.register(() => window.clearTimeout(this.#changeTimer));
+    this.onSession(() => this.#sessionsFeed.changed());
+    plugin.register(() => {
+      this.#sessionsFeed.stop();
+      this.#wikiFeed.stop();
+    });
     app.workspace.onLayoutReady(() =>
       this.enable().catch((error: Error) => {
         console.error(error);
@@ -161,21 +167,16 @@ export class ObsidianYami extends Yami {
    * become one, a moment after the last. Returns the function that stops it.
    */
   onSessionsChange(listener: () => void): () => void {
-    this.#changeListeners.add(listener);
-    return () => this.#changeListeners.delete(listener);
+    return this.#sessionsFeed.on(listener);
   }
 
-  private sessionsChanged(): void {
-    window.clearTimeout(this.#changeTimer);
-    this.#changeTimer = window.setTimeout(() => {
-      for (const listener of [...this.#changeListeners]) {
-        try {
-          listener();
-        } catch (error) {
-          console.error("yami: sessions listener threw", error);
-        }
-      }
-    }, 150);
+  /**
+   * Calls the listener when the wiki may look different: a note that the index holds, or would hold, is
+   * created, changed, renamed, or removed. Calls that come close together become one. The wiki reads the
+   * vault again at its next query. Returns the function that stops it.
+   */
+  onWikiChange(listener: () => void): () => void {
+    return this.#wikiFeed.on(listener);
   }
 
   /** Whether a path is a session document, or a document of a module. */
@@ -285,5 +286,38 @@ export class ObsidianYami extends Yami {
             : "";
     this.#status.setText(text);
     this.#status.toggleClass("is-working", working.length > 0 || running.length > 0);
+  }
+}
+
+/** Listeners that hear of changes: once for changes that come close together, a moment after the last. */
+class ChangeFeed {
+  readonly #listeners = new Set<() => void>();
+  #timer: number | undefined;
+
+  constructor(
+    private readonly name: string,
+    private readonly wait: number,
+  ) {}
+
+  on(listener: () => void): () => void {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  changed(): void {
+    window.clearTimeout(this.#timer);
+    this.#timer = window.setTimeout(() => {
+      for (const listener of [...this.#listeners]) {
+        try {
+          listener();
+        } catch (error) {
+          console.error(`yami: a ${this.name} listener threw`, error);
+        }
+      }
+    }, this.wait);
+  }
+
+  stop(): void {
+    window.clearTimeout(this.#timer);
   }
 }

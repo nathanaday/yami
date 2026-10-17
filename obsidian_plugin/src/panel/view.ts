@@ -1,7 +1,8 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
 import { LINKED_KINDS, STATUS_LABELS, type LinkedKind, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
 import { basename } from "yami/document";
-import type { ObsidianYami } from "yami/obsidian";
+import { modeOf, type ObsidianYami } from "yami/obsidian";
+import * as ui from "../ui";
 
 export const PANEL_VIEW = "yami-panel";
 
@@ -134,9 +135,9 @@ export class YamiPanel extends ItemView {
 
     const live = summaries.filter((s) => s.status === "working" || s.status === "checking");
     if (live.length) {
-      const group = this.section(page, "Working now", `${live.length}`);
+      const group = ui.section(page, "Working now", `${live.length}`);
       for (const summary of live) {
-        const row = this.row(group, `live:${summary.path}`, () => this.go({ level: "session", module: summary.module.id, path: summary.path }));
+        const row = ui.row(group, `live:${summary.path}`, () => this.go({ level: "session", module: summary.module.id, path: summary.path }));
         row.setAttribute("aria-label", `${summary.name}, ${summary.module.name}, ${STATUS_LABELS[summary.status].toLowerCase()}`);
         row.style.setProperty("--yami-module-color", summary.module.colors.folder);
         mark(row, summary.status);
@@ -148,7 +149,7 @@ export class YamiPanel extends ItemView {
 
     const list = page.createDiv({ cls: "yami-module-list" });
     for (const module of this.yami.modules) {
-      const row = this.row(list, `module:${module.id}`, () => this.go({ level: "module", module: module.id }));
+      const row = ui.row(list, `module:${module.id}`, () => this.go({ level: "module", module: module.id }));
       row.addClass("yami-module-row");
       row.style.setProperty("--yami-module-color", module.colors.folder);
       const text = row.createDiv({ cls: "yami-row-text" });
@@ -189,7 +190,7 @@ export class YamiPanel extends ItemView {
       return;
     }
     const summaries = await this.yami.summaries(module);
-    const list = this.section(page, "Sessions", summaries.length ? `${summaries.length}` : undefined);
+    const list = ui.section(page, "Sessions", summaries.length ? `${summaries.length}` : undefined);
     if (!summaries.length) {
       list.createDiv({ cls: "yami-panel-empty", text: news.length ? `No sessions yet. ${news.map((act) => act.label).join(" or ")} starts one.` : "No sessions yet." });
       return;
@@ -200,7 +201,7 @@ export class YamiPanel extends ItemView {
   private sessionRow(list: HTMLElement, summary: SessionSummary, showTemplate: boolean): void {
     // The row and its quick button sit side by side: a button never holds another.
     const item = list.createDiv({ cls: "yami-session-item", attr: { "data-status": summary.status } });
-    const row = this.row(item, `session:${summary.path}`, () => this.go({ level: "session", module: summary.module.id, path: summary.path }));
+    const row = ui.row(item, `session:${summary.path}`, () => this.go({ level: "session", module: summary.module.id, path: summary.path }));
     row.addClass("yami-session-row");
     row.setAttribute("aria-label", `${summary.name}, ${STATUS_LABELS[summary.status].toLowerCase()}`);
     mark(row, summary.status);
@@ -224,7 +225,7 @@ export class YamiPanel extends ItemView {
   private drawSession(page: HTMLElement, module: YamiModule, details: SessionDetails): void {
     this.breadcrumb(page, [module.name, details.name]);
     const title = page.createEl("h2", { cls: "yami-panel-title is-link", text: details.name, attr: { tabindex: "0", role: "link", "data-key": "title", "aria-label": `Open ${details.name}` } });
-    activates(title, (evt) => this.openNote(details.path, evt));
+    ui.activates(title, (evt) => void this.yami.open(details.path, modeOf(evt)));
 
     const state = page.createDiv({ cls: "yami-state" });
     mark(state, details.status);
@@ -246,20 +247,20 @@ export class YamiPanel extends ItemView {
       const documents = details.documents.filter((d) => d.kind === kind);
       if (!documents.length) continue;
       const count = kind === "promises" && documents.some((d) => d.met !== undefined) ? `${documents.filter((d) => d.met).length} of ${documents.length} met` : `${documents.length}`;
-      const group = this.section(page, heading, count);
+      const group = ui.section(page, heading, count);
       for (const doc of documents) this.documentRow(group, doc, icon);
     }
 
     if (details.conversation) {
-      const group = this.section(page, "Conversation");
+      const group = ui.section(page, "Conversation");
       const conversation = details.conversation;
-      const row = this.row(group, "conversation", (evt) => this.openNote(conversation, evt));
-      icon(row, "message-square");
+      const row = ui.row(group, "conversation", (evt) => void this.yami.open(conversation, modeOf(evt)));
+      ui.icon(row, "message-square");
       row.createDiv({ cls: "yami-row-name", text: basename(conversation) });
     }
 
     if (details.progress.length) {
-      const group = this.section(page, "Progress");
+      const group = ui.section(page, "Progress");
       const timeline = group.createEl("ol", { cls: "yami-progress" });
       for (const line of [...details.progress].reverse()) {
         const item = timeline.createEl("li");
@@ -271,9 +272,9 @@ export class YamiPanel extends ItemView {
 
   private documentRow(group: HTMLElement, doc: SessionDocument, kindIcon: string): void {
     const path = doc.path;
-    const row = this.row(group, `doc:${doc.kind}:${doc.target}`, (evt) => path && this.openNote(path, evt));
+    const row = ui.row(group, `doc:${doc.kind}:${doc.target}`, (evt) => path && void this.yami.open(path, modeOf(evt)));
     if (!path) row.addClass("is-missing");
-    const glyph = icon(row, doc.kind === "promises" && doc.met !== undefined ? (doc.met ? "check" : "x") : kindIcon);
+    const glyph = ui.icon(row, doc.kind === "promises" && doc.met !== undefined ? (doc.met ? "check" : "x") : kindIcon);
     if (doc.kind === "promises" && doc.met !== undefined) glyph.addClass(doc.met ? "is-met" : "is-unmet");
     row.createDiv({ cls: "yami-row-name", text: doc.name });
     const note = !path ? "Missing" : doc.kind === "promises" ? (doc.met === undefined ? "Not checked" : doc.met ? "Met" : "Not met") : undefined;
@@ -300,26 +301,6 @@ export class YamiPanel extends ItemView {
     });
   }
 
-  private section(page: HTMLElement, title: string, count?: string): HTMLElement {
-    const section = page.createEl("section", { cls: "yami-section" });
-    const head = section.createDiv({ cls: "yami-section-head" });
-    head.createEl("h3", { text: title });
-    if (count) head.createSpan({ cls: "yami-section-count", text: count });
-    return section;
-  }
-
-  /** A row that the mouse and the keyboard activate. */
-  private row(parent: HTMLElement, key: string, activate: (evt: MouseEvent | KeyboardEvent) => void): HTMLElement {
-    const row = parent.createDiv({ cls: "yami-row", attr: { tabindex: "0", role: "button", "data-key": key } });
-    activates(row, activate);
-    return row;
-  }
-
-  /** Opens a note: in this tab, or in a new one with Cmd or Ctrl. */
-  private openNote(path: string, evt: MouseEvent | KeyboardEvent): void {
-    void this.yami.open(path, evt.metaKey || evt.ctrlKey ? "tab" : "open");
-  }
-
   private button(parent: HTMLElement, key: string, label: string, iconName: string | undefined, primary: boolean, run: () => Promise<void>, warning = false): void {
     const button = parent.createEl("button", { cls: ["yami-action", ...(primary ? ["mod-cta"] : []), ...(warning ? ["mod-warning"] : [])], attr: { "data-key": key } });
     if (iconName) setIcon(button.createSpan({ cls: "yami-action-icon" }), iconName);
@@ -334,16 +315,6 @@ export class YamiPanel extends ItemView {
   }
 }
 
-/** Runs `activate` on a click, and on Enter or Space while the element has the focus. */
-function activates(el: HTMLElement, activate: (evt: MouseEvent | KeyboardEvent) => void): void {
-  el.addEventListener("click", activate);
-  el.addEventListener("keydown", (evt) => {
-    if (evt.target !== el || (evt.key !== "Enter" && evt.key !== " ")) return;
-    evt.preventDefault();
-    activate(evt);
-  });
-}
-
 function depth(place: Place): number {
   return place.level === "modules" ? 0 : place.level === "module" ? 1 : 2;
 }
@@ -351,12 +322,6 @@ function depth(place: Place): number {
 /** The status as a shape: hollow before a run, turning while it works, filled when done, and a sign of its own for each other end. */
 function mark(parent: HTMLElement, status: SessionStatus): HTMLElement {
   return parent.createSpan({ cls: "yami-mark", attr: { "data-status": status, role: "img", "aria-label": STATUS_LABELS[status] } });
-}
-
-function icon(parent: HTMLElement, name: string): HTMLElement {
-  const el = parent.createSpan({ cls: "yami-row-icon" });
-  setIcon(el, name);
-  return el;
 }
 
 function actIcon(act: SessionAct): string | undefined {

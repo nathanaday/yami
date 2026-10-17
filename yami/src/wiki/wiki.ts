@@ -11,6 +11,7 @@ import { EmbeddingCache, type Embedder } from "./embed.js";
 import { CACHE_PATH, ORIGINALS } from "./folders.js";
 import { lint, type Finding, type LintOptions } from "./lint.js";
 import { match, type Match, type MatchOptions } from "./match.js";
+import { TagIndex, type Neighbors, type TagCount, type TagView } from "./tags.js";
 import { tokens } from "./tokens.js";
 import { captured, snapshot, versions, writeArchive, type Captured, type SnapshotOptions, type Version } from "./versions.js";
 
@@ -25,6 +26,8 @@ export interface Note {
   aliases: string[];
   /** Lower case, without `#`. A note holds a tag and every tag above it. */
   tags: string[];
+  /** The tags that the note's `tags` property holds itself, in the same form, without the tags above them. */
+  ownTags: string[];
   description: string;
   /** The notes this note links, as paths. */
   links: string[];
@@ -72,6 +75,7 @@ export class Wiki {
   notes: Note[] = [];
   readonly graph = new Graph({ type: "directed" });
   private byPath = new Map<string, Note>();
+  private tagIndex = new TagIndex([]);
   /** Every note of the vault, indexed or not, by path and by lower-case name: what a link can name. */
   private everyPath = new Set<string>();
   private everyName = new Map<string, string[]>();
@@ -107,7 +111,7 @@ export class Wiki {
   /** Reads every note and builds the index, the graph, and the communities. */
   async refresh(): Promise<void> {
     const changes = this.changes;
-    const exclude = (typeof this.options.exclude === "function" ? this.options.exclude() : this.options.exclude).map((entry) => entry.replace(/\/$/, ""));
+    const exclude = this.excluded();
     const all = await this.vault.list("");
     this.everyPath = new Set(all);
     this.everyName = new Map();
@@ -115,7 +119,7 @@ export class Wiki {
       const key = path.slice(path.lastIndexOf("/") + 1, -3).toLowerCase();
       this.everyName.set(key, [...(this.everyName.get(key) ?? []), path]);
     }
-    const paths = all.filter((path) => !UNINDEXED.some((pattern) => pattern.test(path)) && !exclude.some((entry) => path === entry || path.startsWith(`${entry}/`)));
+    const paths = all.filter((path) => this.reads(path, exclude));
     const notes: Note[] = [];
     for (const path of paths) {
       // One note with broken properties must not stop the index: it goes in with its body, and lint names it.
@@ -128,12 +132,12 @@ export class Wiki {
         doc = { path, properties: {}, body: error.body };
         problem = error.reason;
       }
+      if (!this.keeps(doc.properties)) continue;
       const type = typeof doc.properties.type === "string" ? doc.properties.type : undefined;
-      // A copy of another note, such as a librarian's checkout copy, is not knowledge of its own.
-      if ((type && this.options.skipTypes.includes(type)) || doc.properties.copy_of !== undefined) continue;
       const name = path.slice(path.lastIndexOf("/") + 1, -3);
       const aliases = list(doc.properties.aliases);
-      const tags = expandTags(list(doc.properties.tags));
+      const ownTags = [...new Set(list(doc.properties.tags).map(normalizeTag).filter(Boolean))];
+      const tags = expandTags(ownTags);
       const description = typeof doc.properties.description === "string" ? doc.properties.description : "";
       notes.push({
         path,
@@ -143,6 +147,7 @@ export class Wiki {
         body: doc.body,
         aliases,
         tags,
+        ownTags,
         description,
         links: [],
         unresolved: [],
@@ -160,6 +165,7 @@ export class Wiki {
     }
     this.notes = notes.sort((a, b) => (a.path < b.path ? -1 : 1));
     this.byPath = new Map(notes.map((note) => [note.path, note]));
+    this.tagIndex = new TagIndex(notes);
     this.graph.clear();
     for (const note of notes) this.graph.addNode(note.path);
     for (const note of notes) {
@@ -333,11 +339,55 @@ export class Wiki {
   nameCeiling(terms: string[]): number {
     return this.bm25.self(terms, "title");
   }
-  /** The tags of the indexed notes with the count of notes that hold each, most used first. */
-  tags(): { tag: string; count: number }[] {
-    const counts = new Map<string, number>();
-    for (const note of this.notes) for (const tag of note.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
-    return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || (a.tag < b.tag ? -1 : 1));
+  /**
+   * A tag and what is around it in the tag hierarchy, where `a/b` is below `a`: the tags above it, the tags
+   * one level below it, and the notes that hold it. With no tag, the top: each tag with no `/`. Undefined for a
+   * tag that no note holds. It reads the vault again first when the index is stale.
+   */
+  async tag(tag = ""): Promise<TagView | undefined> {
+    await this.ensure();
+    return this.tagIndex.view(normalizeTag(tag));
+  }
+
+  /**
+   * Where a note sits in the tag hierarchy: its own tags, the tags above them, and the tags one level below
+   * them, each with the count of notes under it. The note is a path or a link name. Undefined for a note that
+   * the index does not hold. It reads the vault again first when the index is stale.
+   */
+  async neighbors(note: string): Promise<Neighbors | undefined> {
+    await this.ensure();
+    const path = this.resolve(note);
+    const found = path ? this.byPath.get(path) : undefined;
+    return found ? this.tagIndex.neighbors(found) : undefined;
+  }
+
+  /** The tags of the indexed notes with the count of notes that hold each or a tag below it, most used first. */
+  tags(): TagCount[] {
+    return this.tagIndex.all();
+  }
+
+  /**
+   * Whether the index holds the note at a path that has these properties: a note outside the excluded
+   * folders, the module skills and agents, and the originals, of no skipped type, and no copy of another
+   * note. A host's change feed uses it to pass over a change that cannot change the wiki.
+   */
+  holds(path: string, properties: Properties = {}): boolean {
+    return path.endsWith(".md") && this.reads(path, this.excluded()) && this.keeps(properties);
+  }
+
+  private excluded(): string[] {
+    return (typeof this.options.exclude === "function" ? this.options.exclude() : this.options.exclude).map((entry) => entry.replace(/\/$/, ""));
+  }
+
+  /** Whether the index reads a note at this path. */
+  private reads(path: string, exclude: string[]): boolean {
+    return !UNINDEXED.some((pattern) => pattern.test(path)) && !exclude.some((entry) => path === entry || path.startsWith(`${entry}/`));
+  }
+
+  /** Whether the index keeps a note with these properties. A copy of another note, such as a checkout copy, is not knowledge of its own. */
+  private keeps(properties: Properties): boolean {
+    const type = typeof properties.type === "string" ? properties.type : undefined;
+    return !(type && this.options.skipTypes.includes(type)) && properties.copy_of === undefined;
   }
 
   /** Every version of the knowledge base, oldest first. */
@@ -427,8 +477,16 @@ function list(value: unknown): string[] {
   return typeof value === "string" && value ? value.split(",").map((item) => item.trim()).filter(Boolean) : [];
 }
 
+/** A tag as the index holds it: lower case, without `#`, and with no empty part between `/`. */
 export function normalizeTag(tag: string): string {
-  return tag.replace(/^#/, "").trim().toLowerCase();
+  return tag
+    .trim()
+    .replace(/^#+/, "")
+    .toLowerCase()
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/");
 }
 
 /** A tag list with every tag above each tag: `a/b/c` adds `a/b` and `a`. */
@@ -436,6 +494,7 @@ export function expandTags(tags: string[]): string[] {
   const out = new Set<string>();
   for (const raw of tags) {
     const tag = normalizeTag(raw);
+    if (!tag) continue;
     const parts = tag.split("/");
     for (let i = 1; i <= parts.length; i++) out.add(parts.slice(0, i).join("/"));
   }

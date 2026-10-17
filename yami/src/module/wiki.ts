@@ -6,6 +6,7 @@ import { algorithms } from "../wiki/algorithms/index.js";
 import { InvalidPlan, type ChangePlan } from "../wiki/change.js";
 import { CHANGES, SNAPSHOTS, SOURCES, TOPICS, WIKI } from "../wiki/folders.js";
 import { sourceChunks } from "../wiki/source.js";
+import { normalizeTag } from "../wiki/wiki.js";
 import { WIKI_COLOR } from "./colors.js";
 import { YamiModule } from "./module.js";
 
@@ -296,6 +297,29 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
         run: async () => {
           await wiki.refresh();
           return JSON.stringify({ tags: wiki.tags() });
+        },
+      }),
+      defineTool({
+        name: "neighbors",
+        description:
+          "Where a note or a tag sits in the tag hierarchy, where ml/vision is below ml. For a note: its own tags, the tags above them, and the tags one level below them. For a tag: the tags above it, the tags one level below it, and the notes that hold it. Each tag comes with the count of notes under it. With neither, the top tags. Use it to walk a large wiki by subject: from a note to its tags, from a tag to the notes and tags under it.",
+        input: {
+          note: z.string().optional().describe("A note, as a path or a [[link]] name."),
+          tag: z.string().optional().describe("A tag, such as ml/vision."),
+          limit: z.number().int().positive().optional().describe("At most this many notes of a tag. Default 50."),
+        },
+        title: ({ note, tag }) => (note ? `Neighbors of ${note.slice(0, 60)}` : tag ? `The tag ${tag.slice(0, 60)}` : "The top tags"),
+        run: async ({ note, tag, limit = 50 }) => {
+          if (note && tag) return { text: "Give a note or a tag, not both.", isError: true };
+          if (tag !== undefined && !normalizeTag(tag)) return { text: `"${tag}" is not a tag. Leave tag out for the top tags.`, isError: true };
+          await wiki.refresh();
+          if (note) {
+            const neighbors = await wiki.neighbors(note);
+            return neighbors ? JSON.stringify(neighbors) : { text: `${note} is not a note of the wiki.`, isError: true };
+          }
+          const view = await wiki.tag(tag);
+          if (!view) return { text: `No note holds the tag ${tag}. wiki_tags lists every tag.`, isError: true };
+          return JSON.stringify({ ...view, notes: view.notes.slice(0, limit), ...(view.notes.length > limit && { more: view.notes.length - limit }) });
         },
       }),
       defineTool({

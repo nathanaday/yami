@@ -6,6 +6,7 @@ export { chunk, MAX_CHUNK, type Chunk } from "./chunks.js";
 export { cosine, EmbeddingCache, VoyageEmbedder, type Embedder, type VoyageOptions } from "./embed.js";
 export { CACHE_PATH, CHANGES, inKnowledge, KNOWLEDGE, ORIGINALS, SNAPSHOTS, SOURCES, TOPICS, WIKI, WIKI_INTERNAL } from "./folders.js";
 export { lint, type Finding, type LintOptions } from "./lint.js";
+export type { Neighbors, TagCount, TagView } from "./tags.js";
 export { match, THRESHOLD, type Match, type MatchOptions, type Neighbor } from "./match.js";
 export {
   captureSource,

@@ -18,5 +18,5 @@ export { ObsidianVault } from "./vault.js";
 export { createYami, HARNESS_COLORS, IDLE_MINUTES, ObsidianYami, type AgentEntry, type CommandGroup, type YamiPluginOptions } from "./yami.js";
 export { WikiCompareModal } from "./wiki/compare-modal.js";
 export { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
-export { ignoredPaths, type OpenMode, openNote, pickOne, watchWiki } from "./wiki/open.js";
+export { ignoredPaths, modeOf, type OpenMode, openNote, pickOne, watchWiki } from "./wiki/open.js";
 export { WikiSearchModal, type WikiSearchOptions } from "./wiki/search-modal.js";

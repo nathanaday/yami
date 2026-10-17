@@ -499,9 +499,103 @@ describe("Yami in Obsidian", () => {
     await page().waitForSelector(`${row} .yami-mark[data-status="done"]`);
   });
 
+  it("walks the wiki by its tags in the navigator, and follows the open note", { timeout: 60_000 }, async () => {
+    await page().evaluate(async () => {
+      const vault = (window as any).app.vault;
+      await vault.createFolder("Tagged");
+      const note = (name: string, tags: string[], description: string) => vault.create(`Tagged/${name}.md`, `---\ndescription: ${description}\ntags: [${tags.join(", ")}]\n---\n${name}.\n`);
+      await note("Learning", ["ml"], "How machines learn.");
+      await note("Vision", ["ml/vision"], "How machines see.");
+      await note("Detection", ["ml/vision/detection"], "Finding objects in an image.");
+      await note("Bread", ["cooking"], "Flour, water, and time.");
+      const app = (window as any).app;
+      await app.workspace.getLeaf().openFile(app.vault.getFileByPath("Tagged/Vision.md"));
+    });
+    await run("yami:open-wiki-navigator");
+    const nav = ".yami-navigator";
+    /** Waits for the navigator's title, and says what it shows instead when the wait ends. */
+    const titled = async (text: string, timeout = 15_000) => {
+      try {
+        await page().waitForFunction(([sel, want]) => document.querySelector(`${sel} .yami-panel-title`)?.textContent === want, [nav, text] as const, { timeout, polling: 100 });
+      } catch {
+        const seen = await page().evaluate((sel) => {
+          const app = (window as any).app;
+          const leaves = app.workspace.getLeavesOfType("yami-wiki-navigator");
+          const view = leaves[0]?.view;
+          return JSON.stringify({ leaves: leaves.length, shown: view?.containerEl?.isShown?.(), stale: view?.stale, place: view?.place, title: document.querySelector(`${sel} .yami-panel-title`)?.textContent, active: app.workspace.getActiveFile()?.path });
+        }, nav);
+        throw new Error(`The navigator never showed "${text}": ${seen}`);
+      }
+    };
+    const title = () => page().textContent(`${nav} .yami-panel-title`);
+    const heads = () => page().$$eval(`${nav} .yami-section-head h3`, (els) => els.map((el) => el.textContent));
+    const rows = (heading: string) =>
+      page().$$eval(`${nav} .yami-section`, (sections, h) => sections.filter((s) => s.querySelector("h3")?.textContent === h).flatMap((s) => [...s.querySelectorAll(".yami-row-name")].map((el) => el.textContent)), heading);
+    await titled("Vision");
+
+    // A note: the tags above its own, its own, and the tags below.
+    expect(await heads()).toEqual(["Above", "Tags", "Below"]);
+    expect(await rows("Above")).toEqual(["ml"]);
+    expect(await rows("Tags")).toEqual(["ml/vision"]);
+    expect(await rows("Below")).toEqual(["ml/vision/detection"]);
+
+    // Following the editor never takes the focus from it.
+    await page().evaluate(async () => {
+      const app = (window as any).app;
+      await app.workspace.getLeaf().openFile(app.vault.getFileByPath("Tagged/Learning.md"));
+      app.workspace.activeEditor?.editor?.focus();
+    });
+    await titled("Learning");
+    expect(await page().evaluate((sel) => Boolean(document.activeElement?.closest(sel)), nav)).toBe(false);
+    expect(await rows("Below")).toEqual(["ml/vision"]);
+
+    // A tag: the tags above it, below it, and its notes. A note opens, and the navigator follows it.
+    await page().click(`${nav} .yami-section:has(h3:text-is("Below")) .yami-row`);
+    await titled("vision");
+    expect(await page().$$eval(`${nav} .yami-tag-trail button`, (els) => els.map((el) => el.textContent))).toEqual(["ml"]);
+    expect(await rows("Below")).toEqual(["ml/vision/detection"]);
+    expect(await rows("Notes")).toEqual(["Vision"]);
+    await page().click(`${nav} .yami-section:has(h3:text-is("Below")) .yami-row`);
+    await titled("detection");
+    await page().click(`${nav} .yami-note-row:has-text("Detection")`);
+    await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path === "Tagged/Detection.md");
+    await titled("Detection");
+    expect(await rows("Above")).toEqual(["ml", "ml/vision"]);
+
+    // Back goes to the place before; Wiki goes to the top.
+    await page().click(`${nav} .yami-back`);
+    await titled("detection");
+    await page().click(`${nav} .yami-breadcrumb-part:text-is("Wiki")`);
+    await titled("Wiki");
+    expect(await rows("Tags")).toEqual(expect.arrayContaining(["ml", "cooking"]));
+    expect(await page().$$eval(`${nav} .yami-row-icon, ${nav} .clickable-icon`, (els) => els.filter((el) => !el.querySelector("svg")).length)).toBe(0);
+
+    // Live: a tag that the shown note gains moves it at once, and a rename keeps the navigator on it.
+    await page().evaluate(async () => {
+      const app = (window as any).app;
+      await app.workspace.getLeaf().openFile(app.vault.getFileByPath("Tagged/Bread.md"));
+    });
+    await titled("Bread");
+    expect(await rows("Tags")).toEqual(["cooking"]);
+    await page().evaluate(async () => {
+      const app = (window as any).app;
+      await app.fileManager.processFrontMatter(app.vault.getFileByPath("Tagged/Bread.md"), (fm: any) => (fm.tags = ["cooking/bread"]));
+    });
+    await page().waitForFunction((sel) => [...document.querySelectorAll(`${sel} .yami-row-name`)].some((el) => el.textContent === "cooking/bread"), nav, { timeout: 10_000 });
+    expect(await rows("Above")).toEqual(["cooking"]);
+    expect(await rows("Tags")).toEqual(["cooking/bread"]);
+    await page().evaluate(async () => {
+      const app = (window as any).app;
+      // A name no other note has: an earlier test made a Sourdough topic, and a rename onto a taken name waits for the person.
+      await app.fileManager.renameFile(app.vault.getFileByPath("Tagged/Bread.md"), "Tagged/Rye loaf.md");
+    });
+    await titled("Rye loaf");
+    expect(await rows("Tags")).toEqual(["cooking/bread"]);
+  });
+
   it("offers the commands of the sessions, the templates, and the actions", async () => {
     const ids = await page().evaluate(() => Object.keys((window as any).app.commands.commands).filter((id) => id.startsWith("yami:")));
-    for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search"]) {
+    for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search", "open-panel", "open-wiki-navigator"]) {
       expect(ids, id).toContain(`yami:${id}`);
     }
     // A thread's document holds sections only the tools write, and the wiki's ingest starts from files.

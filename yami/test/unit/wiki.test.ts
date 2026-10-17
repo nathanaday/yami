@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, PropertiesError, readDocument } from "../../src/document/index.js";
 import { runCheck, Yami, type WikiModule } from "../../src/index.js";
-import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type Embedder } from "../../src/wiki/index.js";
+import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, normalizeTag, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type Embedder } from "../../src/wiki/index.js";
 import { FsVault } from "../../src/testing/index.js";
 
 let root = "";
@@ -336,6 +336,148 @@ describe("checks", () => {
   });
 });
 
+describe("the tag hierarchy", () => {
+  /** Tags at three depths, written every way a person writes them, and a parent tag that no note holds itself. */
+  async function tagged() {
+    const notes: [string, unknown][] = [
+      ["A", ["ml"]],
+      ["B", ["ml/vision"]],
+      ["C", ["ml/vision/detection", "Cooking"]],
+      ["D", ["#ML/Vision"]],
+      ["E", ["ml/nlp"]],
+      ["F", "ml//nlp/ , art"],
+      ["G", undefined],
+      ["H", ["physics/quantum"]],
+      ["I", ["ml", "ml/vision"]],
+    ];
+    for (const [name, tags] of notes) await note(`notes/${name}.md`, tags === undefined ? {} : { tags }, `${name}.\n`);
+    const wiki = new Wiki(vault);
+    await wiki.refresh();
+    return wiki;
+  }
+  const at = (path: string) => `notes/${path}.md`;
+
+  it("keeps the tags a note holds itself, in the index's form, beside the tags above them", async () => {
+    const wiki = await tagged();
+    expect(wiki.note(at("D"))).toMatchObject({ ownTags: ["ml/vision"], tags: ["ml", "ml/vision"] });
+    expect(wiki.note(at("F"))!.ownTags).toEqual(["ml/nlp", "art"]);
+    expect(wiki.note(at("G"))!.ownTags).toEqual([]);
+    expect(normalizeTag("  #A//B/ ")).toBe("a/b");
+    expect(normalizeTag("##x")).toBe("x");
+    expect(normalizeTag("#")).toBe("");
+  });
+
+  it("shows the top: every tag with no /, most notes first, and how many notes hold any tag", async () => {
+    const wiki = await tagged();
+    expect(await wiki.tag()).toEqual({
+      tag: "",
+      count: 8,
+      above: [],
+      below: [
+        { tag: "ml", count: 7 },
+        { tag: "art", count: 1 },
+        { tag: "cooking", count: 1 },
+        { tag: "physics", count: 1 },
+      ],
+      notes: [],
+    });
+  });
+
+  it("shows a tag: the tags above it, the tags one level below it, and the notes that hold it, by name", async () => {
+    const wiki = await tagged();
+    expect(await wiki.tag("ml")).toEqual({ tag: "ml", count: 7, above: [], below: [{ tag: "ml/vision", count: 4 }, { tag: "ml/nlp", count: 2 }], notes: [at("A"), at("I")] });
+    expect(await wiki.tag("#ML/Vision")).toEqual({
+      tag: "ml/vision",
+      count: 4,
+      above: [{ tag: "ml", count: 7 }],
+      below: [{ tag: "ml/vision/detection", count: 1 }],
+      notes: [at("B"), at("D"), at("I")],
+    });
+    expect(await wiki.tag("ml/vision/detection")).toMatchObject({ above: [{ tag: "ml", count: 7 }, { tag: "ml/vision", count: 4 }], below: [], notes: [at("C")] });
+    // No note holds physics itself: it has a count, and its notes are under the tag below it.
+    expect(await wiki.tag("physics")).toEqual({ tag: "physics", count: 1, above: [], below: [{ tag: "physics/quantum", count: 1 }], notes: [] });
+    expect(await wiki.tag("nothing")).toBeUndefined();
+  });
+
+  it("gives a note's neighbors: its tags, the tags above them, and the tags one level below them, never its own twice", async () => {
+    const wiki = await tagged();
+    expect(await wiki.neighbors(at("C"))).toEqual({
+      path: at("C"),
+      tags: [{ tag: "cooking", count: 1 }, { tag: "ml/vision/detection", count: 1 }],
+      above: [{ tag: "ml", count: 7 }, { tag: "ml/vision", count: 4 }],
+      below: [],
+    });
+    expect(await wiki.neighbors("A")).toEqual({ path: at("A"), tags: [{ tag: "ml", count: 7 }], above: [], below: [{ tag: "ml/vision", count: 4 }, { tag: "ml/nlp", count: 2 }] });
+    expect(await wiki.neighbors("[[I]]")).toEqual({
+      path: at("I"),
+      tags: [{ tag: "ml", count: 7 }, { tag: "ml/vision", count: 4 }],
+      above: [],
+      below: [{ tag: "ml/nlp", count: 2 }, { tag: "ml/vision/detection", count: 1 }],
+    });
+    expect(await wiki.neighbors(at("G"))).toEqual({ path: at("G"), tags: [], above: [], below: [] });
+    expect(await wiki.neighbors("nowhere")).toBeUndefined();
+  });
+
+  it("follows the vault: a tag that a note gains or loses moves at the next refresh", async () => {
+    const wiki = await tagged();
+    await note(at("G"), { tags: ["ml/vision"] }, "G.\n");
+    await vault.remove(at("C"));
+    await wiki.refresh();
+    expect(await wiki.tag("ml/vision")).toMatchObject({ count: 4, below: [], notes: [at("B"), at("D"), at("G"), at("I")] });
+    expect(await wiki.tag("ml/vision/detection")).toBeUndefined();
+  });
+
+  it("is a tool for every agent: a note, a tag, or the top, with a tag's notes cut to the limit", async () => {
+    await tagged();
+    const { yami } = await enabled();
+    const tool = yami.tools()!.tools.find((t) => t.name === "wiki_neighbors")!;
+    const call = async (input: unknown) => runTool(tool, input, new AbortController().signal);
+    expect(JSON.parse((await call({ note: "C" })).text)).toMatchObject({ path: at("C"), above: [{ tag: "ml" }, { tag: "ml/vision" }] });
+    expect(JSON.parse((await call({ tag: "ml/vision", limit: 2 })).text)).toMatchObject({ tag: "ml/vision", notes: [at("B"), at("D")], more: 1 });
+    expect(JSON.parse((await call({})).text).below[0]).toEqual({ tag: "ml", count: 7 });
+    expect(await call({ note: "C", tag: "ml" })).toEqual({ text: "Give a note or a tag, not both.", isError: true });
+    expect(await call({ tag: "nothing" })).toMatchObject({ isError: true, text: expect.stringContaining("No note holds the tag nothing") });
+    expect(await call({ note: "nowhere" })).toMatchObject({ isError: true, text: "nowhere is not a note of the wiki." });
+    expect(await call({ tag: "#/" })).toEqual({ text: '"#/" is not a tag. Leave tag out for the top tags.', isError: true });
+  });
+  it("shows a tag once when it is above one of a note's tags and below another", async () => {
+    const wiki = await tagged();
+    await note(at("J"), { tags: ["ml", "ml/vision/detection"] }, "J.\n");
+    // A host marks the index stale on a change in the vault; the next read refreshes it.
+    wiki.invalidate();
+    const neighbors = (await wiki.neighbors(at("J")))!;
+    expect(neighbors.tags.map((t) => t.tag)).toEqual(["ml", "ml/vision/detection"]);
+    expect(neighbors.above.map((t) => t.tag)).toEqual(["ml/vision"]);
+    expect(neighbors.below.map((t) => t.tag)).toEqual(["ml/nlp"]);
+  });
+
+  it("counts only the notes the index holds: no session, no conversation, and no copy", async () => {
+    await tagged();
+    await note("notes/Session.md", { type: "session", module: "x", tags: ["ml"] }, "S.\n");
+    await note("notes/Copy.md", { copy_of: "[[notes/A]]", tags: ["ml"] }, "C.\n");
+    await note("conversations/Chat.md", { tags: ["ml"] }, "Chat.\n");
+    const wiki = new Wiki(vault, { exclude: ["conversations"] });
+    expect(await wiki.tag("ml")).toMatchObject({ count: 7, notes: [at("A"), at("I")] });
+    expect(wiki.holds("notes/A.md", { tags: ["ml"] })).toBe(true);
+    expect(wiki.holds("notes/Session.md", { type: "session" })).toBe(false);
+    expect(wiki.holds("notes/Copy.md", { copy_of: "[[notes/A]]" })).toBe(false);
+    expect(wiki.holds("conversations/Chat.md")).toBe(false);
+    expect(wiki.holds("internal/wiki/skills/ingest/SKILL.md")).toBe(false);
+    expect(wiki.holds("notes/picture.png")).toBe(false);
+  });
+
+  it("lists every tag with its count, and filters a search by a tag in any of its forms", async () => {
+    const wiki = await tagged();
+    expect(wiki.tags().slice(0, 3)).toEqual([
+      { tag: "ml", count: 7 },
+      { tag: "ml/vision", count: 4 },
+      { tag: "ml/nlp", count: 2 },
+    ]);
+    const paths = async (tags: string[]) => (await wiki.search("", { seeds: [], tags, limit: 50 })).map((h) => h.path).sort();
+    expect(await paths(["#ML/Vision/"])).toEqual(await paths(["ml/vision"]));
+  });
+});
+
 describe("a note whose properties do not parse", () => {
   it("stays in the index with its body and no properties, and lint names it as an error with a fix", async () => {
     const wiki = await fixture();
@@ -371,7 +513,7 @@ describe("the wiki module", () => {
     const { path } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`)] } });
     expect((await readDocument(vault, path)).properties.sources).toEqual([link(`${SOURCES}/codex-notes.md`)]);
     const set = yami.tools()!;
-    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_chunks", "wiki_change"]);
+    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change"]);
     const signal = new AbortController().signal;
     const search = JSON.parse((await runTool(set.tools[0]!, { text: "codex harness", limit: 1 }, signal)).text);
     expect(search.hits[0].path).toBe(`${TOPICS}/Codex harness.md`);
