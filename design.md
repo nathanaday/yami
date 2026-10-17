@@ -20,7 +20,9 @@ This repository holds the library, `yami/`, and a showcase plugin, `obsidian_plu
 | Yami | The runtime of one vault: its modules, its wiki, its agents, and the handles of its sessions. A plugin builds one with `createYami`. |
 | Module | One agent workflow in the vault, as a subclass of `YamiModule`: its documents, templates, tools, checks, and actions. |
 | Wiki | An LLM knowledge base built on obsidian links; The wiki is built into Yami; all modules have the ability to use this shared knowledge base for their workflows |
-| Template | One kind of session of a module: the documents that a new session links, and how a run goes (iterations, access, instructions). |
+| Vault module | A module defined by markdown in the vault, with no code: a module document and template documents under `internal/<id>/`. Yami finds it and runs it like any module. |
+| Template | One kind of session of a module: the documents that a new session links, and how a run goes (iterations, access, instructions). A code module makes one with `this.template`; a vault module has a template document. |
+| Review | The step of a run in which a new read-only agent judges the session's policies, and its promises that have no check. |
 | Session | One piece of work of a module. One markdown document that links its skills, policies, promises, and articles, and records its state. |
 | Run | One pass of the agent loop over a session: from a start or a resume to `done`, `needs-attention`, `failed`, or `stopped`. |
 | Action | An act of the person, such as publish or return, that a module defines and a host offers as a command. |
@@ -54,7 +56,7 @@ The showcase also has two views. The wiki navigator, `obsidian_plugin/src/naviga
 
 ## Entities
 
-1. Every document that Yami writes has a `type` property: `module`, `session`, `policy`, `promise`, `skill`, `conversation`, `topic`, `source`, `snapshot`, or `change`. The schema of each type is in `yami/src/document/schema.ts`, and nowhere else.
+1. Every document that Yami writes has a `type` property: `module`, `template`, `session`, `policy`, `promise`, `skill`, `conversation`, `topic`, `source`, `snapshot`, or `change`. The schema of each type is in `yami/src/document/schema.ts`, and nowhere else.
 2. Links are the identity of documents. Yami generates no IDs. A session refers to its policies, promises, skills, and articles as `[[links]]` in its properties.
 3. A session is one document. It is the front page of the work: its properties hold the state, the links, the template, and the module's own fields; its body holds the deliverables checklist and the progress. There is no other record of a session's state. The exchange with the agent goes to a conversation note, linked from the document.
 4. A module declares its session fields as a schema, in the same form as the core schemas. Core field names (`type`, `module`, `template`, `state`, `created`, `iteration`, `harness`, `conversation`, `articles`, `policies`, `promises`, `skills`, `met`, `unmet`) are reserved: `Yami` refuses a schema that declares one, and a new session whose fields set one.
@@ -72,6 +74,7 @@ wiki/                       the knowledge base: what the wiki module produces, f
 <module>/                   user-facing: the session documents, one file each
 internal/<module>/          what the module needs: module doc, ledger, policies, promises, articles, skills, agents
   sessions.base             module ledger
+  templates/                a vault module's template documents
 internal/wiki/              the wiki module's own: its sessions and ledger, the changes, the versions, the originals, the cache
   sessions/                 the ingest sessions
   originals/                the frozen copies that sources embed, each named by its content hash
@@ -149,6 +152,10 @@ A new feature is a module when it can be expressed as these parts. Before adding
 
 If none of these fit, the design needs a change to this document before the code.
 
+### Vault modules
+
+A person can define a module in the vault with no code. A vault module is the folder `internal/<id>/` with a module document and one or more template documents in `templates/`. Its policies, promises, skills, agents, and articles go in the same folders that a code module installs. Yami finds vault modules at start and as they change, and a host sees them through the same API as code modules. A broken document is a problem that the API reports, never a crash. A vault module has no tools, checks of its own, or actions. Its sessions use the tools that Yami serves and the core checks, and the review judges what code cannot check. A code module wins an id it shares with a vault module. The `New module` command writes a starter vault module.
+
 ## The wiki
 
 The wiki is the knowledge base, and the reason the modules belong together. `Wiki` in `yami/wiki` is plain TypeScript over the `Vault` interface, with no agent in its API.
@@ -199,16 +206,17 @@ The modules in `obsidian_plugin/src/modules/` are built on the public API, as an
 
 There is one loop, `runSession` in `yami/src/module/run.ts`. Modules do not have their own. A host runs it through a session's handle: `yami.session(path)`, or the handle that `template.create()` returns.
 
-1. **Context.** The first prompt holds the session document, the module's session fields, the instructions of the module and the template, and the content of every linked policy, promise, and article. A linked skill that the agent has as a skill set goes by its command: the prompt starts with the first one, `/<module>:<skill>`, so the harness loads it, and lists the others to load when needed. A skill the agent does not have is inlined. Later prompts hold only the verification feedback, because the harness session keeps the conversation.
-2. **Action.** One agent turn, with `accept-edits` approval, the template's access, and the vault as the working directory.
-3. **Verification.** Yami runs the check of each promise and records the outcome in the session document. The exchange is a conversation note, linked from the document, so a person can watch a run in Obsidian, answer its approvals, and continue it.
+1. **Context.** The first prompt invokes the base Yami skill, which says how every session runs, and holds what is particular to the session: the session document, the module's session fields, the instructions of the module and the template, and the content of every linked policy, promise, and article. A linked skill that the agent has as a skill set goes by its command, `/<module>:<skill>`; the first one loads at the start, and the others are listed to load when needed. A skill the agent does not have is inlined. Later prompts hold only the feedback, because the harness session keeps the conversation.
+2. **Action.** One agent turn, with `accept-edits` approval, the template's access, and the vault as the working directory. The agent can run the code checks itself with the self-check tool before it ends the turn.
+3. **Verification.** Yami runs the check of each promise that has one, and records the outcome in the session document. The exchange is a conversation note, linked from the document, so a person can watch a run in Obsidian, answer its approvals, and continue it.
+4. **Review.** When those checks pass, and the session links a policy or a promise with no check, a new read-only conversation with the same agent judges each one and records a verdict through a tool. The worker never judges its own work. A broken policy or an unmet promise is feedback for the next iteration, the same as an unmet check. The review is best effort: an agent judges natural language, and the verdicts with their reasons are in the session document for a person to read.
 
-The session ends `done` when every promise is met; `needs-attention` when the iterations run out or a promise has no check; `failed` when the harness ends a turn with an error; `stopped` when the person stops the run or interrupts its turn. `needs-attention` is the state for a person to look at, and the ledgers show it. A later run continues the iteration count.
+The session ends `done` when every check passes and the review finds every policy followed and every promise met; `needs-attention` when the iterations run out, a check returns `review`, or the reviewer gives no verdict on an item; `failed` when the harness ends a turn with an error; `stopped` when the person stops the run or interrupts its turn. `needs-attention` is the state for a person to look at, and the ledgers show it. A later run continues the iteration count.
 
 - `start()` runs the loop in a new conversation, with the full context.
 - `resume()` checks the promises first, and ends `done` with no turn when they are met. Otherwise it continues the session's conversation note, so the agent keeps what it did, with the feedback as the prompt. When the harness no longer has the session, the conversation reports it, and the prompt holds the whole context before the feedback.
 - `stop()` interrupts the turn; `kill()` closes the harness session at once. Both end the run `stopped`, and a resume continues it.
-- `status()` is `working` or `checking` while a run is live in this Yami, and otherwise the state the document records. A document that says `running` with no live run reads as `stopped`: its run ended without recording its end, for example when the app quit. `session.on` and `yami.onSession` report each change.
+- `status()` is `working`, `checking`, or `reviewing` while a run is live in this Yami, and otherwise the state the document records. A document that says `running` with no live run reads as `stopped`: its run ended without recording its end, for example when the app quit. `session.on` and `yami.onSession` report each change.
 - `acts(properties)` gives what a person can do with the session now: start it with each agent, resume it, stop or kill a live run, and the module's actions on it whose `when` holds. The commands and every view use it, so the rules of when an act applies are in one place. `STATUS_LABELS` gives the words for each status.
 
 ## Approval and permissions
