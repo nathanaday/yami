@@ -71,6 +71,12 @@ export interface AgentTool<Shape extends z.ZodRawShape = z.ZodRawShape> {
   name: string;
   description: string;
   input: Shape;
+  /**
+   * `true` when the tool changes nothing: no file, and no state of the host. A cache that the host can
+   * rebuild does not count. A host can give a conversation only these tools, as Yami gives its reviewer.
+   * Default: the tool can change things.
+   */
+  readOnly?: boolean;
   /** Short one-line summary for `tool-start` events. */
   title?(input: z.infer<z.ZodObject<Shape>>): string;
   run(input: z.infer<z.ZodObject<Shape>>, context: { signal: AbortSignal }): Promise<ToolOutput>;

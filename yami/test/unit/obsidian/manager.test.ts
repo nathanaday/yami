@@ -58,6 +58,7 @@ import type { ConversationAgent } from "../../../src/obsidian/agents.js";
 import type { TurnEnd } from "../../../src/obsidian/api.js";
 import { applyOps } from "../../../src/obsidian/collab/text-ops.js";
 import { ConversationManager } from "../../../src/obsidian/conversation/manager.js";
+import { ObsidianConversations } from "../../../src/obsidian/conversation/obsidian-conversations.js";
 
 // The mocks take the arguments that the tests need, not those of Obsidian's classes.
 const FakeFile = TFile as unknown as new (path: string) => TFile;
@@ -360,6 +361,20 @@ describe("ConversationManager", () => {
     await expect(manager.start({ message: "Hi" })).rejects.toThrow("Yami has no agents.");
     await manager.destroy();
     await expect(manager.start({ message: "Hi" })).rejects.toThrow("Yami is turned off.");
+  });
+
+  it("starts the agent of a run's conversation with the tools that the run gives, in place of the agent's", async () => {
+    const runs = new ObsidianConversations(fake.app as never, manager, () => agents);
+    const tools = { name: "yami", description: "The reviewer's tools.", tools: [] };
+    const review = await runs.open({ agent: claude, name: "x review", folder: "conversations", access: "read-only", tools });
+    void review.send("Judge the work.");
+    await flush();
+    expect(claude.started.at(-1)).toMatchObject({ access: "read-only", tools });
+    const work = await runs.open({ agent: claude, name: "x", folder: "conversations" });
+    void work.send("Do the work.");
+    await flush();
+    expect(claude.started).toHaveLength(2);
+    expect(claude.started.at(-1)?.tools).toBeUndefined();
   });
 
   describe("a turn that a run waits for", () => {

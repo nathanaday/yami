@@ -11,6 +11,7 @@ import type {
   QuestionAnswers,
   QuestionRequest,
   SessionSettings,
+  ToolSet,
   TurnStatus,
 } from "../../agent/index.js";
 import { availablePath, frontmatterEdit, isUnnamed, nameFrom, renderTurn, TurnTranscript, userBlock } from "../../conversation/index.js";
@@ -111,6 +112,11 @@ export class ConversationController {
   private interruptPending = false;
   /** Whether the agent session continued the one the note records, or had to start a new one. */
   private continued = false;
+  /**
+   * The tools of the agent sessions that start after this is set, in place of the agent's own; none for
+   * the agent's. A run sets them, as for its review. They last while the app runs, not in the note.
+   */
+  tools: ToolSet | undefined;
 
   constructor(
     private readonly app: App,
@@ -485,6 +491,7 @@ export class ConversationController {
         effort: this.property("effort"),
         approval: this.approval,
         access: this.property("access") as "edit" | "read-only" | undefined,
+        ...(this.tools && { tools: this.tools }),
         onPermission: (request) => this.ask(request),
         onQuestion: (request) => this.question(request),
         // Shares a note before the agent's tool changes it, so the change merges as the agent's edit.

@@ -245,13 +245,13 @@ export type ModuleAct = { kind: "new"; label: string; template: SessionTemplate 
  * tools, its checks, and its actions as fields, with the builders below:
  *
  * ```ts
- * class Hello extends YamiModule {
- *   readonly id = "hello";
- *   readonly name = "Hello world";
- *   readonly greeting = this.skill(greetingMd);
- *   readonly polite = this.policy("Always say hello", politeMd);
- *   readonly note = this.promise("Greeting note", noteMd);
- *   readonly session = this.template({ id: "greet", name: "Greeting", skills: [this.greeting], policies: [this.polite], promises: [this.note] });
+ * class Notes extends YamiModule {
+ *   readonly id = "notes";
+ *   readonly name = "Notes";
+ *   readonly summarize = this.skill(summarizeMd);
+ *   readonly cite = this.policy("Cite sources", citeMd);
+ *   readonly summary = this.promise("Summary written", summaryMd);
+ *   readonly weekly = this.template({ id: "weekly", name: "Weekly summary", skills: [this.summarize], policies: [this.cite], promises: [this.summary] });
  * }
  * ```
  *

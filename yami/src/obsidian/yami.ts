@@ -5,12 +5,13 @@ import { CONVERSATION_FOLDER } from "../conversation/conversations.js";
 import { basename } from "../document/document.js";
 import { SessionTemplate, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
 import type { Session } from "../module/session.js";
-import { definesModule } from "../module/vault-module.js";
 import { Yami } from "../module/yami.js";
 import type { WikiOptions } from "../wiki/wiki.js";
 import { vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
+import { ChangeFeed } from "./change-feed.js";
 import { showFolderColors } from "./colors.js";
+import { watchModules } from "./discovery.js";
 import { checkModuleIcons } from "./icons.js";
 import { addConversationCommands, addModuleCommands, addNewModuleCommand, addSessionCommands, addWikiCommands } from "./commands.js";
 import { ConversationManager } from "./conversation/manager.js";
@@ -77,7 +78,6 @@ export class ObsidianYami extends Yami {
   #status: HTMLElement | undefined;
   readonly #sessionsFeed = new ChangeFeed("sessions", 150);
   readonly #wikiFeed = new ChangeFeed("wiki", 300);
-  readonly #discovery = new ChangeFeed("modules", 300);
 
   constructor(plugin: Plugin, options: YamiPluginOptions) {
     const app = plugin.app;
@@ -118,16 +118,7 @@ export class ObsidianYami extends Yami {
 
     conversations.install(plugin);
     watchWiki(app, plugin, this.wiki);
-    this.#discovery.on(() => void this.discover().catch((error) => console.error("yami: could not read the vault modules", error)));
-    // A created, renamed, or removed file can change what a template's link finds; a changed file only
-    // matters when it is a module document or a template document.
-    const discover = (file: TAbstractFile, old?: string) => {
-      if (old !== undefined || definesModule(file.path)) this.#discovery.changed();
-    };
-    plugin.registerEvent(app.vault.on("create", (file) => discover(file, "")));
-    plugin.registerEvent(app.vault.on("delete", (file) => discover(file, "")));
-    plugin.registerEvent(app.vault.on("rename", (file, old) => discover(file, old)));
-    plugin.registerEvent(app.vault.on("modify", (file) => discover(file)));
+    watchModules(app, plugin, this);
     const watch = (file: TAbstractFile, old?: string) => {
       const paths = old ? [file.path, old] : [file.path];
       if (paths.some((path) => this.concernsSessions(path))) this.#sessionsFeed.changed();
@@ -143,7 +134,6 @@ export class ObsidianYami extends Yami {
     plugin.register(() => {
       this.#sessionsFeed.stop();
       this.#wikiFeed.stop();
-      this.#discovery.stop();
     });
     app.workspace.onLayoutReady(() =>
       this.enable().catch((error: Error) => {
@@ -188,9 +178,11 @@ export class ObsidianYami extends Yami {
   }
 
   /**
-   * Calls the listener when the sessions may look different: a session document or a module's document is
-   * created, changed, renamed, or removed, or a run changes its status. Calls that come close together
-   * become one, a moment after the last. Returns the function that stops it.
+   * Calls the listener when the sessions or the modules may look different: a session document or a
+   * module's document is created, changed, renamed, or removed; a run changes its status; or a discovery
+   * changes `modules` or `problems`, as `onModulesChange` hears. So a view of the modules and the sessions
+   * needs this feed only. Calls that come close together become one, a moment after the last. Returns the
+   * function that stops it.
    */
   onSessionsChange(listener: () => void): () => void {
     return this.#sessionsFeed.on(listener);
@@ -312,38 +304,5 @@ export class ObsidianYami extends Yami {
             : "";
     this.#status.setText(text);
     this.#status.toggleClass("is-working", working.length > 0 || running.length > 0);
-  }
-}
-
-/** Listeners that hear of changes: once for changes that come close together, a moment after the last. */
-class ChangeFeed {
-  readonly #listeners = new Set<() => void>();
-  #timer: number | undefined;
-
-  constructor(
-    private readonly name: string,
-    private readonly wait: number,
-  ) {}
-
-  on(listener: () => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  }
-
-  changed(): void {
-    window.clearTimeout(this.#timer);
-    this.#timer = window.setTimeout(() => {
-      for (const listener of [...this.#listeners]) {
-        try {
-          listener();
-        } catch (error) {
-          console.error(`yami: a ${this.name} listener threw`, error);
-        }
-      }
-    }, this.wait);
-  }
-
-  stop(): void {
-    window.clearTimeout(this.#timer);
   }
 }

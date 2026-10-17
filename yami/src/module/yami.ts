@@ -109,7 +109,8 @@ export class Yami {
 
   /**
    * The tools of Yami and of every module as one tool set named `yami`, which Yami gives its agents: Yami's
-   * own, `yami_check` and `yami_review`, and each module's tool as `<module id>_<tool name>`.
+   * own, `yami_check`, and each module's tool as `<module id>_<tool name>`. A review gets only the tools
+   * whose `readOnly` is true, and its own `yami_review`, which no other agent has.
    */
   tools(): ToolSet {
     const modules = moduleTools(this.modules);

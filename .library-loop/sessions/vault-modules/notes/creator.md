@@ -1,19 +1,20 @@
 # Creator notes · vault-modules
 
 ## Round 1 (0.2.0): what I built and why
-- Vault modules: `src/module/vault-module.ts` (`readVaultModules`, `VaultModule`, `definesModule`). `Yami.modules` is a getter: code modules, then vault modules. `discover()` runs one call at a time. It keeps the module object when the definition JSON did not change, and calls the `onModulesChange` listeners only on a change, a problem change included.
-- A template with any problem stays out. A module whose document does not parse stays out. A bad `color` or a module property that is not text falls back to its default. Template id = `idFromName(file name)`.
-- Template links resolve by `linkedDocuments`, the session rule, not by the wiki rule. I flagged this under Policy. Watch for a ruling.
-- Every property of a template document has the name of its `TemplateOptions` option. The template's body is the body of a new session. The module's instructions are a property, and the module's body is for a person.
-- `DocumentRef` widens the template's link types. This is a breaking change, at the type level only.
-- Review: `src/module/review.ts` and `runReview` in `run.ts`. `RunControl.review` holds the live verdicts. `yami_review` finds the live review through `liveControl(session)`, a WeakMap in `session.ts`. The core fields `review`, `followed`, and `broken` are new.
-- Base skill: `internal/yami/skills/run/SKILL.md`. The run invokes it with `/yami:run`. It is inlined for an agent that does not have the `internal/yami` skill set.
-- `session.check()` is behind `yami_check`. It is a general primitive, for a "check now" button in a view.
-- Testing: `Turn(prompt, session)`, `session.tool(name, input)`, and `review(verdicts?)`, which reads the session path from the review prompt line "The session document is …".
-- Obsidian: `addModuleCommands` returns a sync function, which calls `removeCommand` (Obsidian 1.7.2 or later). Discovery is debounced 300 ms. It runs on create, delete, or rename anywhere, and on a modify of a module document or a template document. The New module command is in the `modules` group.
+- Vault modules are in `src/module/vault-module.ts`. `Yami.modules` is a getter: code modules first, then vault modules. `discover()` runs calls in sequence, keeps a module object when its definition JSON did not change, and calls listeners only when something changed.
+- A template with any problem stays out. Template id = `idFromName(file name)`. Template links resolve as session links do (ruled in round 2).
+- Review: `src/module/review.ts` and `runReview` in `run.ts`. The core fields `review`, `followed`, and `broken` are new.
+- Base skill: `internal/yami/skills/run/SKILL.md`, invoked as `/yami:run`. It is inlined when the agent does not have the skill set.
+
+## Round 2 (0.3.0): decisions
+- Reviewer tool limit (audit): `AgentTool.readOnly`. The reviewer's conversation gets `OpenConversation.tools` = the read-only tools of `yami.tools()` + `reviewTool(review)`. `yami_review` is bound to one `Review` and refuses after `review.open = false`. I removed `liveControl` and `RunControl.review`. `ConversationController.tools` carries the tools in Obsidian (in memory only). A custom `Conversations` must honor `tools`, and the docs say so.
+- F1.1/F1.8: `SessionDocument.reason` (the line text from Deliverables or Review) and `judged`. They are parsed in `details()`, the same way as the Progress section.
+- F1.3: `ModuleProblem.document`, only when a document holds the problem.
+- F1.4: `testYami({ files })`, a map from vault path to disk path, copied with `cp`. On failure, it removes the temporary folder.
+- Trigger audit: `watchModules(app, component, yami)` in `src/obsidian/discovery.ts`. `ChangeFeed` moved to `change-feed.ts`. Tests: `test/unit/obsidian/discovery.test.ts`.
+- Generic examples: the base skill uses `/<module>:<skill>`. README, module, and testing docs use `notes` and `code-review`, not hello.
 
 ## Watch next round
-- Consumer tests that break because of the review. The migration is in the CHANGELOG.
-- Whether "what the run changed" is enough for a reviewer.
-- The field-type conflict rule: the first template by file name wins.
-- The Obsidian discovery trigger has no unit test. Only the command sync does.
+- Showcase module tools that only read and that a reviewer needs must add `readOnly: true`.
+- The Deliverables detail of a check is not cut to one line. A multi-line check detail would break the `reason` parse and the checklist line.
+- Field-type conflict rule: the first template by file name wins.

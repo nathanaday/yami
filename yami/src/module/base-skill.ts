@@ -22,7 +22,7 @@ description: How to run a Yami session. Read the session document, load its skil
 A Yami session is one piece of work, and one markdown document in the vault. The message that invoked this skill names the session document and gives its context: the instructions, the policies, the promises, the skills, and the articles. The working directory is the vault, and paths are relative to it.
 
 1. **Read the session document.** Its body says what the work is, and a person can write in it. Yami writes its properties and its Deliverables, Progress, and Review sections. Do not edit the session document.
-2. **Load the session's skills.** Load the first skill of the message before you begin, and load the others when you need them. To load a skill, invoke it by its command, such as \`hello:greeting\`, or read the \`SKILL.md\` in the folder that the message gives. A skill that the message gives in full is loaded already.
+2. **Load the session's skills.** Load the first skill of the message before you begin, and load the others when you need them. To load a skill, invoke it by its command, \`/<module>:<skill>\`, or read the \`SKILL.md\` in the folder that the message gives. A skill that the message gives in full is loaded already.
 3. **Follow every policy.** A policy is a rule for all of the work.
 4. **Deliver every promise.** A promise names a deliverable, and where it goes. In a promise, \`{{session}}\` is the session's name, and \`{{field}}\` is the value of a session property.
 5. **Check the work before the turn ends.** Call the tool \`yami_check\` with the session document's path. It runs the checks of the promises and returns each result, and it records nothing. Fix each unmet promise, and check again.

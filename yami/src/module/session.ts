@@ -1,10 +1,11 @@
 import type { Agent } from "../agent/agent.js";
 import type { Harness } from "../agent/types.js";
-import { basename, linksOf, readDocument, resolveLink, sectionText, type Document } from "../document/document.js";
+import { basename, linksOf, linkTarget, readDocument, resolveLink, sectionText, type Document } from "../document/document.js";
 import { SESSION_STATES, type SessionState } from "../document/schema.js";
 import type { Properties } from "../document/vault.js";
 import { linkedDocuments, type LinkedDocument } from "./links.js";
 import type { ActionResult, DocumentRef, SessionAction, SessionTemplate, YamiModule } from "./module.js";
+import { isJudged } from "./review.js";
 import { checkSession, runSession, sessionParts, type RunControl, type RunResult, type SessionCheck } from "./run.js";
 import type { Yami } from "./yami.js";
 
@@ -49,11 +50,19 @@ export interface SessionSummary {
 
 /**
  * A linked document of a session. A promise also says whether the last check or review met it, and a
- * policy whether the last review found it followed: undefined before any.
+ * policy whether the last review found it followed: undefined before any. `reason` says why.
  */
 export interface SessionDocument extends LinkedDocument {
   met?: boolean;
   followed?: boolean;
+  /**
+   * Why the last check or review decided so, as the session document shows it:
+   * for a promise, the check's detail, `review: <reason>` once a review judged it, or `the review judges it`;
+   * for a policy, the reviewer's reason. Undefined before any.
+   */
+  reason?: string;
+  /** For a promise: `true` when it has no check, so the review judges it, and `false` when Yami checks it. */
+  judged?: boolean;
 }
 
 /** All of a session: what a page about one session shows. */
@@ -105,13 +114,6 @@ interface LiveRun {
   promise: Promise<RunResult>;
   control: RunControl;
   phase: "working" | "checking" | "reviewing";
-}
-
-const controls = new WeakMap<Session, RunControl>();
-
-/** The control of a session's live run, for the tools of Yami. */
-export function liveControl(session: Session): RunControl | undefined {
-  return controls.get(session);
 }
 
 /**
@@ -199,9 +201,24 @@ export class Session {
     };
     const met = await marks("met", "unmet");
     const followed = await marks("followed", "broken");
-    const documents = (await linkedDocuments(this.yami.vault, summary.module.layout, doc.properties)).map((d): SessionDocument =>
-      !d.path ? d : d.kind === "promises" ? { ...d, met: met(d.path) } : d.kind === "policies" ? { ...d, followed: followed(d.path) } : d,
-    );
+    // The text after an item's link on its line of a section that the loop writes.
+    const reasons = async (section: string, line: RegExp) => {
+      const found = new Map<string, string>();
+      for (const match of sectionText(doc.body, section).split("\n").map((text) => line.exec(text))) {
+        const path = match && (await resolveLink(this.yami.vault, linkTarget(match[1]!), []));
+        if (path) found.set(path, match![2]!);
+      }
+      return found;
+    };
+    const checked = await reasons("Deliverables", /^- \[[ x]\] (\[\[[^\]]+\]\]) — (.*)$/);
+    const reviewed = await reasons("Review", /^- (?:followed|broken): (\[\[[^\]]+\]\]) — (.*)$/);
+    const judged = (path: string) => readDocument(this.yami.vault, path).then(isJudged, () => undefined);
+    const documents: SessionDocument[] = [];
+    for (const d of await linkedDocuments(this.yami.vault, summary.module.layout, doc.properties)) {
+      if (d.path && d.kind === "promises") documents.push({ ...d, met: met(d.path), reason: checked.get(d.path), judged: await judged(d.path) });
+      else if (d.path && d.kind === "policies") documents.push({ ...d, followed: followed(d.path), reason: reviewed.get(d.path) });
+      else documents.push(d);
+    }
     const target = linksOf(doc.properties.conversation)[0];
     const review = linksOf(doc.properties.review)[0];
     const progress = sectionText(doc.body, "Progress")
@@ -323,18 +340,15 @@ export class Session {
     };
     const live: LiveRun = { control, phase: resume ? "checking" : "working", promise: undefined as unknown as Promise<RunResult> };
     this.#run = live;
-    controls.set(this, control);
     live.promise = runSession(this.yami, this.path, agent, control, { resume, maxIterations: options.maxIterations });
     this.emit(live.phase);
     live.promise.then(
       (result) => {
         this.#run = undefined;
-        if (controls.get(this) === control) controls.delete(this);
         this.emit(result.state === "running" ? "stopped" : result.state);
       },
       () => {
         this.#run = undefined;
-        if (controls.get(this) === control) controls.delete(this);
         // The run threw before it changed the document, so the document says what the session is.
         void this.status().then((status) => !this.#run && this.emit(status), () => undefined);
       },

@@ -1,6 +1,6 @@
 // Test a module without Obsidian or a harness: a vault on the file system, an agent that follows a
 // script, and a Yami over both in a fresh folder.
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { YamiModule } from "../module/module.js";
@@ -28,11 +28,32 @@ export interface TestYamiOptions {
   /** The agent's first turns. `agent.queue` adds more. */
   turns?: Turn[];
   wiki?: WikiOptions;
+  /**
+   * Files and folders to copy into the vault before the modules are enabled, so that `enable` finds them,
+   * as a vault module: each vault path with the file or the folder on disk to copy there. A relative disk
+   * path starts at the working directory of the test run.
+   *
+   * ```ts
+   * await testYami({ files: { "internal/<id>": "test/fixtures/<id>", "notes/Idea.md": "test/fixtures/Idea.md" } });
+   * ```
+   */
+  files?: Record<string, string>;
 }
 
-/** A Yami over a fresh vault in a temporary folder, with a scripted agent and every module enabled. */
+/**
+ * A Yami over a fresh vault in a temporary folder, with the `files` copied in, a scripted agent, and every
+ * module enabled. It throws when it cannot copy a file, and then leaves no folder behind.
+ */
 export async function testYami(options: TestYamiOptions = {}): Promise<TestYami> {
   const root = await mkdtemp(join(tmpdir(), "yami-test-"));
+  for (const [to, from] of Object.entries(options.files ?? {})) {
+    try {
+      await cp(from, join(root, to), { recursive: true });
+    } catch (error) {
+      await rm(root, { recursive: true, force: true });
+      throw new Error(`testYami cannot copy ${from} to ${to}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const vault = new FsVault(root);
   const agent = new ScriptedAgent(options.turns);
   const yami = new Yami({ vault, agents: [agent], modules: options.modules, wiki: options.wiki });

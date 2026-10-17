@@ -1,5 +1,5 @@
 import type { Agent } from "../agent/agent.js";
-import type { AgentSession, ApprovalSetting, PermissionHandler, TurnStatus } from "../agent/types.js";
+import type { AgentSession, ApprovalSetting, PermissionHandler, ToolSet, TurnStatus } from "../agent/types.js";
 import { link, readDocument, updateDocument, writeDocument } from "../document/document.js";
 import { timestamp } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
@@ -40,6 +40,11 @@ export interface OpenConversation {
   /** `read-only`: the agent changes nothing except through its tools. */
   access?: "edit" | "read-only";
   /**
+   * The tools of the conversation's agent sessions, in place of the agent's own. Default: the agent's. A
+   * `Conversations` must honor it: Yami's review gives its reviewer only the tools that change nothing.
+   */
+  tools?: ToolSet;
+  /**
    * A conversation note to continue instead of a new one. The agent resumes the harness session that the
    * note records, so it keeps the conversation; when that session is gone, it starts a new one in the note.
    */
@@ -63,7 +68,8 @@ export class FileConversations implements Conversations {
   ) {}
 
   async open(options: OpenConversation): Promise<Conversation> {
-    const start = (resume?: string) => options.agent.startSession({ resume, approval: options.approval, access: options.access, onPermission: this.onPermission });
+    const start = (resume?: string) =>
+      options.agent.startSession({ resume, approval: options.approval, access: options.access, onPermission: this.onPermission, ...(options.tools && { tools: options.tools }) });
     let path: string;
     let session: AgentSession;
     let continued = false;

@@ -24,6 +24,7 @@ export class ObsidianConversations implements Conversations {
       file = await this.manager.create(registered, { name: options.name, folder: options.folder, open: false, module: options.module, approval: options.approval, access: options.access });
     }
     const controller = this.manager.conversation(file);
+    controller.tools = options.tools;
     if (controller.ended) await controller.resume();
     // A resumed note continues its agent session when the harness still has it; the run learns which.
     const continued = earlier ? await controller.connect() : false;

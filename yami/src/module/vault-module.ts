@@ -12,6 +12,8 @@ export interface ModuleProblem {
   module: string;
   /** The vault path of the document with the problem, or of the module's folder. */
   path: string;
+  /** The vault path of the document with the problem, which a view can open. None when no document holds the problem: the folder's name, a missing module document, or a ledger that Yami could not write. */
+  document?: string;
   /** What is wrong, and how to fix it. */
   message: string;
 }
@@ -91,7 +93,7 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
   for (const [id, { templates, skills }] of [...folders].sort(([a], [b]) => (a < b ? -1 : 1))) {
     if (!templates.length) continue;
     const root = `${INTERNAL}/${id}`;
-    const problem = (path: string, message: string) => problems.push({ module: id, path, message });
+    const problem = (path: string, message: string) => problems.push({ module: id, path, ...(path !== root && { document: path }), message });
     if (taken.has(id)) {
       problem(root, `The plugin's code has a module with the id ${id}, and it wins. Rename the folder ${root}/ to give the vault module an id of its own.`);
       continue;

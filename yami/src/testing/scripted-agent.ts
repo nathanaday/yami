@@ -30,7 +30,7 @@ export class ScriptedSession extends BaseSession {
   }
 
   /**
-   * Calls a tool of the session's tool set by its full name, such as `wiki_search` or `yami_review`, as the
+   * Calls a tool of the session's tool set by its full name, such as `wiki_search` or `yami_check`, as the
    * harness would: the input is checked against the tool's schema. Throws when the session has no such tool.
    */
   async tool(name: string, input: unknown): Promise<{ text: string; isError: boolean }> {
@@ -111,17 +111,17 @@ export type ScriptedVerdict = Verdict | [Verdict, string];
  * A turn that plays the reviewer of a session: it records a verdict with `yami_review` for each policy and
  * each promise of the review. An item that `verdicts` names, by its name or its path, gets that verdict;
  * any other is followed or met. A reviewer that records nothing is a turn that does nothing, `() => {}`.
+ * It throws when its session is no review's: only a review's conversation has `yami_review`.
  *
  * ```ts
- * t.agent.queue(writeTheNote, review({ "Always say hello": ["broken", "It said hi."] }), fixIt, review());
+ * t.agent.queue(meetTheChecks, review({ "<policy name>": ["broken", "<reason>"] }), fixIt, review());
  * ```
  */
 export function review(verdicts: Record<string, ScriptedVerdict> = {}): Turn {
-  return async (prompt, session) => {
-    const path = /^The session document is (.+?\.md)\./m.exec(prompt)?.[1];
-    if (!path) throw new Error("The turn is no review: its message names no session document.");
+  return async (_prompt, session) => {
+    if (!session.options.tools?.tools.some((tool) => tool.name === "yami_review")) throw new Error("The turn is no review: its session has no yami_review tool.");
     const call = async (list: { item: string; verdict: Verdict; reason: string }[]) => {
-      const result = await session.tool("yami_review", { session: path, verdicts: list });
+      const result = await session.tool("yami_review", { verdicts: list });
       if (result.isError) throw new Error(result.text);
       return JSON.parse(result.text) as { remaining: { kind: "policy" | "promise"; name: string; path: string }[] };
     };

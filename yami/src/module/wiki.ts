@@ -247,6 +247,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     return [
       defineTool({
         name: "search",
+        readOnly: true,
         description: `Ranked search over every note of the vault. Returns notes with a score in [0, 1], a snippet, and why each ranks. Filter by types (topic, source, policy, …), tags (a note must hold every one, or a tag below it), and folder. With seeds and no text, it returns the notes related to the seeds through links. Algorithms: ${Object.keys(algorithms).join(", ")}. To answer a question: search, read the best notes with Read, follow a link one hop when needed, then answer with a [[link]] on each claim.`,
         input: {
           text: z.string().optional().describe("The query. May be empty when seeds are given."),
@@ -266,6 +267,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }),
       defineTool({
         name: "match",
+        readOnly: true,
         description: `Where each name stands in the wiki: hit (a topic or source holds the name or an alias, with its path), near (notes above the similarity threshold, as neighbors), or new. Call it with every subject of a source at once, before you draft.`,
         input: {
           names: z.array(z.string()).min(1).describe("The names to match, each with its aliases joined by a space when useful."),
@@ -279,6 +281,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }),
       defineTool({
         name: "lint",
+        readOnly: true,
         description: "The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, and orphan topics. Each finding names its fix. Errors fail the Clean topics promise; warnings are worth a look. Reads only.",
         input: {
           paths: z.array(z.string()).optional().describe("Check only these notes, as paths or [[link]] names."),
@@ -292,6 +295,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }),
       defineTool({
         name: "tags",
+        readOnly: true,
         description: "The tags of the vault's notes with the count of notes that hold each, most used first. The vocabulary for new topics.",
         input: {},
         title: () => "List the wiki's tags",
@@ -302,6 +306,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }),
       defineTool({
         name: "neighbors",
+        readOnly: true,
         description:
           "Where a note or a tag sits in the tag hierarchy, where ml/vision is below ml. For a note: its own tags, the tags above them, and the tags one level below them. For a tag: the tags above it, the tags one level below it, and the notes that hold it. Each tag comes with the count of notes under it. With neither, the top tags. Use it to walk a large wiki by subject: from a note to its tags, from a tag to the notes and tags under it.",
         input: {
@@ -325,6 +330,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }),
       defineTool({
         name: "chunks",
+        readOnly: true,
         description: `Splits a source's original for the workers of an ingest: a text file into runs of at most 800 lines, a PDF into 20 pages at a time, any other file whole. Returns the file and each chunk's range and locator. Workers read a range with their Read tool.`,
         input: {
           source: z.string().describe("The source note, as a path or a [[link]] name."),

@@ -34,6 +34,8 @@ export function isJudged(promise: Document): boolean {
 /** The verdicts of one review, as the reviewer records them with `yami_review`. A later verdict on an item replaces an earlier one. */
 export class Review {
   readonly verdicts = new Map<string, { verdict: Verdict; reason: string }>();
+  /** Whether the review runs. The run sets it false when the review ends, and `yami_review` then refuses. */
+  open = true;
 
   constructor(readonly items: ReviewItem[]) {}
 
@@ -89,7 +91,7 @@ export class Review {
   }
 }
 
-/** The first message of a review. The `yami/testing` reviewer reads the session path from its second paragraph. */
+/** The first message of a review. */
 export function reviewPrompt(options: {
   path: string;
   kind: string;
@@ -105,7 +107,7 @@ export function reviewPrompt(options: {
   return [
     `You review the Yami session "${basename(path)}", ${options.kind}. You judge the work, and you change no file.`,
     `The session document is ${path}. ${options.conversation ? `The conversation note ${options.conversation} records the run: the worker's messages and its tool calls. ` : ""}Read the files that the work changed, and any other file that you need.`,
-    `Judge each policy and each promise below. A policy is \`followed\` or \`broken\`. A promise is \`met\` or \`unmet\`. Give each verdict a reason of one or two sentences that names the evidence. Record the verdicts with the tool \`yami_review\`, with the session document's path. An item with no recorded verdict is not judged, and then a person must look at the session.`,
+    `Judge each policy and each promise below. A policy is \`followed\` or \`broken\`. A promise is \`met\` or \`unmet\`. Give each verdict a reason of one or two sentences that names the evidence. Record the verdicts with the tool \`yami_review\`. An item with no recorded verdict is not judged, and then a person must look at the session.`,
     `## Session\n\n${session.body.trim()}`,
     options.reply?.trim() ? `## The worker's last message\n\n${options.reply.trim()}` : "",
     section("Policies", policies),

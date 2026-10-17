@@ -1,3 +1,6 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { readDocument } from "../../src/document/index.js";
 import { VaultModule, type Properties } from "../../src/index.js";
@@ -217,6 +220,9 @@ describe("the problems of vault modules", () => {
       "unparsed · internal/unparsed/unparsed.md · The properties do not parse: Nested mappings are not allowed in compact mappings at line 1, column 7. Fix them in the document's source view.",
       "yami · internal/yami · The id yami is Yami's own. Rename the folder internal/yami/.",
     ]);
+    // A problem in a document names the document; a problem of the folder names none.
+    const folders = ["internal/Bad Name", "internal/headless", "internal/hello", "internal/yami"];
+    for (const problem of yami.problems) expect(problem.document, problem.message).toBe(folders.includes(problem.path) ? undefined : problem.path);
   });
 
   it("keeps the other modules' sessions running", async () => {
@@ -316,6 +322,29 @@ describe("live changes", () => {
     expect(yami.module("code-review")!.templates[0]!.maxIterations).toBe(1);
     release();
     expect(await run).toMatchObject({ state: "done", iterations: 2 });
+  });
+});
+
+describe("a test Yami with files", () => {
+  it("copies files and folders into the vault before it enables the modules, so discovery finds them at start", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "yami-fixture-"));
+    try {
+      await mkdir(join(fixture, "notes/templates"), { recursive: true });
+      await writeFile(join(fixture, "notes/notes.md"), "---\ntype: module\nname: Notes\n---\n");
+      await writeFile(join(fixture, "notes/templates/Daily.md"), "---\ntype: template\n---\n");
+      await writeFile(join(fixture, "Readme.md"), "Read me.\n");
+      t = await testYami({ files: { "internal/notes": join(fixture, "notes"), "docs/Readme.md": join(fixture, "Readme.md") } });
+      expect(t.yami.module("notes")).toBeInstanceOf(VaultModule);
+      expect(t.yami.module("notes")!.templates.map((tp) => tp.id)).toEqual(["daily"]);
+      expect(await t.vault.read("docs/Readme.md")).toBe("Read me.\n");
+      expect(await t.vault.exists("internal/notes/sessions.base")).toBe(true);
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("says which file it cannot copy", async () => {
+    await expect(testYami({ files: { "internal/notes": "/no/such/folder" } })).rejects.toThrow("testYami cannot copy /no/such/folder to internal/notes:");
   });
 });
 

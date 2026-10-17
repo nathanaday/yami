@@ -22,6 +22,7 @@ import { linkedDocuments } from "./links.js";
 import { skillCommand, type Layout, type LinkedKind, type SessionTemplate, type YamiModule } from "./module.js";
 import { isJudged, Review, reviewFeedback, reviewPrompt, type ReviewItem } from "./review.js";
 import type { Yami } from "./yami.js";
+import { reviewTool } from "./yami-tools.js";
 
 export interface RunResult {
   path: string;
@@ -41,8 +42,6 @@ export interface RunControl {
   stopping: boolean;
   /** The conversation that is live now: the worker's, or the reviewer's during a review. */
   conversation?: Conversation;
-  /** The review in progress, which `yami_review` records into. */
-  review?: Review;
   phase(phase: "working" | "checking" | "reviewing"): void;
 }
 
@@ -209,6 +208,8 @@ export async function runSession(
         break;
       }
       await write({ iteration, line, verification, state: "running" });
+      // The reviewer sees the session as the verification left it.
+      doc = await readDocument(vault, path);
 
       control.phase("reviewing");
       const review = new Review(items);
@@ -256,7 +257,8 @@ export async function runSession(
 
 /**
  * The review: a new read-only conversation with the agent, which records its verdicts into `review` with
- * `yami_review`. While it runs, it is the run's live conversation, so stop and kill reach it.
+ * `yami_review`. It gets only the tools that change nothing, and its own `yami_review`. While it runs, it
+ * is the run's live conversation, so stop and kill reach it.
  */
 async function runReview(
   yami: Yami,
@@ -265,6 +267,7 @@ async function runReview(
   review: Review,
   options: { path: string; name: string; prompt: string; worker: Conversation | undefined },
 ): Promise<{ note: string; result: ConversationTurn }> {
+  const served = yami.tools();
   const reviewer = await yami.openConversation({
     agent,
     name: options.name,
@@ -272,9 +275,9 @@ async function runReview(
     module: options.path,
     approval: "accept-edits",
     access: "read-only",
+    tools: { ...served, tools: [...served.tools.filter((tool) => tool.readOnly), reviewTool(review)] },
   });
   control.conversation = reviewer;
-  control.review = review;
   try {
     await updateDocument(yami.vault, options.path, (d) => {
       d.properties.state = "running";
@@ -284,7 +287,7 @@ async function runReview(
     const result: ConversationTurn = control.stopping ? { status: "interrupted", text: "" } : await reviewer.send(options.prompt);
     return { note: reviewer.path, result };
   } finally {
-    control.review = undefined;
+    review.open = false;
     control.conversation = options.worker;
     await reviewer.close();
   }
