@@ -10,6 +10,7 @@ import type { WikiOptions } from "../wiki/wiki.js";
 import { vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
 import { showFolderColors } from "./colors.js";
+import { checkModuleIcons } from "./icons.js";
 import { addConversationCommands, addModuleCommands, addSessionCommands, addWikiCommands } from "./commands.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
@@ -147,6 +148,7 @@ export class ObsidianYami extends Yami {
     if (groups.conversations) addConversationCommands(this);
     if (groups.sessions) addSessionCommands(this);
     if (groups.wiki) addWikiCommands(this);
+    checkModuleIcons(this.modules);
     addModuleCommands(this);
     if (options.folderColors ?? true) showFolderColors(this, plugin);
     if (options.statusBar ?? true) {

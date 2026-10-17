@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { runTool, setSkills, slashCommand } from "../../src/agent/index.js";
 import { readDocument, sectionText } from "../../src/document/index.js";
-import { skillCommand, Yami, YamiModule, type AgentTool, type Place } from "../../src/index.js";
+import { MODULE_ICON, skillCommand, Yami, YamiModule, type AgentTool, type Place } from "../../src/index.js";
 import { FsVault, ScriptedAgent, testYami, type TestYami } from "../../src/testing/index.js";
 import { GREETING_SKILL, Hello } from "../fixtures/hello.js";
 
@@ -145,6 +145,12 @@ describe("a module's files", () => {
     new Yami({ vault, modules: [hello] });
     expect(hello.vault).toBe(vault);
     expect(() => new Yami({ vault, modules: [hello] })).toThrow("already added to another Yami");
+  });
+
+  it("gives a module its own icon, the default when it names none, and the wiki a book", () => {
+    const yami = new Yami({ vault: new FsVault("/tmp/none"), modules: [new Hello(), new (class extends Hello { readonly id = "shelf"; readonly icon = "library"; })()] });
+    expect(Object.fromEntries(yami.modules.map((m) => [m.id, m.icon]))).toEqual({ wiki: "book-open", hello: MODULE_ICON, shelf: "library" });
+    expect(MODULE_ICON).toBe("box");
   });
 });
 

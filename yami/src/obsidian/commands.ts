@@ -4,6 +4,7 @@ import type { Agent } from "../agent/agent.js";
 import type { SessionAct } from "../module/session.js";
 import { WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
 import type { ConversationAgent } from "./agents.js";
+import { moduleIcon } from "./icons.js";
 import { WikiCompareModal } from "./wiki/compare-modal.js";
 import { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
 import { WikiSearchModal } from "./wiki/search-modal.js";
@@ -99,10 +100,12 @@ export function addSessionCommands(yami: ObsidianYami): void {
 /** For each module: a command for each of its acts (a new session, an action on no session), and one for each action on a session. */
 export function addModuleCommands(yami: ObsidianYami): void {
   for (const module of yami.modules) {
+    const icon = moduleIcon(module);
     for (const act of module.acts()) {
       yami.plugin.addCommand({
         id: act.kind === "new" ? `${module.id}-new-${act.template.id}` : `${module.id}-${act.action.id}`,
         name: `${module.name}: ${act.kind === "new" ? `${act.label.charAt(0).toLowerCase()}${act.label.slice(1)}` : act.label}`,
+        icon,
         callback: () => void yami.runModuleAct(act),
       });
     }
@@ -111,6 +114,7 @@ export function addModuleCommands(yami: ObsidianYami): void {
       yami.plugin.addCommand({
         id: `${module.id}-${action.id}`,
         name: `${module.name}: ${action.name}`,
+        icon,
         checkCallback: (checking) => {
           const session = yami.activeSession(action.on);
           const act = session?.acts(yami.properties(session.path)).find((a) => a.action === action);

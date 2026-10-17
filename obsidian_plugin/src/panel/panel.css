@@ -1,4 +1,4 @@
-/* The Yami panel. The module's color is its one accent: a strand beside each module, which becomes the
+/* The Yami panel. The module's color is its one accent: the module's icon in the list, which becomes the
    page's whole left edge inside a module, so the panel always says whose work it shows. The rest follows
    the theme. */
 
@@ -184,12 +184,6 @@
   min-width: 0;
 }
 
-.yami-row-head {
-  display: flex;
-  align-items: center;
-  gap: var(--size-4-2);
-}
-
 .yami-row-name {
   flex: 1;
   min-width: 0;
@@ -251,49 +245,96 @@
   color: color-mix(in srgb, var(--yami-module-color) 60%, var(--text-normal));
 }
 
-/* The modules, each with its strand */
+/* The modules, each with its icon */
 
 .yami-module-list {
   display: flex;
   flex-direction: column;
-  gap: var(--size-2-2);
+  gap: var(--size-2-1);
   margin-top: var(--size-4-3);
 }
 
 .yami-module-row {
-  position: relative;
-  align-items: flex-start;
-  padding-left: calc(var(--size-4-2) + 6px);
+  gap: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-2) var(--size-4-2) var(--size-4-3);
+  border-radius: var(--radius-m);
 }
 
-.yami-module-row::before {
-  content: "";
-  position: absolute;
-  top: var(--size-2-3);
-  bottom: var(--size-2-3);
-  left: var(--size-2-2);
-  width: 3px;
-  border-radius: 2px;
-  background: var(--yami-module-color);
+.yami-module-row .yami-row-name {
+  font-size: var(--font-ui-medium);
 }
 
-.yami-counts {
-  display: flex;
-  flex: none;
-  gap: var(--size-4-2);
-  font-size: var(--font-ui-smaller);
-  font-variant-numeric: tabular-nums;
+.yami-row-sub {
+  margin-top: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-ui-small);
   color: var(--text-muted);
 }
 
-.yami-count {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--size-2-2);
+.yami-module-icon {
+  display: flex;
+  flex: none;
+  color: var(--yami-module-color);
 }
 
-.yami-count .yami-mark {
-  --yami-mark-size: 8px;
+.yami-module-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.75px;
+}
+
+.yami-badge {
+  flex: none;
+  box-sizing: border-box;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 var(--size-2-3);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--yami-module-color) 18%, transparent);
+  font-size: var(--font-ui-smaller);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 22px;
+  text-align: center;
+  color: color-mix(in srgb, var(--yami-module-color) 70%, var(--text-normal));
+}
+
+.yami-row-chevron {
+  display: flex;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.yami-row-chevron svg {
+  width: 16px;
+  height: 16px;
+}
+
+.yami-module-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin: var(--size-2-2) 0 var(--size-4-2);
+}
+
+.yami-module-head .yami-module-icon {
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--yami-module-color) 14%, transparent);
+}
+
+.yami-module-head .yami-module-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.yami-module-head .yami-panel-title {
+  margin: 0;
 }
 
 /* Sessions */

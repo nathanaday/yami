@@ -14,6 +14,7 @@ export { ObsidianConversations } from "./conversation/obsidian-conversations.js"
 export { type PermissionContext, PermissionPrompts } from "./prompts/permission-modal.js";
 export { type QuestionForm, renderQuestions } from "./prompts/question-form.js";
 export { folderColorRules, showFolderColors } from "./colors.js";
+export { checkModuleIcons, moduleIcon } from "./icons.js";
 export { ObsidianVault } from "./vault.js";
 export { createYami, HARNESS_COLORS, IDLE_MINUTES, ObsidianYami, type AgentEntry, type CommandGroup, type YamiPluginOptions } from "./yami.js";
 export { WikiCompareModal } from "./wiki/compare-modal.js";

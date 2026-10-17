@@ -150,6 +150,7 @@ export class WikiModule extends YamiModule {
   readonly description = "The knowledge base of the vault: topics cited to sources, changed through plans, with a version for each change.";
   readonly sessionsIn = "internal";
   readonly color = WIKI_COLOR;
+  readonly icon = "book-open";
   readonly schema: Schema = {
     /** The source notes this session absorbs. */
     sources: { type: "links", default: [] },

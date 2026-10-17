@@ -27,6 +27,7 @@ export interface Edition {
 export class Journals extends YamiModule {
   readonly id = "journals";
   readonly name = "Journals";
+  readonly icon = "notebook-pen";
   readonly description = `The user's own writing, one volume per folder of ${JOURNALS}/. Publishing a volume captures its new and changed notes as sources and starts a wiki ingest session, an edition.`;
   readonly sessionsIn = "none";
 

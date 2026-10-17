@@ -32,6 +32,7 @@ const thread: Check = async (_promise, context) => {
 export class Threads extends YamiModule {
   readonly id = "threads";
   readonly name = "Threads";
+  readonly icon = "spool";
   readonly description =
     "Work on repositories as threads: the idea, a spec with checkable requirements, a plan, validation rounds by a fresh read-only agent, and the outcome, in one document each.";
   readonly schema: Schema = {

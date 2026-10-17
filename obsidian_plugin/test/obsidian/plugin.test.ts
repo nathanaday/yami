@@ -442,6 +442,64 @@ describe("Yami in Obsidian", () => {
     expect(colors.shown).toEqual(colors.expected.map(rgb));
   });
 
+  it("shows each module in the panel with its icon and its sessions in a line, and gives its commands the icon", async () => {
+    await run("yami:open-panel");
+    await page().waitForSelector(".yami-panel .yami-module-row");
+    const rows = () =>
+      page().$$eval(".yami-panel .yami-module-row", (els) =>
+        els.map((el) => ({
+          key: el.getAttribute("data-key"),
+          icon: [...(el.querySelector(".yami-module-icon svg")?.classList ?? [])].find((c) => c.startsWith("lucide-")),
+          line: el.querySelector(".yami-row-sub")?.textContent,
+          badge: el.querySelector(".yami-badge")?.textContent ?? null,
+          label: el.getAttribute("aria-label"),
+        })),
+      );
+    const icons = Object.fromEntries((await rows()).map((r) => [r.key, r.icon]));
+    expect(icons).toEqual({ "module:wiki": "lucide-book-open", "module:hello": "lucide-hand", "module:threads": "lucide-spool", "module:librarian": "lucide-library", "module:journals": "lucide-notebook-pen" });
+    expect(await page().$$(".yami-panel .yami-row-desc")).toHaveLength(0);
+    expect((await rows()).find((r) => r.key === "module:journals")).toMatchObject({ line: "Publish a volume", badge: null });
+
+    // A session that needs attention is the badge. The line leaves it out, unless it is all there is; the label says every count.
+    const create = (name: string, state?: string) =>
+      page().evaluate(
+        async ([name, state]) => {
+          const app = (window as any).app;
+          const session = await app.plugins.plugins.yami.yami.module("hello").greet.create({ name });
+          if (state) await app.fileManager.processFrontMatter(app.vault.getFileByPath(session.path), (fm: any) => (fm.state = state));
+          return session.path as string;
+        },
+        [name, state] as const,
+      );
+    const hello = async () => (await rows()).find((r) => r.key === "module:hello")!;
+    const waiting = await create("Waiting greeting", "needs-attention");
+    await page().waitForSelector('.yami-panel [data-key="module:hello"] .yami-badge');
+    expect(await hello()).toMatchObject({ badge: "1", line: "1 needs attention", label: "Hello world: 1 needs attention" });
+    const fresh = await create("Fresh greeting");
+    await page().waitForFunction(() => document.querySelector('.yami-panel [data-key="module:hello"] .yami-row-sub')?.textContent === "1 not started");
+    expect(await hello()).toMatchObject({ badge: "1", label: "Hello world: 1 needs attention · 1 not started" });
+    await page().evaluate((paths) => Promise.all(paths.map((p) => (window as any).app.vault.delete((window as any).app.vault.getFileByPath(p)))), [waiting, fresh]);
+    await page().waitForSelector('.yami-panel [data-key="module:hello"]:not(:has(.yami-badge))');
+
+    // An icon that Obsidian does not have shows the default instead of nothing.
+    const fallback = await page().evaluate(async () => {
+      const app = (window as any).app;
+      const threads = app.plugins.plugins.yami.yami.module("threads");
+      threads.icon = "not-an-icon";
+      app.workspace.getLeavesOfType("yami-panel")[0].view.go({ level: "modules" });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      threads.icon = "spool";
+      return document.querySelector('.yami-panel [data-key="module:threads"] .yami-module-icon svg')?.classList.contains("lucide-box");
+    });
+    expect(fallback).toBe(true);
+
+    const commandIcons = await page().evaluate(() => {
+      const commands = (window as any).app.commands.commands;
+      return ["hello-new-greeting", "librarian-return", "journals-publish", "wiki-ingest-file"].map((id) => commands[`yami:${id}`]?.icon);
+    });
+    expect(commandIcons).toEqual(["hand", "library", "notebook-pen", undefined]);
+  });
+
   it("shows the modules, a module's sessions, and a session in the panel, and runs the session from it", { timeout: TIMEOUT }, async () => {
     await run("yami:open-panel");
     await page().waitForSelector(".yami-panel .yami-module-row");

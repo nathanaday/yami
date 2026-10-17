@@ -4,6 +4,7 @@ export { Yami, type IngestOptions, type SessionListener, type YamiOptions } from
 export {
   checkName,
   INTERNAL,
+  MODULE_ICON,
   ModuleDocument,
   moduleSkills,
   safeName,

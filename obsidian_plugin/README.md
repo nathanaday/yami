@@ -30,14 +30,14 @@ The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conver
 
 Each module is a folder in `src/modules/`: the class in `index.ts`, and its skills, policies, promises, and agents as markdown files beside it, which the build imports as text. When the plugin loads, each module writes the files that are missing under `internal/<module>/`. Files that exist stay as they are, so you can edit them in the vault.
 
-In the file explorer, each module's folder has the module's color, its folder under `internal/` the same color muted, and `internal/` is gray. The wiki is cyan. The librarian sets its color, `#a0522d`, with `readonly color`; the other modules take a basic color by their id.
+In the file explorer, each module's folder has the module's color, its folder under `internal/` the same color muted, and `internal/` is gray. The wiki is cyan. The librarian sets its color, `#a0522d`, with `readonly color`; the other modules take a basic color by their id. Each module sets its icon, a Lucide name, with `readonly icon`: the panel shows it, and the module's commands carry it.
 
-| Module | Folder | Templates | Actions |
-| --- | --- | --- | --- |
-| Hello world | `hello/` | Greeting | |
-| Threads | `threads/` | Thread (planted by `/threads:stub`) | |
-| Librarian | `librarian/` | Checkout | Return this checkout |
-| Journals | none | | Publish a volume |
+| Module | Icon | Folder | Templates | Actions |
+| --- | --- | --- | --- | --- |
+| Hello world | `hand` | `hello/` | Greeting | |
+| Threads | `spool` | `threads/` | Thread (planted by `/threads:stub`) | |
+| Librarian | `library` | `librarian/` | Checkout | Return this checkout |
+| Journals | `notebook-pen` | none | | Publish a volume |
 
 To add a module, write its folder and add an instance to `modules` in `src/main.ts`. Its commands appear on the next load: one for each template, **<Module>: new <template>**, and one for each action. Its tools and skills reach every agent. Test it in `test/unit/` with `testYami` from `yami/testing`.
 
@@ -45,8 +45,8 @@ To add a module, write its folder and add an instance to `modules` in `src/main.
 
 **Open the Yami panel**, from the ribbon or the command palette, shows a panel in the right sidebar:
 
-- **Modules**: each module with its color and a count of its sessions by status. Sessions that work now are at the top.
-- **A module**: a button for each of its templates, such as **New greeting**, its actions, such as **Publish a volume**, and its sessions, newest first. A session's mark shows its status: a hollow circle before its first run, a turning arc while the agent works, a filled circle when done, a diamond when it needs attention, a cross when it failed, and a square when stopped. A row's button runs or stops the session.
+- **Modules**: each module with its icon in its color, and a line that counts its sessions by status. A badge counts the sessions that need attention. Sessions that work now are at the top.
+- **A module**: its description, a button for each of its templates, such as **New greeting**, its actions, such as **Publish a volume**, and its sessions, newest first. A session's mark shows its status: a hollow circle before its first run, a turning arc while the agent works, a filled circle when done, a diamond when it needs attention, a cross when it failed, and a square when stopped. A row's button runs or stops the session.
 - **A session**: its status, its acts as buttons (**Run with Claude**, **Resume**, **Stop**, **Return this checkout**), its promises with whether the last check met them, its policies, skills, and articles, its conversation, and its progress. Click a document to open it; Cmd-click opens it in a new tab.
 
 Backspace goes up a level. The panel follows the vault: a session that an agent creates, a run that starts, and a promise that is met show at once. The panel is the plugin's own code, `src/panel/`, over the library's read API.

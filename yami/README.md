@@ -154,6 +154,7 @@ A module is a subclass of `YamiModule`. Its fields declare it, and builders in i
 | `instructions` | Text added to the first prompt of each run. |
 | `checks` | Checks that the module's promises can name, ahead of the core checks of the same name. A check gets the vault, the wiki, the session's `path`, and its properties. |
 | `color` | The color of the module's folder, as a hex code such as `#3e63dd`. Without one, the module takes a color of `MODULE_COLORS` chosen by its id, the same on every start, and one that no other module has while one is free. `module.colors` gives the folder's color and the internal folder's, which is the color muted halfway toward the gray of `internal/` (`mute`). The wiki is cyan, `WIKI_COLOR`. |
+| `icon` | The name of the module's icon in the host's icon set: in Obsidian, a Lucide icon such as `book-open`, or one that the plugin adds with `addIcon` before `createYami`. Default `MODULE_ICON`, `box`. The wiki is `book-open`. |
 
 | Builder | Makes |
 | --- | --- |
@@ -492,7 +493,7 @@ The Obsidian layer. It holds what needs the Obsidian API: `createYami`, the vaul
 | `statusBar` | `true` | A status bar item that says which agents work. |
 | `folderColors` | `true` | Each module's folder in the module's color in the file explorer, its internal folder muted, and `internal/` gray (`INTERNAL_COLOR`). `folderColorRules(yami)` gives the CSS. |
 
-It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations, and removes the shared-document hub.
+It gives each module's commands the module's icon, and warns in the console of a module whose icon Obsidian does not have. It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations, and removes the shared-document hub.
 
 `ObsidianYami` adds what a plugin's own commands and views need:
 
@@ -500,6 +501,7 @@ It enables the modules when the workspace is ready, shows a notice when one fail
 - `onSessionsChange(listener)`: a call when the sessions may look different, after a session document or a module's document changes, or a run changes its status. Close calls become one. `onWikiChange(listener)`: a call when a note that the wiki holds, or would hold, changes, for a view of the wiki. A change to a note the index leaves out, such as a conversation, makes no call.
 - `newSession(template)`: creates a session, opens it, and says so. `runAction(action, session?)`: does a module's action, and first lets the person pick when it has choices. `runModuleAct(act)`: does an act of `module.acts()`.
 - `open(path, mode)`; `pick(items, label, placeholder)`, a list to pick one from; and `notify(work)`, which shows the message of a promise, opens the note it names, shows an error in a notice, and resolves when it has.
+- `moduleIcon(module)`, the name of the module's icon, or `MODULE_ICON` when Obsidian does not have it, for `setIcon`.
 - `agentName(agent)`, the name the agent is registered under; `hub` and `conversations`, the shared documents and the conversation notes, for other plugins.
 
 The plugin must ship `yami/obsidian/styles.css` as the `styles.css` next to its `main.js`; `copyStyles` in `yami/esbuild` copies it.

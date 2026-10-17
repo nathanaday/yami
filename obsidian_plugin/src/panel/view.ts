@@ -1,7 +1,7 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
 import { LINKED_KINDS, STATUS_LABELS, type LinkedKind, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
 import { basename } from "yami/document";
-import { modeOf, type ObsidianYami } from "yami/obsidian";
+import { modeOf, moduleIcon, type ObsidianYami } from "yami/obsidian";
 import * as ui from "../ui";
 
 export const PANEL_VIEW = "yami-panel";
@@ -149,31 +149,27 @@ export class YamiPanel extends ItemView {
 
     const list = page.createDiv({ cls: "yami-module-list" });
     for (const module of this.yami.modules) {
+      const mine = summaries.filter((s) => s.module === module);
+      // The badge counts the sessions that wait for the person, so the line under the name leaves them out.
+      const waiting = mine.filter((s) => s.status === "needs-attention").length;
       const row = ui.row(list, `module:${module.id}`, () => this.go({ level: "module", module: module.id }));
       row.addClass("yami-module-row");
+      row.setAttribute("aria-label", `${module.name}: ${moduleLine(module, mine, COUNT_ORDER)}`);
       row.style.setProperty("--yami-module-color", module.colors.folder);
+      setIcon(row.createSpan({ cls: "yami-module-icon" }), moduleIcon(module));
       const text = row.createDiv({ cls: "yami-row-text" });
-      const head = text.createDiv({ cls: "yami-row-head" });
-      head.createDiv({ cls: "yami-row-name", text: module.name });
-      const counts = head.createDiv({ cls: "yami-counts" });
-      const mine = summaries.filter((s) => s.module === module);
-      for (const status of COUNT_ORDER) {
-        const n = mine.filter((s) => s.status === status).length;
-        if (!n) continue;
-        const count = counts.createSpan({ cls: "yami-count", attr: { role: "img", "aria-label": `${n} ${STATUS_LABELS[status].toLowerCase()}` } });
-        const shape = mark(count, status);
-        shape.removeAttribute("role");
-        shape.removeAttribute("aria-label");
-        shape.setAttribute("aria-hidden", "true");
-        count.createSpan({ text: `${n}`, attr: { "aria-hidden": "true" } });
-      }
-      if (module.description) text.createDiv({ cls: "yami-row-desc", text: module.description });
+      text.createDiv({ cls: "yami-row-name", text: module.name });
+      text.createDiv({ cls: "yami-row-sub", text: moduleLine(module, mine, waiting ? COUNT_ORDER.filter((s) => s !== "needs-attention") : COUNT_ORDER) });
+      if (waiting) row.createSpan({ cls: "yami-badge", text: `${waiting}`, attr: { title: counts(mine, ["needs-attention"]), "aria-hidden": "true" } });
+      setIcon(row.createSpan({ cls: "yami-row-chevron" }), "chevron-right");
     }
   }
 
   private async drawModule(page: HTMLElement, module: YamiModule): Promise<void> {
     this.breadcrumb(page, [module.name]);
-    page.createEl("h2", { cls: "yami-panel-title", text: module.name });
+    const head = page.createDiv({ cls: "yami-module-head" });
+    setIcon(head.createSpan({ cls: "yami-module-icon" }), moduleIcon(module));
+    head.createEl("h2", { cls: "yami-panel-title", text: module.name });
     if (module.description) page.createEl("p", { cls: "yami-panel-lede", text: module.description });
 
     const bar = page.createDiv({ cls: "yami-actions" });
@@ -322,6 +318,26 @@ function depth(place: Place): number {
 /** The status as a shape: hollow before a run, turning while it works, filled when done, and a sign of its own for each other end. */
 function mark(parent: HTMLElement, status: SessionStatus): HTMLElement {
   return parent.createSpan({ cls: "yami-mark", attr: { "data-status": status, role: "img", "aria-label": STATUS_LABELS[status] } });
+}
+
+/**
+ * A module's line in the list: its sessions of the given statuses, counted, or of every status when none of
+ * those has one; for a module that keeps no sessions, what a person can do with it.
+ */
+function moduleLine(module: YamiModule, sessions: SessionSummary[], statuses: SessionStatus[]): string {
+  if (module.sessionsIn === "none") return module.acts().map((act) => act.label).join(" · ") || "No sessions";
+  if (!sessions.length) return "No sessions yet";
+  return counts(sessions, statuses) || counts(sessions, COUNT_ORDER);
+}
+
+/** The sessions of each status, in the order given, as a person says them: `1 working · 4 done`. */
+function counts(sessions: SessionSummary[], statuses: SessionStatus[]): string {
+  return statuses
+    .flatMap((status) => {
+      const n = sessions.filter((s) => s.status === status).length;
+      return n ? [`${n} ${STATUS_LABELS[status].toLowerCase()}`] : [];
+    })
+    .join(" · ");
 }
 
 function actIcon(act: SessionAct): string | undefined {

@@ -11,6 +11,8 @@ import type { Yami } from "./yami.js";
 
 export const VAULT_LEDGER = "Yami.base";
 export const INTERNAL = "internal";
+/** The icon of a module that names none. */
+export const MODULE_ICON = "box";
 
 export type LinkedKind = "articles" | "policies" | "promises" | "skills";
 export type DocumentKind = "policy" | "promise" | "skill" | "article" | "agent";
@@ -267,6 +269,11 @@ export abstract class YamiModule {
    * Yami has while one is free.
    */
   readonly color?: string;
+  /**
+   * The name of the module's icon in the host's icon set: in Obsidian, a Lucide icon such as `book-open`, or
+   * one that the plugin adds with `addIcon`. Default `MODULE_ICON`.
+   */
+  readonly icon: string = MODULE_ICON;
 
   /** Every document of the module, in the order the builders made them. */
   readonly documents: ModuleDocument[] = [];

@@ -7,6 +7,7 @@ import greeting from "./skills/greeting/SKILL.md";
 export class Hello extends YamiModule {
   readonly id = "hello";
   readonly name = "Hello world";
+  readonly icon = "hand";
   readonly description = "Says hello, and writes the greeting to a note in the vault.";
   readonly schema: Schema = { greeting: { type: "text", default: "Hello" } };
 
