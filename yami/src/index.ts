@@ -17,13 +17,25 @@ export {
   type DocumentKind,
   type Layout,
   type LinkedKind,
+  type ModuleAct,
   type ModuleAction,
   type Place,
   type PlainAction,
   type SessionAction,
   type TemplateOptions,
 } from "./module/module.js";
-export { Session, type NewSession, type RunOptions, type SessionStatus } from "./module/session.js";
+export {
+  Session,
+  STATUS_LABELS,
+  type NewSession,
+  type RunOptions,
+  type SessionAct,
+  type SessionDetails,
+  type SessionDocument,
+  type SessionStatus,
+  type SessionSummary,
+} from "./module/session.js";
+export { LINKED_KINDS, type LinkedDocument } from "./module/links.js";
 export { assignColors, hexColor, INTERNAL_COLOR, MODULE_COLORS, mute, WIKI_COLOR, type ModuleColors } from "./module/colors.js";
 export type { RunResult } from "./module/run.js";
 export { checks, expand, runCheck, type Check, type CheckContext, type CheckResult } from "./module/checks.js";

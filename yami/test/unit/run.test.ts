@@ -387,3 +387,38 @@ describe("what review found", () => {
     expect(() => new Yami({ vault: t!.vault, modules: [new Bad()] })).toThrow("The bad module's schema holds iteration");
   });
 });
+
+describe("a note whose properties do not parse", () => {
+  const broken = "---\ndescription: Fix a scroll stop: the editor counted as out of view.\n---\nAn old note.\n";
+
+  it("anywhere in the vault, does not fail a session that never links it", async () => {
+    const { session, vault, agent, path } = await fresh("unrelated");
+    await vault.write("tool/sessions/old.md", broken);
+    agent.queue(write("unrelated"));
+    expect(await session.start()).toMatchObject({ state: "done", iterations: 1 });
+    expect(await vault.read(path)).toContain("iteration 1: 1 met, 0 unmet");
+  });
+
+  it("linked by a session, leaves its promise unmet and names the note, instead of failing the run", async () => {
+    class Reads extends Hello {
+      readonly id = "reads";
+      readonly checked = this.promise("Notes checked", "Every linked note is checked.", { check: "property", field: "notes", name: "checked", value: true });
+      readonly read = this.template({ id: "read", name: "Read", promises: [this.checked], maxIterations: 1 });
+      readonly schema = { notes: { type: "links" as const, default: [] } };
+    }
+    const reads = new Reads();
+    t = await testYami({ modules: [reads] });
+    await t.vault.write("notes/Broken.md", broken);
+    const session = await reads.read.create({ name: "r", fields: { notes: ["[[notes/Broken]]"] } });
+    expect(await session.start()).toMatchObject({ state: "needs-attention" });
+    const doc = await t.vault.read(session.path);
+    expect(doc).toContain("the check could not finish: The properties of notes/Broken.md do not parse: Nested mappings are not allowed in compact mappings");
+  });
+
+  it("keeps a progress line on one line, whatever the error holds", async () => {
+    const { session, vault, path } = await fresh("lines", new Hello(), [() => ({ status: "failed", error: "first line\n\n   second line\n   ^" })]);
+    await session.start();
+    const progress = (await vault.read(path)).split("## Progress\n")[1]!;
+    expect(progress).toMatch(/^- \d\d:\d\d iteration 1: turn failed: first line second line \^\n$/);
+  });
+});

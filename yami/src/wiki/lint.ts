@@ -20,7 +20,7 @@ export interface LintOptions {
 /** The typed notes the wiki maintains, and that lint holds to their form. */
 const KNOWLEDGE = new Set(["topic", "source"]);
 
-/** The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, and orphans. */
+/** The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions, uncited sources, and orphans. */
 export function lint(wiki: Wiki, options: LintOptions = {}): Finding[] {
   const findings: Finding[] = [];
   const add = (note: Note, check: string, severity: Finding["severity"], message: string, fix: string) =>
@@ -38,6 +38,7 @@ export function lint(wiki: Wiki, options: LintOptions = {}): Finding[] {
   }
 
   for (const note of selected) {
+    if (note.problem) add(note, "bad-properties", "error", `its properties do not parse: ${note.problem}`, "fix the properties between the --- lines; put quotes around a value that holds \": \"");
     for (const target of note.unresolved) add(note, "dead-link", "error", `links [[${target}]], which is not a note`, "fix the link, or create the note");
     const others = new Set<string>();
     for (const name of [note.name, ...note.aliases]) {

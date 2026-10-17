@@ -157,6 +157,11 @@ export class SessionTemplate {
     this.command = options.command ?? true;
   }
 
+  /** What a button or a command that creates a session from the template says: `New checkout` for the template "Checkout". */
+  get label(): string {
+    return `New ${/^\p{Lu}\p{Ll}/u.test(this.name) ? this.name.charAt(0).toLowerCase() + this.name.slice(1) : this.name}`;
+  }
+
   /** The documents that a new session links, by the session field that holds them. */
   links(): Record<LinkedKind, ModuleDocument[]> {
     return { skills: this.skills, policies: this.policies, promises: this.promises, articles: this.articles };
@@ -211,6 +216,12 @@ export interface PlainAction extends ActionBase {
  * code; a host such as the Obsidian layer offers each action as a command.
  */
 export type ModuleAction = SessionAction | ChoiceAction<any> | PlainAction;
+
+/**
+ * Something a person can do with a module itself: create a session from a template that offers it, or an
+ * action on no session. The host does it: a new session opens, and an action with choices asks first.
+ */
+export type ModuleAct = { kind: "new"; label: string; template: SessionTemplate } | { kind: "action"; label: string; action: ChoiceAction<any> | PlainAction };
 
 /**
  * One agent workflow in the vault. A subclass declares the module's documents, its session templates, its
@@ -301,6 +312,15 @@ export abstract class YamiModule {
       },
       agents: `${internal}/agents`,
     };
+  }
+
+  /** What a person can do with the module itself: a new session from each template that offers one, then each action on no session. */
+  acts(): ModuleAct[] {
+    const templates = this.sessionsIn === "none" ? [] : this.templates.filter((t) => t.command);
+    return [
+      ...templates.map((template): ModuleAct => ({ kind: "new", label: template.label, template })),
+      ...this.actions.filter((a): a is ChoiceAction<any> | PlainAction => !("on" in a)).map((action): ModuleAct => ({ kind: "action", label: action.name, action })),
+    ];
   }
 
   /** The tools that every agent of the vault gets, named `<module id>_<tool name>`. They run in the host. */

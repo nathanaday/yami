@@ -1,9 +1,9 @@
-import { MarkdownView, Notice, type App, type Plugin, type TFile } from "obsidian";
+import { MarkdownView, Notice, type App, type Plugin, type TAbstractFile, type TFile } from "obsidian";
 import type { Agent } from "../agent/agent.js";
 import type { Harness } from "../agent/types.js";
 import { CONVERSATION_FOLDER } from "../conversation/conversations.js";
 import { basename } from "../document/document.js";
-import { SessionTemplate, type ActionResult, type YamiModule } from "../module/module.js";
+import { SessionTemplate, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
 import type { Session } from "../module/session.js";
 import { Yami } from "../module/yami.js";
 import type { WikiOptions } from "../wiki/wiki.js";
@@ -70,6 +70,8 @@ export class ObsidianYami extends Yami {
   /** The agents with their names and colors, as conversations show them. */
   readonly registered: ConversationAgent[];
   #status: HTMLElement | undefined;
+  readonly #changeListeners = new Set<() => void>();
+  #changeTimer: number | undefined;
 
   constructor(plugin: Plugin, options: YamiPluginOptions) {
     const app = plugin.app;
@@ -110,6 +112,16 @@ export class ObsidianYami extends Yami {
 
     conversations.install(plugin);
     watchWiki(app, plugin, this.wiki);
+    const watch = (file: TAbstractFile, old?: string) => {
+      if (this.concernsSessions(file.path) || (old && this.concernsSessions(old))) this.sessionsChanged();
+    };
+    plugin.registerEvent(app.vault.on("create", watch));
+    plugin.registerEvent(app.vault.on("modify", watch));
+    plugin.registerEvent(app.vault.on("delete", watch));
+    plugin.registerEvent(app.vault.on("rename", watch));
+    plugin.registerEvent(app.metadataCache.on("changed", (file) => watch(file)));
+    this.onSession(() => this.sessionsChanged());
+    plugin.register(() => window.clearTimeout(this.#changeTimer));
     app.workspace.onLayoutReady(() =>
       this.enable().catch((error: Error) => {
         console.error(error);
@@ -136,6 +148,66 @@ export class ObsidianYami extends Yami {
       this.#status.addClass("yami-status");
       this.onSession(() => this.updateStatus());
     }
+  }
+
+  /** The name the agent is registered under. */
+  agentName(agent: Agent): string {
+    return this.registered.find((r) => r.agent === agent)?.name ?? agent.harness;
+  }
+
+  /**
+   * Calls the listener when the sessions may look different: a session document or a module's document is
+   * created, changed, renamed, or removed, or a run changes its status. Calls that come close together
+   * become one, a moment after the last. Returns the function that stops it.
+   */
+  onSessionsChange(listener: () => void): () => void {
+    this.#changeListeners.add(listener);
+    return () => this.#changeListeners.delete(listener);
+  }
+
+  private sessionsChanged(): void {
+    window.clearTimeout(this.#changeTimer);
+    this.#changeTimer = window.setTimeout(() => {
+      for (const listener of [...this.#changeListeners]) {
+        try {
+          listener();
+        } catch (error) {
+          console.error("yami: sessions listener threw", error);
+        }
+      }
+    }, 150);
+  }
+
+  /** Whether a path is a session document, or a document of a module. */
+  private concernsSessions(path: string): boolean {
+    return this.modules.some((module) => [module.layout.sessions, module.layout.internal].some((folder) => path.startsWith(`${folder}/`)));
+  }
+
+  /** Does an act of a module: creates the session of a `new` act and opens it, or does the action. */
+  runModuleAct(act: ModuleAct): Promise<void> {
+    return act.kind === "new" ? this.newSession(act.template) : this.runAction(act.action);
+  }
+
+  /** Creates a session from a template, opens it, and says so. */
+  newSession(template: SessionTemplate): Promise<void> {
+    return this.notify(template.create().then((session) => ({ message: `Created ${session.path}.`, open: session.path })));
+  }
+
+  /**
+   * Does an action of a module, and shows what it reports: an action on a session does it on the one given;
+   * an action with choices first lets the person pick one.
+   */
+  runAction(action: ModuleAction, session?: Session): Promise<void> {
+    if ("on" in action) return session ? this.notify(action.run(session)) : Promise.resolve();
+    if (!("choose" in action)) return this.notify(action.run());
+    const choose = action.choose;
+    return this.notify(
+      choose.items().then(async (items) => {
+        if (!items.length) return choose.empty ?? "There is nothing to choose.";
+        const choice = await this.pick(items, choose.label, choose.placeholder);
+        return choice === undefined ? undefined : action.run(choice);
+      }),
+    );
   }
 
   /** The agent registered under a name: conversation notes name their agent so. */
@@ -183,9 +255,9 @@ export class ObsidianYami extends Yami {
     return pickOne(this.app, items, label, placeholder);
   }
 
-  /** Shows what a piece of work reports when it ends: its message in a notice, and the note it names, opened. An error shows in a notice too. */
-  notify(work: Promise<ActionResult>): void {
-    work.then(
+  /** Shows what a piece of work reports when it ends: its message in a notice, and the note it names, opened. An error shows in a notice too. Resolves when the notice shows. */
+  notify(work: Promise<ActionResult>): Promise<void> {
+    return work.then(
       async (result) => {
         const { message, open } = typeof result === "object" ? result : { message: result || undefined, open: undefined };
         if (open) await this.open(open);

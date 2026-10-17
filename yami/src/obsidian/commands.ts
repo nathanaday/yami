@@ -1,6 +1,7 @@
 import { Notice } from "obsidian";
 import { basename } from "../document/document.js";
-import type { ChoiceAction, ModuleAction, SessionAction } from "../module/module.js";
+import type { Agent } from "../agent/agent.js";
+import type { SessionAct } from "../module/session.js";
 import { WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
 import type { ConversationAgent } from "./agents.js";
 import { WikiCompareModal } from "./wiki/compare-modal.js";
@@ -9,12 +10,11 @@ import { WikiSearchModal } from "./wiki/search-modal.js";
 import type { ObsidianYami } from "./yami.js";
 
 const title = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
-const lowerFirst = (name: string) => (/^\p{Lu}\p{Ll}/u.test(name) ? name.charAt(0).toLowerCase() + name.slice(1) : name);
 
 /** New conversation with each agent, and the commands of an open conversation. */
 export function addConversationCommands(yami: ObsidianYami): void {
   const { plugin, conversations } = yami;
-  const start = (agent: ConversationAgent) => yami.notify(conversations.create(agent).then((file) => `Opened ${file.path}.`));
+  const start = (agent: ConversationAgent) => void yami.notify(conversations.create(agent).then((file) => `Opened ${file.path}.`));
   plugin.addRibbonIcon("message-square-plus", "New conversation", () => start(yami.registered[0]!));
   for (const registered of yami.registered) {
     plugin.addCommand({ id: `new-conversation-${registered.name}`, name: `New conversation with ${registered.name}`, callback: () => start(registered) });
@@ -64,99 +64,62 @@ export function addConversationCommands(yami: ObsidianYami): void {
   });
 }
 
-/** Run, resume, stop, and kill the session open in the editor. */
+/** Run, resume, stop, and kill the session open in the editor. The session's acts decide when each command applies. */
 export function addSessionCommands(yami: ObsidianYami): void {
-  const { plugin } = yami;
-  for (const registered of yami.registered) {
-    plugin.addCommand({
-      id: `run-session-${registered.name}`,
-      name: `Run this session with ${title(registered.name)}`,
+  /** The act of a kind on the session open in the editor, when it applies now. */
+  const act = (kind: SessionAct["kind"], agent?: Agent): SessionAct | undefined => {
+    const session = yami.activeSession();
+    return session?.acts(yami.properties(session.path)).find((a) => a.kind === kind && (!agent || a.agent === agent));
+  };
+  const add = (id: string, name: string, kind: SessionAct["kind"], agent?: Agent, before?: () => void) =>
+    yami.plugin.addCommand({
+      id,
+      name,
       checkCallback: (checking) => {
-        const session = yami.activeSession();
-        if (!session || session.running) return false;
+        const found = act(kind, agent);
+        if (!found) return false;
         if (!checking) {
-          new Notice(`Running ${basename(session.path)} with ${registered.name}…`);
-          yami.notify(session.start({ agent: registered.agent }).then((r) => `${basename(r.path)}: ${r.state} after ${r.iterations} iteration(s).`));
+          before?.();
+          void yami.notify(found.run());
         }
         return true;
       },
     });
+  for (const registered of yami.registered) {
+    add(`run-session-${registered.name}`, `Run this session with ${title(registered.name)}`, "start", registered.agent, () => {
+      const session = yami.activeSession();
+      if (session) new Notice(`Running ${basename(session.path)} with ${registered.name}…`);
+    });
   }
-  plugin.addCommand({
-    id: "resume-session",
-    name: "Resume this session",
-    checkCallback: (checking) => {
-      const session = yami.activeSession();
-      if (!session || session.running || !yami.properties(session.path).conversation) return false;
-      if (!checking) yami.notify(session.resume().then((r) => `${basename(r.path)}: ${r.state} after ${r.iterations} more iteration(s).`));
-      return true;
-    },
-  });
-  plugin.addCommand({
-    id: "stop-session",
-    name: "Stop this session",
-    checkCallback: (checking) => {
-      const session = yami.activeSession();
-      if (!session?.running) return false;
-      if (!checking) yami.notify(session.stop().then(() => `Stopped ${basename(session.path)}. Resume it to go on.`));
-      return true;
-    },
-  });
-  plugin.addCommand({
-    id: "kill-session",
-    name: "Kill this session's agent",
-    checkCallback: (checking) => {
-      const session = yami.activeSession();
-      if (!session?.running) return false;
-      if (!checking) yami.notify(session.kill().then(() => `Killed the agent of ${basename(session.path)}. Resume the session to go on.`));
-      return true;
-    },
-  });
+  add("resume-session", "Resume this session", "resume");
+  add("stop-session", "Stop this session", "stop");
+  add("kill-session", "Kill this session's agent", "kill");
 }
 
-/** For each module: a command that creates a session from each template, and one for each action. */
+/** For each module: a command for each of its acts (a new session, an action on no session), and one for each action on a session. */
 export function addModuleCommands(yami: ObsidianYami): void {
   for (const module of yami.modules) {
-    for (const template of module.templates.filter((t) => t.command && module.sessionsIn !== "none")) {
+    for (const act of module.acts()) {
       yami.plugin.addCommand({
-        id: `${module.id}-new-${template.id}`,
-        name: `${module.name}: new ${lowerFirst(template.name)}`,
-        callback: () => yami.notify(template.create().then((session) => ({ message: `Created ${session.path}.`, open: session.path }))),
+        id: act.kind === "new" ? `${module.id}-new-${act.template.id}` : `${module.id}-${act.action.id}`,
+        name: `${module.name}: ${act.kind === "new" ? `${act.label.charAt(0).toLowerCase()}${act.label.slice(1)}` : act.label}`,
+        callback: () => void yami.runModuleAct(act),
       });
     }
-    for (const action of module.actions) addAction(yami, `${module.id}-${action.id}`, `${module.name}: ${action.name}`, action);
-  }
-}
-
-function addAction(yami: ObsidianYami, id: string, name: string, action: ModuleAction): void {
-  if ("on" in action) {
-    const act = action as SessionAction;
-    yami.plugin.addCommand({
-      id,
-      name,
-      checkCallback: (checking) => {
-        const session = yami.activeSession(act.on);
-        if (!session || session.running || (act.when && !act.when(yami.properties(session.path)))) return false;
-        if (!checking) yami.notify(act.run(session));
-        return true;
-      },
-    });
-  } else if ("choose" in action) {
-    const act = action as ChoiceAction<unknown>;
-    yami.plugin.addCommand({
-      id,
-      name,
-      callback: () =>
-        yami.notify(
-          act.choose.items().then(async (items) => {
-            if (!items.length) return act.choose.empty ?? "There is nothing to choose.";
-            const choice = await yami.pick(items, act.choose.label, act.choose.placeholder);
-            return choice === undefined ? undefined : act.run(choice);
-          }),
-        ),
-    });
-  } else {
-    yami.plugin.addCommand({ id, name, callback: () => yami.notify(action.run()) });
+    for (const action of module.actions) {
+      if (!("on" in action)) continue;
+      yami.plugin.addCommand({
+        id: `${module.id}-${action.id}`,
+        name: `${module.name}: ${action.name}`,
+        checkCallback: (checking) => {
+          const session = yami.activeSession(action.on);
+          const act = session?.acts(yami.properties(session.path)).find((a) => a.action === action);
+          if (!act) return false;
+          if (!checking) void yami.notify(act.run());
+          return true;
+        },
+      });
+    }
   }
 }
 

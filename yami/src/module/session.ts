@@ -1,9 +1,10 @@
 import type { Agent } from "../agent/agent.js";
 import type { Harness } from "../agent/types.js";
-import { linksOf, readDocument, resolveLink, type Document } from "../document/document.js";
+import { basename, linksOf, readDocument, resolveLink, sectionText, type Document } from "../document/document.js";
 import { SESSION_STATES, type SessionState } from "../document/schema.js";
 import type { Properties } from "../document/vault.js";
-import type { ModuleDocument, SessionTemplate, YamiModule } from "./module.js";
+import { linkedDocuments, type LinkedDocument } from "./links.js";
+import type { ActionResult, ModuleDocument, SessionAction, SessionTemplate, YamiModule } from "./module.js";
 import { runSession, sessionParts, type RunControl, type RunResult } from "./run.js";
 import type { Yami } from "./yami.js";
 
@@ -13,6 +14,66 @@ import type { Yami } from "./yami.js";
  */
 export type SessionStatus = Exclude<SessionState, "running"> | "working" | "checking";
 
+/** How a person reads each status, in a list, a button, or a notice. */
+export const STATUS_LABELS: Record<SessionStatus, string> = {
+  open: "Not started",
+  working: "Working",
+  checking: "Checking",
+  done: "Done",
+  "needs-attention": "Needs attention",
+  failed: "Failed",
+  stopped: "Stopped",
+};
+
+/** A session at a glance: what a list of sessions shows. */
+export interface SessionSummary {
+  session: Session;
+  path: string;
+  /** The document's name. */
+  name: string;
+  module: YamiModule;
+  template: SessionTemplate | undefined;
+  status: SessionStatus;
+  /** When the session was created, as `YYYY-MM-DDTHH:MM:SS`. */
+  created: string | undefined;
+  /** The agent turns so far, over every run. */
+  iteration: number;
+  /** The promises met, and the promises not met or for review, at the last check. */
+  met: number;
+  unmet: number;
+  /** The document's properties: the core fields and the module's own. */
+  properties: Properties;
+}
+
+/** A linked document of a session. A promise also says whether the last check met it: undefined before any check. */
+export interface SessionDocument extends LinkedDocument {
+  met?: boolean;
+}
+
+/** All of a session: what a page about one session shows. */
+export interface SessionDetails extends SessionSummary {
+  /** The documents the session links: promises, policies, skills, then articles. */
+  documents: SessionDocument[];
+  /** The conversation note that records the runs, when one exists. */
+  conversation: string | undefined;
+  /** The harness of the last run. */
+  harness: string | undefined;
+  /** The lines of the Progress section, oldest first, each with its time. */
+  progress: { time: string; text: string }[];
+}
+
+/** Something a person can do with a session now. */
+export interface SessionAct {
+  kind: "start" | "resume" | "stop" | "kill" | "action";
+  /** What a button says, such as "Run with Claude". */
+  label: string;
+  /** The agent of a start. */
+  agent?: Agent;
+  /** The module's action, for the kind `action`. */
+  action?: SessionAction;
+  /** Does the act. Resolves when it ends, with what to tell the person. */
+  run(): Promise<ActionResult>;
+}
 export interface RunOptions {
   /** The agent that runs the session, or its harness. Default: the Yami's first agent. A resume takes the agent of the conversation it continues. */
   agent?: Agent | Harness;
@@ -75,10 +136,101 @@ export class Session {
    * live run reads as `stopped`: its run ended without recording its end, for example when the app quit.
    */
   async status(): Promise<SessionStatus> {
+    return this.#statusFrom((await this.read()).properties);
+  }
+
+  #statusFrom(properties: Properties): SessionStatus {
     if (this.#run) return this.#run.phase;
-    const state = (await this.read()).properties.state;
+    const state = properties.state;
     if (state === "running") return "stopped";
     return SESSION_STATES.includes(state as SessionState) ? (state as SessionStatus) : "open";
+  }
+
+  /**
+   * The session at a glance, from its document as read; `yami.summaries` reads each document once and
+   * calls it. A template the module does not have reads as none, so a document in the middle of an edit
+   * still shows.
+   */
+  summarize(doc: Document): SessionSummary {
+    const module = this.yami.module(String(doc.properties.module ?? ""));
+    if (doc.properties.type !== "session" || !module) throw new Error(`${doc.path} is not a session of a module of this Yami.`);
+    const template = module.templateOf(doc.properties.template);
+    const properties = doc.properties;
+    const iteration = Number(properties.iteration);
+    return {
+      session: this,
+      path: this.path,
+      name: basename(this.path),
+      module,
+      template,
+      status: this.#statusFrom(properties),
+      created: typeof properties.created === "string" ? properties.created : undefined,
+      iteration: Number.isFinite(iteration) && iteration > 0 ? Math.trunc(iteration) : 0,
+      met: linksOf(properties.met).length,
+      unmet: linksOf(properties.unmet).length,
+      properties,
+    };
+  }
+
+  /** All of the session: its summary, the documents it links with the paths they resolve to, its conversation, and its progress. */
+  async details(): Promise<SessionDetails> {
+    const doc = await this.read();
+    const summary = this.summarize(doc);
+    // The loop records each promise by its path, so a promise linked by its name still finds its mark.
+    const paths = async (field: string) => new Set(await Promise.all(linksOf(doc.properties[field]).map((target) => resolveLink(this.yami.vault, target, []))));
+    const met = await paths("met");
+    const unmet = await paths("unmet");
+    const documents = (await linkedDocuments(this.yami.vault, summary.module.layout, doc.properties)).map((d): SessionDocument =>
+      d.kind !== "promises" || !d.path ? d : { ...d, met: met.has(d.path) ? true : unmet.has(d.path) ? false : undefined },
+    );
+    const target = linksOf(doc.properties.conversation)[0];
+    const progress = sectionText(doc.body, "Progress")
+      .split("\n")
+      .map((line) => /^- (\d\d:\d\d) (.*)$/.exec(line))
+      .filter((match) => match !== null)
+      .map(([, time, text]) => ({ time: time!, text: text! }));
+    return {
+      ...summary,
+      documents,
+      conversation: target ? await resolveLink(this.yami.vault, target, []) : undefined,
+      harness: typeof doc.properties.harness === "string" ? doc.properties.harness : undefined,
+      progress,
+    };
+  }
+
+  /**
+   * What a person can do with the session now, from its properties as read: start it with each agent and
+   * resume its conversation while no run is live, stop or kill a live run, and the actions of its module
+   * that its template takes and whose `when` holds. A host shows these as commands or buttons.
+   */
+  acts(properties: Properties): SessionAct[] {
+    const name = basename(this.path);
+    // A live run can always be stopped, whatever its document says now.
+    if (this.#run) {
+      return [
+        { kind: "stop", label: "Stop", run: () => this.stop().then(() => `Stopped ${name}. Resume it to go on.`) },
+        { kind: "kill", label: "Kill the agent", run: () => this.kill().then(() => `Killed the agent of ${name}. Resume the session to go on.`) },
+      ];
+    }
+    let parts;
+    try {
+      parts = sessionParts(this.yami, { path: this.path, properties, body: "" });
+    } catch {
+      return [];
+    }
+    const ended = (more: string) => (result: RunResult) =>
+      `${name}: ${STATUS_LABELS[result.state === "running" ? "stopped" : result.state].toLowerCase()} after ${result.iterations}${more} iteration${result.iterations === 1 ? "" : "s"}.`;
+    const acts: SessionAct[] = this.yami.agents.map((agent) => ({
+      kind: "start",
+      label: `Run with ${capitalize(this.yami.agentName(agent))}`,
+      agent,
+      run: () => this.start({ agent }).then(ended("")),
+    }));
+    if (linksOf(properties.conversation).length) acts.push({ kind: "resume", label: "Resume", run: () => this.resume().then(ended(" more")) });
+    for (const action of parts.module.actions) {
+      if ("on" in action && action.on === parts.template && (!action.when || action.when(properties))) acts.push({ kind: "action", label: action.name, action, run: () => action.run(this) });
+    }
+    return acts;
   }
 
   /** Calls the listener at each change of status. Returns the function that stops it. */
@@ -168,4 +320,8 @@ export class Session {
     }
     this.yami.sessionChanged(this, status);
   }
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

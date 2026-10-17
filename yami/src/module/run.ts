@@ -17,7 +17,8 @@ import { timestamp, type SessionState } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
 import { runCheck, type CheckResult } from "./checks.js";
-import { skillCommand, skillPath, type Layout, type LinkedKind, type SessionTemplate, type YamiModule } from "./module.js";
+import { linkedDocuments } from "./links.js";
+import { skillCommand, type Layout, type LinkedKind, type SessionTemplate, type YamiModule } from "./module.js";
 import type { Yami } from "./yami.js";
 
 export interface RunResult {
@@ -159,17 +160,12 @@ export async function runSession(
   return { path, state, iterations: iteration - start, conversation: conversation.path };
 }
 
+/** Reads every document the session links. A link that finds no note stops the run before it starts. */
 async function loadLinked(vault: Vault, lay: Layout, doc: Document): Promise<Linked> {
   const linked = { articles: [], policies: [], promises: [], skills: [] } as Linked;
-  for (const kind of Object.keys(linked) as LinkedKind[]) {
-    for (const target of linksOf(doc.properties[kind])) {
-      const path =
-        kind === "skills" && (await vault.exists(skillPath(lay, target)))
-          ? skillPath(lay, target)
-          : await resolveLink(vault, target, [lay.folders[kind], lay.internal]);
-      if (!path) throw new Error(`The session links to ${kind} "${target}", which is not in the vault.`);
-      linked[kind].push(parseDocument(vault, path, await vault.read(path)));
-    }
+  for (const { kind, target, path } of await linkedDocuments(vault, lay, doc.properties)) {
+    if (!path) throw new Error(`The session links to ${kind} "${target}", which is not in the vault.`);
+    linked[kind].push(parseDocument(vault, path, await vault.read(path)));
   }
   return linked;
 }
@@ -205,7 +201,9 @@ async function record(vault: Vault, path: string, outcome: { iteration: number; 
       doc.body = replaceSection(doc.body, "Deliverables", deliverables);
     }
     const progress = sectionText(doc.body, "Progress");
-    const line = `- ${timestamp().slice(11, 16)} ${outcome.line}`;
+    // A progress line is one line, so an error with many lines cannot break the section.
+    const text = outcome.line.replace(/\s+/g, " ").trim();
+    const line = `- ${timestamp().slice(11, 16)} ${text.length > 300 ? `${text.slice(0, 299)}…` : text}`;
     doc.body = replaceSection(doc.body, "Progress", progress ? `${progress}\n${line}` : line);
   });
 }

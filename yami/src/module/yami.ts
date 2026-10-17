@@ -1,14 +1,14 @@
 import type { Agent } from "../agent/agent.js";
 import type { Harness, ToolSet } from "../agent/types.js";
 import { CONVERSATION_FOLDER, FileConversations, type Conversation, type Conversations, type OpenConversation } from "../conversation/conversations.js";
-import { basename, link, readDocument, writeDocument } from "../document/document.js";
+import { basename, link, readDocument, writeDocument, type Document } from "../document/document.js";
 import { SESSION, timestamp, validate, withDefaults } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import { captureSource, captureSources, readSources } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
 import { assignColors } from "./colors.js";
 import { checkName, moduleSkills, safeName, SessionTemplate, type LinkedKind, type ModuleDocument, type YamiModule } from "./module.js";
-import { Session, type NewSession, type SessionStatus } from "./session.js";
+import { Session, type NewSession, type SessionStatus, type SessionSummary } from "./session.js";
 import { moduleTools } from "./tools.js";
 import { WikiModule } from "./wiki.js";
 
@@ -103,6 +103,13 @@ export class Yami {
     return agent;
   }
 
+  /** The name of an agent, as acts show it: its harness, and a number after the first agent of a harness. */
+  agentName(agent: Agent): string {
+    const same = this.agents.filter((a) => a.harness === agent.harness);
+    const n = same.indexOf(agent);
+    return n > 0 ? `${agent.harness} ${n + 1}` : agent.harness;
+  }
+
   /** The agent that a conversation note names in its `agent` property. A Yami names each agent by its harness. */
   agentNamed(name: unknown): Agent | undefined {
     return this.agents.find((agent) => agent.harness === name);
@@ -134,22 +141,33 @@ export class Yami {
     return session;
   }
 
-  /** The session documents of the vault, newest first by name, of one module or template when given. */
+  /** The session documents of the vault, newest first, of one module or template when given. */
   async sessions(of?: YamiModule | SessionTemplate): Promise<Session[]> {
+    return (await this.sessionDocuments(of)).map((doc) => this.session(doc.path));
+  }
+
+  /** Each session of the vault at a glance, newest first, of one module or template when given. One read of each document. */
+  async summaries(of?: YamiModule | SessionTemplate): Promise<SessionSummary[]> {
+    return (await this.sessionDocuments(of)).map((doc) => this.session(doc.path).summarize(doc));
+  }
+
+  private async sessionDocuments(of?: YamiModule | SessionTemplate): Promise<Document[]> {
     const template = of instanceof SessionTemplate ? of : undefined;
     const modules = template ? [template.module] : of ? [of as YamiModule] : this.modules;
-    const found: Session[] = [];
+    const found: Document[] = [];
     for (const module of modules.filter((m) => m.sessionsIn !== "none")) {
       const folder = module.layout.sessions;
       for (const path of await this.vault.list(folder)) {
         if (path.slice(folder.length + 1).includes("/")) continue;
-        const { properties } = await readDocument(this.vault, path);
-        if (properties.type !== "session" || properties.module !== module.id) continue;
-        if (template && module.templateOf(properties.template) !== template) continue;
-        found.push(this.session(path));
+        // A document in the middle of an edit can hold properties that do not parse; it shows again once they do.
+        const doc = await readDocument(this.vault, path).catch(() => undefined);
+        if (!doc || doc.properties.type !== "session" || doc.properties.module !== module.id) continue;
+        if (template && module.templateOf(doc.properties.template) !== template) continue;
+        found.push(doc);
       }
     }
-    return found.sort((a, b) => b.path.localeCompare(a.path));
+    const created = (doc: Document) => (typeof doc.properties.created === "string" ? doc.properties.created : "");
+    return found.sort((a, b) => created(b).localeCompare(created(a)) || b.path.localeCompare(a.path));
   }
 
   /** The sessions whose run is live now. */

@@ -41,6 +41,16 @@ In the file explorer, each module's folder has the module's color, its folder un
 
 To add a module, write its folder and add an instance to `modules` in `src/main.ts`. Its commands appear on the next load: one for each template, **<Module>: new <template>**, and one for each action. Its tools and skills reach every agent. Test it in `test/unit/` with `testYami` from `yami/testing`.
 
+## The panel
+
+**Open the Yami panel**, from the ribbon or the command palette, shows a panel in the right sidebar:
+
+- **Modules**: each module with its color and a count of its sessions by status. Sessions that work now are at the top.
+- **A module**: a button for each of its templates, such as **New greeting**, its actions, such as **Publish a volume**, and its sessions, newest first. A session's mark shows its status: a hollow circle before its first run, a turning arc while the agent works, a filled circle when done, a diamond when it needs attention, a cross when it failed, and a square when stopped. A row's button runs or stops the session.
+- **A session**: its status, its acts as buttons (**Run with Claude**, **Resume**, **Stop**, **Return this checkout**), its promises with whether the last check met them, its policies, skills, and articles, its conversation, and its progress. Click a document to open it; Cmd-click opens it in a new tab.
+
+Backspace goes up a level. The panel follows the vault: a session that an agent creates, a run that starts, and a promise that is met show at once. The panel is the plugin's own code, `src/panel/`, over the library's read API.
+
 ## Conversations
 
 Run **New conversation** from the ribbon, or **New conversation with claude** or **with codex** from the command palette. You get a note in `conversations/` with a message box at the bottom. Press Enter to send. The note records the conversation: your messages, the agent's replies, and its tool calls in collapsed sections. The note gets its name from your first message.

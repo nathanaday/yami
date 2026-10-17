@@ -108,5 +108,10 @@ export async function runCheck(promise: Document, context: CheckContext, own: Re
   if (typeof name !== "string" || name === "") return { status: "review", detail: "no automatic check" };
   const check = own[name] ?? checks[name];
   if (!check) return { status: "review", detail: `unknown check "${name}"` };
-  return check(promise, context);
+  // A check that cannot finish, for example on a note whose properties do not parse, leaves its promise unmet and says why.
+  try {
+    return await check(promise, context);
+  } catch (error) {
+    return { status: "unmet", detail: `the check could not finish: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }

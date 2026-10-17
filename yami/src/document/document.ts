@@ -8,10 +8,35 @@ export interface Document {
 
 const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
+/** A document whose properties do not parse, for example a value with `: ` in it and no quotes. */
+export class PropertiesError extends Error {
+  constructor(
+    readonly path: string,
+    /** The parser's first line: what is wrong, and where. */
+    readonly reason: string,
+    /** The text after the properties. */
+    readonly body: string,
+  ) {
+    super(`The properties of ${path} do not parse: ${reason}`);
+    this.name = "PropertiesError";
+  }
+}
+
+/** Splits a document into its properties and its body. Properties that do not parse throw a `PropertiesError` that names the document. */
 export function parseDocument(vault: Vault, path: string, text: string): Document {
   const match = text.match(FRONTMATTER);
   if (!match) return { path, properties: {}, body: text };
-  return { path, properties: vault.parseProperties(match[1]) ?? {}, body: text.slice(match[0].length) };
+  const body = text.slice(match[0].length);
+  let properties: unknown;
+  try {
+    properties = vault.parseProperties(match[1]!);
+  } catch (error) {
+    throw new PropertiesError(path, (error instanceof Error ? error.message : String(error)).split("\n")[0]!.trim(), body);
+  }
+  if (properties !== null && properties !== undefined && (typeof properties !== "object" || Array.isArray(properties))) {
+    throw new PropertiesError(path, "the properties are not names with values", body);
+  }
+  return { path, properties: (properties as Properties | null) ?? {}, body };
 }
 
 export function serializeDocument(vault: Vault, doc: Document): string {

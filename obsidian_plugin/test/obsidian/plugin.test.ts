@@ -68,6 +68,24 @@ describe("Yami in Obsidian", () => {
     await page().evaluate((name) => (window as any).app.commands.executeCommandById(name), id);
   }
 
+  /** Puts an instruction in a session's body, and waits until Obsidian's metadata cache has read the note again. */
+  async function instruct(path: string, instruction: string) {
+    await page().evaluate(
+      ({ path, instruction }) =>
+        new Promise<void>((resolve) => {
+          const app = (window as any).app;
+          const file = app.vault.getFileByPath(path);
+          const ref = app.metadataCache.on("changed", (changed: any) => {
+            if (changed !== file) return;
+            app.metadataCache.offref(ref);
+            resolve();
+          });
+          void app.vault.process(file, (text: string) => text.replace("## Deliverables", `${instruction}\n\n## Deliverables`));
+        }),
+      { path, instruction },
+    );
+  }
+
   /** Creates a hello session and waits until it is open and Obsidian has read its properties. */
   async function newGreeting(): Promise<string> {
     const before = await activePath();
@@ -424,6 +442,63 @@ describe("Yami in Obsidian", () => {
     expect(colors.shown).toEqual(colors.expected.map(rgb));
   });
 
+  it("shows the modules, a module's sessions, and a session in the panel, and runs the session from it", { timeout: TIMEOUT }, async () => {
+    await run("yami:open-panel");
+    await page().waitForSelector(".yami-panel .yami-module-row");
+    const names = () => page().$$eval(".yami-panel .yami-row-name", (els) => els.map((el) => el.textContent));
+    expect(await names()).toEqual(expect.arrayContaining(["Wiki", "Hello world", "Threads", "Librarian", "Journals"]));
+    const focused = () => page().evaluate(() => document.activeElement?.getAttribute("data-key") ?? document.activeElement?.textContent);
+
+    // The keyboard: Enter goes in with the focus on Back, and Backspace comes out with the focus on the row it left.
+    await page().focus('.yami-panel [data-key="module:hello"]');
+    await page().keyboard.press("Enter");
+    await page().waitForSelector('.yami-panel .yami-panel-title:text-is("Hello world")');
+    expect(await focused()).toBe("back");
+    await page().keyboard.press("Backspace");
+    await page().waitForSelector('.yami-panel .yami-panel-title:text-is("Modules")');
+    expect(await focused()).toBe("module:hello");
+
+    // A module with no sessions shows its actions only.
+    await page().click('.yami-module-row:has-text("Journals")');
+    await page().waitForSelector('.yami-panel button:has-text("Publish a volume")');
+    expect(await page().textContent(".yami-panel .yami-panel-empty")).toBe("Journals keeps no sessions.");
+    await page().click(".yami-panel .yami-back");
+
+    // New greeting creates a session, and the change feed puts it in the list.
+    await page().click('.yami-module-row:has-text("Hello world")');
+    const before = await page().$$eval(".yami-panel .yami-session-row", (rows) => rows.length);
+    await page().click('.yami-panel button:has-text("New greeting")');
+    await page().waitForFunction((n) => document.querySelectorAll(".yami-panel .yami-session-row").length === n + 1, before, { timeout: 10_000 });
+    const session = await activePath();
+    const name = session.slice("hello/".length, -3);
+    const row = `.yami-session-row:has(.yami-row-name:text-is("${name}"))`;
+    expect(await page().textContent(`${row} .yami-row-meta span`)).toBe("Not started");
+
+    // The session's page: its documents, each of which opens.
+    await page().click(row);
+    await page().waitForSelector(".yami-panel .yami-state-label");
+    expect(await page().textContent(".yami-panel .yami-panel-title")).toBe(name);
+    expect(await page().$$eval(".yami-panel .yami-section-head h3", (els) => els.map((el) => el.textContent))).toEqual(["Promises", "Policies", "Skills"]);
+    await page().click('.yami-panel .yami-row:has-text("Always say hello")');
+    await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path === "internal/hello/policies/Always say hello.md");
+
+    // Run it from the panel: the mark turns while the agent works, and the page shows the end.
+    await page().click('.yami-panel button:has-text("Run with Claude")');
+    await page().waitForSelector('.yami-panel .yami-state .yami-mark[data-status="working"]', { timeout: 30_000 });
+    // Run became Stop; the focus moved to it instead of leaving the panel.
+    await page().waitForFunction(() => document.activeElement?.textContent === "Stop", undefined, { timeout: 5_000 });
+    await page().waitForFunction(() => document.querySelector(".yami-panel .yami-state-label")?.textContent === "Done", undefined, { timeout: 180_000, polling: 250 });
+    expect(await page().textContent('.yami-panel .yami-row:has-text("Greeting note") .yami-row-note')).toBe("Met");
+    expect(await page().$$eval(".yami-panel .yami-section-head h3", (els) => els.map((el) => el.textContent))).toEqual(["Promises", "Policies", "Skills", "Conversation", "Progress"]);
+    expect(await page().textContent(".yami-panel .yami-progress li")).toContain("iteration 1: 1 met, 0 unmet");
+    expect(await page().$$eval(".yami-panel .yami-action", (els) => els.map((el) => el.textContent))).toEqual(["Run with Claude", "Run with Codex", "Resume"]);
+
+    // Every icon drew: a name Obsidian does not know leaves an empty element.
+    expect(await page().$$eval(".yami-panel .yami-row-icon, .yami-panel .yami-action-icon, .yami-panel .clickable-icon", (els) => els.filter((el) => !el.querySelector("svg")).length)).toBe(0);
+    await page().click(".yami-panel .yami-back");
+    await page().waitForSelector(`${row} .yami-mark[data-status="done"]`);
+  });
+
   it("offers the commands of the sessions, the templates, and the actions", async () => {
     const ids = await page().evaluate(() => Object.keys((window as any).app.commands.commands).filter((id) => id.startsWith("yami:")));
     for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search"]) {
@@ -434,7 +509,13 @@ describe("Yami in Obsidian", () => {
     expect(ids).not.toContain("yami:wiki-new-ingest");
   });
 
-  it("runs a hello session from its document", { timeout: TIMEOUT }, async () => {
+  it("runs a hello session from its document, also with a note elsewhere whose properties do not parse", { timeout: TIMEOUT }, async () => {
+    // An old note of another tool, with a value that holds ": " and no quotes.
+    await page().evaluate(async () => {
+      const vault = (window as any).app.vault;
+      if (!vault.getFolderByPath("tool")) await vault.createFolder("tool");
+      await vault.create("tool/Old session.md", "---\ndescription: Fix a scroll stop: the editor counted as out of view.\n---\nAn old note.\n");
+    });
     const session = await newGreeting();
     await run("yami:run-session-claude");
     const doc = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
@@ -470,10 +551,7 @@ describe("Yami in Obsidian", () => {
 
     // In the middle of a turn: the harness session closes at once.
     const working = await newGreeting();
-    await page().evaluate(async (path) => {
-      const app = (window as any).app;
-      await app.vault.process(app.vault.getFileByPath(path), (text: string) => text.replace("## Deliverables", "Before anything else, run the shell command `sleep 30` with your Bash tool. Then write the greeting note.\n\n## Deliverables"));
-    }, working);
+    await instruct(working, "Before anything else, run the shell command `sleep 30` with your Bash tool. Then write the greeting note.");
     await page().evaluate(() => {
       (window as any).__allow = setInterval(() => (document.querySelector(".yami-permission .mod-cta") as HTMLElement | null)?.click(), 200);
     });
@@ -494,12 +572,7 @@ describe("Yami in Obsidian", () => {
   it("stops a session's run in the middle of a turn, and resumes it in the same conversation", { timeout: TIMEOUT }, async () => {
     const session = await newGreeting();
     // A long first act, so the turn is still going when the person stops it.
-    await page().evaluate(async (path) => {
-      const app = (window as any).app;
-      await app.vault.process(app.vault.getFileByPath(path), (text: string) =>
-        text.replace("## Deliverables", "Before anything else, run the shell command `sleep 30` with your Bash tool. Then write the greeting note.\n\n## Deliverables"),
-      );
-    }, session);
+    await instruct(session, "Before anything else, run the shell command `sleep 30` with your Bash tool. Then write the greeting note.");
     // The person allows each request; the user's own permission rules may also allow the command.
     await page().evaluate(() => {
       (window as any).__allow = setInterval(() => (document.querySelector(".yami-permission .mod-cta") as HTMLElement | null)?.click(), 200);

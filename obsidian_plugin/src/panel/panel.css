@@ -1,0 +1,494 @@
+/* The Yami panel. The module's color is its one accent: a strand beside each module, which becomes the
+   page's whole left edge inside a module, so the panel always says whose work it shows. The rest follows
+   the theme. */
+
+.yami-panel.view-content {
+  padding: 0;
+  --yami-module-color: var(--interactive-accent);
+}
+
+.yami-panel-page {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: var(--size-4-3) var(--size-4-4) var(--size-4-8);
+}
+
+.yami-panel-page.has-spine::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--yami-module-color);
+}
+
+.yami-panel-page.is-entering-in {
+  animation: yami-enter-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.yami-panel-page.is-entering-out {
+  animation: yami-enter-out 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+@keyframes yami-enter-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+
+@keyframes yami-enter-out {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+/* Where you are */
+
+.yami-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
+  min-width: 0;
+  margin: 0 0 var(--size-4-1) calc(-1 * var(--size-4-2));
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.yami-panel .yami-back {
+  padding: var(--size-2-1);
+}
+
+.yami-panel .yami-breadcrumb-part {
+  height: auto;
+  padding: 0 var(--size-2-1);
+  background: none;
+  box-shadow: none;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.yami-panel .yami-breadcrumb-part:hover {
+  color: var(--text-normal);
+}
+
+.yami-breadcrumb-sep {
+  color: var(--text-faint);
+}
+
+.yami-breadcrumb-here {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-normal);
+}
+
+.yami-panel-title {
+  margin: var(--size-2-2) 0 var(--size-4-1);
+  font-size: var(--font-ui-large);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.yami-panel-title.is-link {
+  cursor: pointer;
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 4px;
+  transition: text-decoration-color 120ms;
+}
+
+.yami-panel-title.is-link:hover {
+  text-decoration-color: var(--yami-module-color);
+}
+
+.yami-panel-lede {
+  max-width: 60ch;
+  margin: 0 0 var(--size-4-3);
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.yami-panel-empty {
+  padding: var(--size-4-2);
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* Sections and rows */
+
+.yami-section {
+  margin-top: var(--size-4-4);
+}
+
+.yami-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding: 0 var(--size-4-2) var(--size-2-2);
+}
+
+.yami-section-head h3 {
+  margin: 0;
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.yami-section-count {
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.yami-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  min-width: 0;
+  padding: var(--size-2-3) var(--size-4-2);
+  border-radius: var(--radius-s);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.yami-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.yami-panel .yami-row:focus-visible,
+.yami-panel button:focus-visible,
+.yami-panel-title.is-link:focus-visible {
+  outline: 2px solid var(--yami-module-color);
+  outline-offset: 1px;
+}
+
+.yami-row.is-missing {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.yami-row.is-missing:hover {
+  background: none;
+}
+
+.yami-row-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.yami-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.yami-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--font-ui-small);
+  font-weight: 500;
+}
+
+.yami-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--size-4-2);
+  margin-top: 1px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.yami-row-desc {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.yami-row-note {
+  flex: none;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.yami-row-icon {
+  display: flex;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.yami-row-icon svg,
+.yami-action-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.yami-row-icon.is-met {
+  color: var(--color-green);
+}
+
+.yami-row-icon.is-unmet {
+  color: var(--color-orange);
+}
+
+/* Small text in a module's color mixes with the theme's text color, so it reads in light and dark themes. */
+.yami-module-name {
+  color: color-mix(in srgb, var(--yami-module-color) 60%, var(--text-normal));
+}
+
+/* The modules, each with its strand */
+
+.yami-module-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  margin-top: var(--size-4-3);
+}
+
+.yami-module-row {
+  position: relative;
+  align-items: flex-start;
+  padding-left: calc(var(--size-4-2) + 6px);
+}
+
+.yami-module-row::before {
+  content: "";
+  position: absolute;
+  top: var(--size-2-3);
+  bottom: var(--size-2-3);
+  left: var(--size-2-2);
+  width: 3px;
+  border-radius: 2px;
+  background: var(--yami-module-color);
+}
+
+.yami-counts {
+  display: flex;
+  flex: none;
+  gap: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.yami-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-2);
+}
+
+.yami-count .yami-mark {
+  --yami-mark-size: 8px;
+}
+
+/* Sessions */
+
+.yami-session-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-2-2);
+  border-radius: var(--radius-s);
+}
+
+.yami-session-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.yami-session-row {
+  flex: 1;
+  align-items: flex-start;
+}
+
+.yami-session-row:hover {
+  background: none;
+}
+
+.yami-session-row > .yami-mark {
+  margin-top: 4px;
+}
+
+.yami-panel .yami-quick {
+  flex: none;
+  margin-top: var(--size-2-2);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.yami-session-item:hover .yami-quick,
+.yami-session-item:focus-within .yami-quick,
+.yami-session-item[data-status="working"] .yami-quick,
+.yami-session-item[data-status="checking"] .yami-quick {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .yami-panel .yami-quick {
+    opacity: 1;
+  }
+}
+
+/* One session */
+
+.yami-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-2-3) var(--size-4-2);
+  margin-bottom: var(--size-4-3);
+}
+
+.yami-state-label {
+  font-size: var(--font-ui-small);
+  font-weight: 600;
+}
+
+.yami-state .yami-row-meta {
+  margin: 0;
+}
+
+.yami-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin: var(--size-4-2) 0;
+}
+
+.yami-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-3);
+}
+
+.yami-action-icon {
+  display: flex;
+}
+
+.yami-panel .yami-action[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.yami-progress {
+  margin: 0;
+  padding: 0 var(--size-4-2);
+  list-style: none;
+}
+
+.yami-progress li {
+  display: flex;
+  gap: var(--size-4-2);
+  padding: 2px 0;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.yami-progress-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.yami-progress-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The status as a shape, so color is never the only sign */
+
+.yami-mark {
+  --yami-mark-size: 10px;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--yami-mark-size);
+  height: var(--yami-mark-size);
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  color: var(--text-faint);
+}
+
+.yami-mark[data-status="working"] {
+  border-color: color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  border-right-color: currentColor;
+  color: var(--yami-module-color);
+  animation: yami-turn 1.1s linear infinite;
+}
+
+.yami-mark[data-status="checking"] {
+  background: linear-gradient(to right, currentColor 50%, transparent 50%);
+  color: var(--yami-module-color);
+}
+
+.yami-mark[data-status="done"] {
+  background: currentColor;
+  color: var(--color-green);
+}
+
+.yami-mark[data-status="needs-attention"] {
+  border-radius: 1.5px;
+  background: currentColor;
+  color: var(--color-orange);
+  transform: rotate(45deg) scale(0.8);
+}
+
+.yami-mark[data-status="stopped"] {
+  border-radius: 2px;
+  background: currentColor;
+  color: var(--text-muted);
+  transform: scale(0.8);
+}
+
+.yami-mark[data-status="failed"] {
+  border: none;
+  color: var(--color-red);
+}
+
+.yami-mark[data-status="failed"]::before,
+.yami-mark[data-status="failed"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 100%;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+
+.yami-mark[data-status="failed"]::after {
+  transform: rotate(-45deg);
+}
+
+@keyframes yami-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yami-panel-page.is-entering-in,
+  .yami-panel-page.is-entering-out,
+  .yami-mark[data-status="working"] {
+    animation: none;
+  }
+}

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
-import { link, linkTarget, readDocument } from "../../src/document/index.js";
+import { link, linkTarget, PropertiesError, readDocument } from "../../src/document/index.js";
 import { runCheck, Yami, type WikiModule } from "../../src/index.js";
 import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type Embedder } from "../../src/wiki/index.js";
 import { FsVault } from "../../src/testing/index.js";
@@ -333,6 +333,31 @@ describe("checks", () => {
     expect(result.status).toBe("unmet");
     expect(result.detail).toContain("2 lint error(s)");
     expect(await runCheck({ path: "p", properties: { check: "lint" }, body: "" }, context([]))).toMatchObject({ status: "review" });
+  });
+});
+
+describe("a note whose properties do not parse", () => {
+  it("stays in the index with its body and no properties, and lint names it as an error with a fix", async () => {
+    const wiki = await fixture();
+    await vault.write("tool/old.md", "---\ndescription: Fix a scroll stop: the editor counted as out of view.\n---\nThe scroll pinned at the edge indicator.\n");
+    await wiki.refresh();
+    expect(wiki.note("tool/old.md")).toMatchObject({ properties: {}, problem: expect.stringContaining("Nested mappings are not allowed") });
+    expect((await wiki.search("scroll pinned edge indicator")).map((h) => h.path)).toContain("tool/old.md");
+    const findings = await wiki.lint({ paths: ["tool/old.md"] });
+    expect(findings).toEqual([
+      expect.objectContaining({ path: "tool/old.md", check: "bad-properties", severity: "error", message: expect.stringMatching(/^its properties do not parse: Nested mappings/) }),
+    ]);
+    expect((await wiki.lint({ folder: "wiki/topics" })).some((f) => f.check === "bad-properties")).toBe(false);
+  });
+
+  it("names the note when a read of it fails", async () => {
+    await vault.write("tool/old.md", "---\ntitle: a: b\n---\nBody.\n");
+    const error = await readDocument(vault, "tool/old.md").catch((e: Error) => e);
+    expect(error).toBeInstanceOf(PropertiesError);
+    expect((error as PropertiesError).message).toMatch(/^The properties of tool\/old\.md do not parse: Nested mappings are not allowed in compact mappings at line 1, column 8:?$/);
+    expect((error as PropertiesError).body).toBe("Body.\n");
+    await vault.write("tool/list.md", "---\n- a\n- b\n---\nBody.\n");
+    await expect(readDocument(vault, "tool/list.md")).rejects.toThrow("The properties of tool/list.md do not parse: the properties are not names with values");
   });
 });
 

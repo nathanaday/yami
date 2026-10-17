@@ -2,7 +2,7 @@
 // expect Node; in Obsidian's renderer the globals are Chromium's, and Obsidian's review rejects code that
 // generates code. These fixes apply to the SDKs' own files only.
 import { builtinModules } from "node:module";
-import { copyFile, readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { BuildOptions, Plugin } from "esbuild";
 
@@ -87,7 +87,12 @@ export function pluginBuild({ production = false }: PluginBuild = {}): BuildOpti
   };
 }
 
-/** Copies the stylesheet of the Obsidian layer, which a plugin ships as the `styles.css` next to its `main.js`. */
-export async function copyStyles(to = "styles.css"): Promise<void> {
-  await copyFile(`${PACKAGE}src/obsidian/styles.css`, to);
+/**
+ * Writes the stylesheet a plugin ships as the `styles.css` next to its `main.js`: the stylesheet of the
+ * Obsidian layer, then the plugin's own stylesheets in order, so a plugin's rules come last.
+ */
+export async function copyStyles(to = "styles.css", own: string[] = []): Promise<void> {
+  const parts = [await readFile(`${PACKAGE}src/obsidian/styles.css`, "utf8")];
+  for (const file of own) parts.push(`/* ${file} */\n${await readFile(file, "utf8")}`);
+  await writeFile(to, parts.map((part) => part.replace(/\n*$/, "\n")).join("\n"));
 }

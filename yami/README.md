@@ -122,7 +122,7 @@ The ledgers are Obsidian bases: live views over the properties of the session do
 
 `Vault` is the host's access to the vault: `read`, `write`, `exists`, `list`, and the parsing and writing of properties. `ObsidianVault` in `yami/obsidian` implements it over the Obsidian API, and tests implement it over the file system.
 
-`readDocument`, `writeDocument`, and `updateDocument` handle a document as `{ path, properties, body }`. `replaceSection` replaces one `## heading` section of a body. `link`, `linkTarget`, `linksOf`, and `resolveLink` handle `[[links]]` in properties.
+`readDocument`, `writeDocument`, and `updateDocument` handle a document as `{ path, properties, body }`. Properties that do not parse throw a `PropertiesError`, which names the document and gives the parser's reason. `replaceSection` replaces one `## heading` section of a body. `link`, `linkTarget`, `linksOf`, and `resolveLink` handle `[[links]]` in properties.
 
 The schemas of the built-in types are `MODULE`, `SESSION`, `POLICY`, and `PROMISE`. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form.
 
@@ -187,6 +187,21 @@ A module writes its files when the Yami enables it, and only the files that do n
 
 `yami.running` lists the sessions with a live run, and `yami.sessions(module or template?)` the session documents of the vault.
 
+### What a view reads
+
+A view of the sessions, such as a panel, gets its data and its acts here, and holds no rules of its own:
+
+| Call | Gives |
+| --- | --- |
+| `yami.summaries(module or template?)` | Each session at a glance, newest first by `created`, from one read of each document: `name`, `module`, `template`, `status`, `created`, `iteration`, `met` and `unmet` (counts at the last check), and the `properties`. A document whose template the module lacks shows with no template; one whose properties do not parse, as in the middle of an edit, is left out until they do. |
+| `session.details()` | The summary, and `documents`: each linked promise, policy, skill, and article with the `path` it resolves to (none for a link that finds no note), and for a promise whether the last check `met` it; the `conversation` note; the `harness`; and the `progress` lines, each with its `time`. |
+| `session.acts(properties)` | What a person can do with the session now, from its properties as read: `start` with each agent, `resume` when it has a conversation, `stop` and `kill` while a run is live (whatever the document says), and each module action on its template whose `when` holds. An act has a `label`, such as "Run with Claude", and `run()`, which resolves with what to tell the person. The commands use it too. |
+| `module.acts()` | What a person can do with a module itself: `new` from each template that offers a command (its `label` is the template's), then each `action` on no session. `runModuleAct(act)` in `yami/obsidian` does one. |
+| `STATUS_LABELS` | The words for each status: "Not started", "Working", "Checking", "Done", "Needs attention", "Failed", "Stopped". |
+| `template.label` | What a button or a command that creates a session says: "New checkout". |
+| `LINKED_KINDS` | The fields that link documents, in the order a person reads them: promises, policies, skills, articles. |
+| `yami.agentName(agent)` | The name of an agent in acts: its harness, with a number after the first agent of a harness; in Obsidian, the name it is registered under. |
+
 ### The agent loop
 
 Each iteration is one agent turn and one verification.
@@ -222,7 +237,7 @@ A promise names a `check` and gives it properties. `{{session}}` in a value is t
 | `lint` | `path`, or `folder`, or `field` | The wiki's lint finds no error in the note, the folder, or the notes linked in the session's `field` and every note that links them. |
 | none | | Never by Yami. The session ends `needs-attention` for a person to decide. |
 
-A module adds checks in its `checks`. The wiki reads the vault again before the checks run, so they see what the agent wrote.
+A module adds checks in its `checks`. The wiki reads the vault again before the checks run, so they see what the agent wrote. A check that throws, for example on a linked note whose properties do not parse, leaves its promise unmet with the reason, and the agent hears it in the next prompt.
 
 ## `yami/wiki`
 
@@ -251,7 +266,7 @@ await wiki.restore(3);                                                          
 - **`refresh()` reads the vault again.** About 500 notes take a quarter of a second. The tools and the checks call it, so they see the agent's writes. The embeddings are the one cache, keyed by the hash of each chunk, in `internal/wiki/cache/embeddings.json`; a refresh embeds only new chunks.
 - **A hit** has the `path`, a `score` in `[0, 1]` with the best at 1, a `snippet`, and `why`: "title match", "linked from Codex harness", "in the community of Claude harness", or the chunk that matched.
 - **`match`** compares names with the names, aliases, and descriptions of the typed notes: `hit` when a note holds the name or an alias, `near` when one scores above the threshold, `new` otherwise, each with its neighbors. The ingest skill calls it before it writes a topic.
-- **`lint`** reports `dead-link` and `no-description` as errors, and `duplicate-name`, `no-sources`, `uncited`, and `orphan` as warnings. An error fails the `lint` check.
+- **`lint`** reports `bad-properties`, `dead-link`, and `no-description` as errors, and `duplicate-name`, `no-sources`, `uncited`, and `orphan` as warnings. An error fails the `lint` check. A note whose properties do not parse, such as a value with `: ` and no quotes, stays in the index with its body and no properties, and `bad-properties` names it with the parser's reason.
 - **`captureSource(vault, file)`** captures a file as a source. The file stays where it is. Yami copies it into `internal/wiki/originals/`, named by the first 16 hex characters of its SHA-256, and writes `wiki/sources/<name> (source).md` with `type: source`, `status: pending`, `file` (the copy, which the note embeds), `from` (the file), and `sha256`. The wiki reads and cites the copy, so a later edit of the file does not change what the source said, and the source note never shares a name with the file. A file whose latest source holds its content returns that source; a changed file gets a new one, `<name> (source 2).md`, also when it changed back to an older text. A file with no source of its own shares the source of any file with the same content. `readSources(vault)` reads the sources once for many captures, and `sourceOf(sources, file, sha256)` says which source holds a file's content, if any. **`captureSources(vault, folder)`** does it for every file in a folder, and skips the wiki's own files. **`sourceChunks(vault, wiki, source)`** takes a source note, or the file a source was captured from, and splits the frozen copy for the workers of an ingest: a text file into runs of at most 800 lines cut at a heading or a blank line, a PDF into 20 pages at a time, any other file whole.
 
 ### Changes and versions
@@ -478,7 +493,13 @@ The Obsidian layer. It holds what needs the Obsidian API: `createYami`, the vaul
 
 It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations, and removes the shared-document hub.
 
-`ObsidianYami` adds what a plugin's own commands need: `activeSession(module or template?)`, the session open in the editor; `activeFile()` and `activeSelection()`; `open(path, mode)`; `pick(items, label, placeholder)`, a list to pick one from; and `notify(work)`, which shows the message of a promise, opens the note it names, and shows an error in a notice. `hub` and `conversations` are the shared documents and the conversation notes, for other plugins.
+`ObsidianYami` adds what a plugin's own commands and views need:
+
+- `activeSession(module or template?)`, the session open in the editor; `activeFile()` and `activeSelection()`; `properties(path)`, a note's properties from Obsidian's cache.
+- `onSessionsChange(listener)`: a call when the sessions may look different, after a session document or a module's document changes, or a run changes its status. Close calls become one.
+- `newSession(template)`: creates a session, opens it, and says so. `runAction(action, session?)`: does a module's action, and first lets the person pick when it has choices. `runModuleAct(act)`: does an act of `module.acts()`.
+- `open(path, mode)`; `pick(items, label, placeholder)`, a list to pick one from; and `notify(work)`, which shows the message of a promise, opens the note it names, shows an error in a notice, and resolves when it has.
+- `agentName(agent)`, the name the agent is registered under; `hub` and `conversations`, the shared documents and the conversation notes, for other plugins.
 
 The plugin must ship `yami/obsidian/styles.css` as the `styles.css` next to its `main.js`; `copyStyles` in `yami/esbuild` copies it.
 
@@ -574,7 +595,7 @@ const context = await esbuild.context({ ...pluginBuild({ production }), entryPoi
 await copyStyles("styles.css");
 ```
 
-`pluginBuild` gives a CommonJS bundle with Obsidian, Electron, CodeMirror, and Node's modules left out, `.md` files loaded as text, and the four fixes the agent SDKs need in Obsidian's renderer (see the Claude harness).
+`pluginBuild` gives a CommonJS bundle with Obsidian, Electron, CodeMirror, and Node's modules left out, `.md` files loaded as text, and the four fixes the agent SDKs need in Obsidian's renderer (see the Claude harness). `copyStyles(to, own)` writes the Obsidian layer's stylesheet, then the plugin's own stylesheets in `own`, in order.
 
 ## Build and tests
 

@@ -1,6 +1,6 @@
 import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
-import { link, LINK, linkTarget, parseDocument, updateDocument, writeDocument } from "../document/document.js";
+import { link, LINK, linkTarget, parseDocument, PropertiesError, updateDocument, writeDocument } from "../document/document.js";
 import { timestamp } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { algorithms, type Algorithm, type Hit, type Query, type Scored } from "./algorithms/index.js";
@@ -37,6 +37,8 @@ export interface Note {
   fields: Fields;
   /** The Louvain community, when the graph has edges. */
   community?: number;
+  /** Why the note's properties do not parse. The index holds the note with no properties until they do. */
+  problem?: string;
 }
 
 export interface WikiOptions {
@@ -116,7 +118,16 @@ export class Wiki {
     const paths = all.filter((path) => !UNINDEXED.some((pattern) => pattern.test(path)) && !exclude.some((entry) => path === entry || path.startsWith(`${entry}/`)));
     const notes: Note[] = [];
     for (const path of paths) {
-      const doc = parseDocument(this.vault, path, await this.vault.read(path));
+      // One note with broken properties must not stop the index: it goes in with its body, and lint names it.
+      let doc;
+      let problem: string | undefined;
+      try {
+        doc = parseDocument(this.vault, path, await this.vault.read(path));
+      } catch (error) {
+        if (!(error instanceof PropertiesError)) throw error;
+        doc = { path, properties: {}, body: error.body };
+        problem = error.reason;
+      }
       const type = typeof doc.properties.type === "string" ? doc.properties.type : undefined;
       // A copy of another note, such as a librarian's checkout copy, is not knowledge of its own.
       if ((type && this.options.skipTypes.includes(type)) || doc.properties.copy_of !== undefined) continue;
@@ -136,6 +147,7 @@ export class Wiki {
         links: [],
         unresolved: [],
         backlinks: [],
+        ...(problem && { problem }),
         chunks: chunk(doc.body, name),
         fields: {
           title: tokens(name),

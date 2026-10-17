@@ -7,6 +7,7 @@ export {
   linksOf,
   linkTarget,
   parseDocument,
+  PropertiesError,
   readDocument,
   replaceSection,
   resolveLink,
