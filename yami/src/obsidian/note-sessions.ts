@@ -1,3 +1,4 @@
+import type { TFile } from "obsidian";
 import type { Agent, AgentSession, ResumedSession, SessionStart } from "../agent/index.js";
 import type { ConversationAgent } from "./agents.js";
 
@@ -27,6 +28,10 @@ export class SessionSlot {
   continued = false;
   starting: Promise<AgentSession> | undefined;
   #agent: Agent | undefined;
+  /** The agent of the session, also of one that closed: the agent that `agent()` gave when it started. */
+  get agent(): Agent | undefined {
+    return this.#agent;
+  }
   #turn = false;
   #closing: Promise<void> = Promise.resolve();
   readonly #holders = new Set<object>();
@@ -145,19 +150,30 @@ export type SessionIds = Record<string, Record<string, string>>;
 export interface NoteAgent {
   /** The path of the note. It is read at each use, so it follows a rename. */
   readonly path: string;
+  /** The note's file. Obsidian keeps one `TFile` for a note, and changes its `path` on a rename. */
+  readonly file: TFile;
   /** The name of the agent. */
   readonly agent: string;
 }
 
-/** What `setup` gives for a session that starts. */
-export interface NoteSessionSetup<State> {
+/**
+ * What `setup` gives for a session that starts. When `State` cannot be undefined, `state` is required, so
+ * `notes.session()` always gives a state of the type that `setup` gives.
+ */
+export type NoteSessionSetup<State> = {
   /** The options of the session, such as its `instructions`, `access`, `tools`, and `skills`. Default: none. */
   options?: SessionStart;
-  /** The host's own state of the session, such as tools bound to it. `notes.session()` gives it with the session. */
-  state?: State;
   /** Hears the session once it started, before `notes.session()` gives it, for example to follow its events. */
   started?(session: AgentSession): void;
-}
+} & (undefined extends State
+  ? {
+      /** The host's own state of the session, such as tools bound to it. `notes.session()` gives it with the session. */
+      state?: State;
+    }
+  : {
+      /** The host's own state of the session, such as tools bound to it. `notes.session()` gives it with the session. */
+      state: State;
+    });
 
 export interface NoteSessionsOptions<State = undefined> {
   /** The ids that the host stored, for example in its plugin data. Yami copies them, and never changes this object. Default: none. */
@@ -169,14 +185,15 @@ export interface NoteSessionsOptions<State = undefined> {
   /**
    * Makes each session that starts: its options, the host's state of it, and a hook for the session once it
    * started. Yami calls it once for each harness session, so a session that closed and starts again gets a
-   * new setup. Default: no options and no state.
+   * new setup. It gets the note's path, file, and agent. Default: no options and no state. When it gives a
+   * state on one path and none on another, the type of `state` includes `undefined`.
    */
   setup?(note: NoteAgent): NoteSessionSetup<State>;
 }
 
 /** A harness session of a note, with the host's state of it. */
 export interface NoteSession<State = undefined> extends ResumedSession {
-  /** The `state` that `setup` gave when this harness session started. */
+  /** The `state` that `setup` gave when this harness session started. Its type includes `undefined` when a setup can give none. */
   state: State;
 }
 
@@ -203,6 +220,8 @@ export interface NoteEvents {
 /** What `NoteSessions` needs of its Yami. */
 export interface NoteSessionsHost {
   agents(): readonly ConversationAgent[];
+  /** The note at a path, or null when there is none. */
+  file(path: string): TFile | null;
   idleMinutes(): number;
   addWork(work: AgentWork): () => void;
   /** Sends the events of the vault and the agents to the note sessions. */
@@ -246,9 +265,10 @@ export class NoteSessions<State = undefined> {
    * Each call restarts the idle wait, so the session stays open for the idle minutes after the call, and a turn
    * keeps it open until the turn ends. While the session is in a turn, the status bar shows the agent working
    * in the note, and `yami-stop` in the note interrupts the turn. `agent` is the name of an agent of the Yami;
-   * default: the first. Rejects with `Yami has no agent named <name>. Agents: <names>.` or `Yami has no agents.`
+   * default: the first. Rejects with `Yami has no agent named <name>. Agents: <names>.` or `Yami has no agents.`,
+   * and, before a new session starts, with `There is no note at <path>.`
    * @example
-   * const notes = yami.noteSessions({ setup: ({ path }) => { const live = new Reply(path); return { options: { tools: live.tools, skills: [] }, state: live, started: (s) => s.on(live.hear) }; } });
+   * const notes = yami.noteSessions({ setup: ({ file }) => { const live = new Reply(file); return { options: { tools: live.tools, skills: [] }, state: live, started: (s) => s.on(live.hear) }; } });
    * const { session, continued, state: live } = await notes.session(file.path, "claude");
    * await session.send(continued ? request : `${context}\n\n${request}`);
    */
@@ -329,12 +349,6 @@ export class NoteSessions<State = undefined> {
   }
 
   #entry(path: string, name: string): Entry {
-    const note: NoteAgent = {
-      get path() {
-        return entry.path;
-      },
-      agent: name,
-    };
     // The setup of the session that starts now: `options` and `started` run in turn for each start.
     let setup: NoteSessionSetup<State> | undefined;
     const entry: Entry = {
@@ -342,6 +356,15 @@ export class NoteSessions<State = undefined> {
       slot: new SessionSlot({
         agent: () => this.#agent(name).agent,
         options: () => {
+          const file = this.host.file(entry.path);
+          if (!file) throw new Error(`There is no note at ${entry.path}.`);
+          const note: NoteAgent = {
+            get path() {
+              return entry.path;
+            },
+            file,
+            agent: name,
+          };
           setup = this.options.setup?.(note);
           return setup?.options ?? {};
         },

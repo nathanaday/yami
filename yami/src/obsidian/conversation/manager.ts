@@ -1,7 +1,7 @@
 import { type App, MarkdownView, normalizePath, Notice, type Plugin, TFile } from "obsidian";
 import type { ApprovalSetting } from "../../agent/index.js";
 import { availablePath, nameFrom, newConversation, noteName, stamp, unnamed } from "../../conversation/index.js";
-import type { ConversationAgent } from "../agents.js";
+import { type ConversationAgent, noAgentsMessage } from "../agents.js";
 import type { ConversationStatus, NewConversationOptions, TurnEnd } from "../api.js";
 import type { CollabHub } from "../collab/hub.js";
 import type { PermissionPrompts } from "../prompts/permission-modal.js";
@@ -16,6 +16,8 @@ export interface ConversationOptions {
   animate: () => boolean;
   idleMinutes: () => number;
   onActivity: () => void;
+  /** What a conversation note says when no agent is left. Default: `Yami has no agents. Add one in its settings.` */
+  noAgents?: string;
 }
 
 export interface CreateOptions {
@@ -222,6 +224,7 @@ export class ConversationManager {
       controller = new ConversationController(this.app, this.hub, file, this.options.agents, this.prompts, {
         animate: this.options.animate,
         idleMinutes: this.options.idleMinutes,
+        noAgents: this.options.noAgents ?? noAgentsMessage("Yami"),
         newConversation: (agent) => void this.create(agent).catch((error: Error) => new Notice(`Yami could not start a conversation: ${error.message}`, 10_000)),
         onActivity: this.options.onActivity,
         onTurnEnd: (turn) => this.turnEnded(file, turn),

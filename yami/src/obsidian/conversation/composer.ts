@@ -33,6 +33,7 @@ export class Composer {
   private readonly modeButton: HTMLButtonElement;
   private readonly sendButton: HTMLButtonElement;
   private readonly endedEl: HTMLElement;
+  private readonly unavailableEl: HTMLElement;
   private readonly suggestEl: HTMLElement;
   private suggestions: Suggestion[] = [];
   private selected = 0;
@@ -42,6 +43,8 @@ export class Composer {
   private readonly cleanup: (() => void)[] = [];
   /** The request that `approvalEl` shows. It is drawn again only when it changes, so a half-filled answer stays. */
   private shown: PendingRequest | undefined;
+  /** The value that each part of the composer shows, so `render` writes only the parts whose value changed. */
+  private readonly drawn = new Map<string, unknown>();
 
   constructor(
     private readonly app: App,
@@ -54,6 +57,7 @@ export class Composer {
     this.suggestEl = this.root.createDiv({ cls: "yami-suggest" });
     this.approvalEl = this.root.createDiv({ cls: "yami-approval" });
     this.endedEl = this.root.createDiv({ cls: "yami-ended" });
+    this.unavailableEl = this.root.createDiv({ cls: "yami-unavailable" });
     this.card = this.root.createDiv({ cls: "yami-composer-card" });
     this.input = this.card.createEl("textarea", { cls: "yami-input", attr: { rows: "1", spellcheck: "true" } });
     const bar = this.card.createDiv({ cls: "yami-composer-bar" });
@@ -120,41 +124,60 @@ export class Composer {
     return button;
   }
 
+  /** Calls `write` when a part's value differs from the value that it shows, so an unchanged part is not written. */
+  private draw(part: string, value: unknown, write: () => void): void {
+    if (this.drawn.has(part) && this.drawn.get(part) === value) return;
+    this.drawn.set(part, value);
+    write();
+  }
+
   private render(): void {
     const { controller } = this;
-    const ended = controller.ended;
-    this.root.toggleClass("is-ended", ended);
-    this.root.toggleClass("is-working", controller.working);
-    this.root.style.setProperty("--yami-agent", controller.registered.color);
-    this.input.placeholder = `Message ${controller.agentName}   /  for commands   [[  to link notes`;
-
-    this.endedEl.empty();
-    if (ended) {
+    const { ended, working, unavailable } = controller;
+    this.draw("ended", ended, () => {
+      this.root.toggleClass("is-ended", ended);
+      this.endedEl.empty();
+      if (!ended) return;
       this.endedEl.createSpan({ text: "This conversation has ended. The note keeps it as a record." });
       const resume = this.endedEl.createEl("button", { text: "Continue it" });
       resume.addEventListener("click", () => void controller.resume().then(() => this.focus()));
-    }
+    });
+    this.draw("unavailable", unavailable, () => {
+      this.root.toggleClass("is-unavailable", Boolean(unavailable));
+      this.unavailableEl.setText(unavailable ?? "");
+    });
+    this.draw("working", working, () => this.root.toggleClass("is-working", working));
+    const color = controller.registered?.color ?? "";
+    this.draw("color", color, () => this.root.style.setProperty("--yami-agent", color));
+    const placeholder = `Message ${controller.agentName}   /  for commands   [[  to link notes`;
+    this.draw("placeholder", placeholder, () => (this.input.placeholder = placeholder));
 
     const model = controller.models.find((option) => (controller.model ? option.id === controller.model : option.isDefault));
     this.label(this.modelButton, model?.name ?? controller.model ?? "Default model");
-    const efforts = controller.efforts;
-    this.effortButton.toggleClass("is-hidden", !efforts.length && !controller.effort);
+    const effortHidden = !controller.efforts.length && !controller.effort;
+    this.draw("effort-hidden", effortHidden, () => this.effortButton.toggleClass("is-hidden", effortHidden));
     this.label(this.effortButton, capitalize(controller.effort ?? "Default effort"));
     this.label(this.modeButton, APPROVAL_NAMES[controller.approval]);
 
     const queued = controller.queue.length;
-    this.statusEl.setText(controller.working ? `${controller.status ?? "Working"}${queued ? ` · ${queued} queued` : ""}` : "");
-    const stop = controller.working && !this.input.value.trim();
-    this.sendButton.empty();
-    setIcon(this.sendButton, stop ? "square" : "arrow-up");
-    this.sendButton.toggleClass("is-stop", stop);
-    this.sendButton.disabled = !stop && !this.input.value.trim();
-    setTooltip(this.sendButton, stop ? "Stop (Esc)" : "Send (Enter)", { placement: "top" });
+    const status = working ? `${controller.status ?? "Working"}${queued ? ` · ${queued} queued` : ""}` : "";
+    this.draw("status", status, () => this.statusEl.setText(status));
+    const text = Boolean(this.input.value.trim());
+    const stop = working && !text;
+    this.draw("stop", stop, () => {
+      this.sendButton.empty();
+      setIcon(this.sendButton, stop ? "square" : "arrow-up");
+      this.sendButton.toggleClass("is-stop", stop);
+      setTooltip(this.sendButton, stop ? "Stop (Esc)" : "Send (Enter)", { placement: "top" });
+    });
+    const disabled = !stop && (!text || Boolean(unavailable));
+    this.draw("disabled", disabled, () => (this.sendButton.disabled = disabled));
     this.renderPending(controller.pending[0]);
   }
 
   private label(button: HTMLButtonElement, text: string): void {
-    button.querySelector(".yami-chip-label")!.textContent = text;
+    const label = button.querySelector(".yami-chip-label")!;
+    if (label.textContent !== text) label.textContent = text;
   }
 
   private renderPending(pending: PendingRequest | undefined): void {
@@ -247,7 +270,8 @@ export class Composer {
 
   private submit(): void {
     const text = this.input.value.trim();
-    if (!text) return;
+    // The text stays in the box until an agent can take it.
+    if (!text || this.controller.unavailable) return;
     if (/^\/(model|effort|mode)$/.test(text)) {
       this.setInput("");
       const target = text === "/model" ? this.modelButton : text === "/effort" ? this.effortButton : this.modeButton;

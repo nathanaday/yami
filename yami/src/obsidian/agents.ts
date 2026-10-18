@@ -8,6 +8,11 @@ export interface ConversationAgent extends AgentIdentity {
   agent: Agent;
 }
 
+/** What a plugin with no agents tells the person, by the plugin's name. */
+export function noAgentsMessage(plugin: string): string {
+  return `${plugin} has no agents. Add one in its settings.`;
+}
+
 export function vaultRoot(app: App): string {
   const adapter = app.vault.adapter;
   if (!(adapter instanceof FileSystemAdapter)) throw new Error("Yami needs a vault on the local file system.");

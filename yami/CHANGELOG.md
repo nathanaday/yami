@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.12.0 · library-loop runtime agents and options round 3
+
+A conversation note does not break when the host removes its last agent: it says what to do, and takes messages again when an agent comes back. `setup` of `noteSessions` gets the note's `TFile`, and the type of a session's `state` says what `setup` gives. A composer writes only what changed, so `setAgents` writes nothing in a note whose agent kept its name and color. `npm test` type-checks the tests.
+
+### Breaking
+- **`ConversationController.registered` is `ConversationAgent | undefined`, and `harness` is `Harness | undefined`.** Before, `registered` threw `Yami has no agents.`, and a composer that read it threw too: `setAgents([])` with a conversation note open threw out of `setAgents` and left the message box drawn for the old agent. `registered` is undefined only when no agent is left and no session is open. While a session is open, it is the agent that the session runs, also one that the host removed. Migrate: `controller.registered.color` → `controller.registered?.color`; `controller.agentName` still gives a name.
+- **`NoteSessionSetup<State>` requires `state` when `State` cannot be undefined**, and it is a type, not an interface. Before, a `setup` that gave a state on one path and none on another compiled, and `notes.session()` gave `undefined` as a `State`. Now that `setup` makes the type `State | undefined`, and `noteSessions<Reply>({ setup: () => ({ options }) })` does not compile. Migrate: give a state from every setup, or check for `undefined` where the code reads it. A `setup` that always gives a state needs no change.
+- **`notes.session(path)` rejects with `There is no note at <path>.` when the vault has no note at `path`**, before a new session starts, so `setup` always gets a file. A session that is open for the path stays. Migrate: create the note before its first session.
+- **`ControllerOptions.noAgents` is required**, for a host that builds a `ConversationController` itself. Migrate: add `noAgents: "<plugin> has no agents. Add one in its settings."`. `ConversationManager` gives it from its own options.
+
+### Added
+- `NoteAgent.file`, the note's `TFile`, which Obsidian keeps for the note across a rename. Migrate a workaround: `const file = app.vault.getFileByPath(path)` and a check for a missing file in `setup` → `setup: ({ file, agent }) => …`.
+- `ConversationOptions.noAgents`: the text that a conversation note shows when no agent is left. `createYami` gives `<plugin name> has no agents. Add one in its settings.`, the ribbon's text. Default: `Yami has no agents. Add one in its settings.`
+- `ConversationController.unavailable`: why the conversation takes no new message now, or none. With no agent left, the composer shows it in `.yami-unavailable`, adds `is-unavailable` to `.yami-composer`, keeps the person's text, and disables Send. A message that comes another way, such as a queued message or `/new`, shows it in a notice and starts no agent. When `setAgents` adds an agent again, the note takes messages with no reload, and continues its harness session when the harness still has it.
+
+### Changed
+- A composer writes only the parts whose value changed: the classes, the agent's color, the placeholder, the chips, the status, and the Send button. Before, each render wrote all of them again, so each `setAgents` call, such as one at each keystroke in a settings tab, made 11 writes in every open message box.
+- A conversation whose agent the host removes during a turn keeps the agent's name and color in its message box and in the status bar until the turn ends.
+- `npm test` type-checks the unit tests with `tsconfig.test.json` before it runs them, so a test of a type fails when the type is wrong. The tests run the composer over happy-dom, a development dependency.
+
 ## 0.11.0 · library-loop runtime agents and options round 2
 
 A session of `noteSessions` holds the host's own state, which `setup` makes once for each harness session. Each change of `hub.observe` gives the note and the text before the change, and an observer hears a note's `shared`, its changes, and its stop in that order. `yami.animate()` gives the library's rule of motion to a host's own presence. The ribbon says which plugin has no agents, and what to do.

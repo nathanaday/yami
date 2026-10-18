@@ -2,9 +2,10 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({}));
 
+import type { TFile } from "obsidian";
 import type { AgentSession } from "../../../src/agent/index.js";
 import type { ConversationAgent } from "../../../src/obsidian/agents.js";
-import { NoteSessions, type AgentWork, type NoteEvents, type NoteSessionsHost, type NoteSessionsOptions, type SessionIds } from "../../../src/obsidian/note-sessions.js";
+import { NoteSessions, type AgentWork, type NoteAgent, type NoteEvents, type NoteSessionsHost, type NoteSessionsOptions, type SessionIds } from "../../../src/obsidian/note-sessions.js";
 import { ScriptedAgent } from "../../../src/testing/index.js";
 
 beforeAll(() => {
@@ -17,11 +18,18 @@ afterEach(() => {
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** A host over agents that the test changes, with the work it records and the events it sends. */
+/** A host over agents that the test changes, with the work it records and the events it sends. Every path is a note, except the paths in `missing`. */
 function host(agents: ConversationAgent[], works: AgentWork[] = []) {
   const events: NoteEvents[] = [];
+  const missing = new Set<string>();
+  const files = new Map<string, TFile>();
   const value: NoteSessionsHost = {
     agents: () => agents,
+    file: (path) => {
+      if (missing.has(path)) return null;
+      if (!files.has(path)) files.set(path, { path } as TFile);
+      return files.get(path)!;
+    },
     idleMinutes: () => 15,
     addWork: (work) => {
       works.push(work);
@@ -29,7 +37,7 @@ function host(agents: ConversationAgent[], works: AgentWork[] = []) {
     },
     follow: (each) => void events.push(each),
   };
-  return { value, events };
+  return { value, events, missing };
 }
 
 /** A NoteSessions over agents that the test changes, with the work and the saves it records. */
@@ -38,11 +46,11 @@ function fixture<State = undefined>(ids: SessionIds = {}, options: NoteSessionsO
   const agents: ConversationAgent[] = [{ name: "claude", color: "#d97757", agent: claude }];
   const works: AgentWork[] = [];
   const saved: SessionIds[] = [];
-  const { value, events } = host(agents, works);
+  const { value, events, missing } = host(agents, works);
   const notes = new NoteSessions<State>(value, { ids, save: (next) => void saved.push(next), ...options });
   // What the vault and setAgents tell the note sessions.
   const vault = events[0]!;
-  return { claude, agents, works, saved, notes, vault };
+  return { claude, agents, works, saved, notes, vault, value, missing };
 }
 
 /** A turn that runs until the test releases it. */
@@ -80,6 +88,32 @@ describe("NoteSessions", () => {
     expect(lost.continued).toBe(false);
     expect(lost.session.id).not.toBe(earlier.id);
     await expect(notes.session("Ideas.md", "gemini")).rejects.toThrow("Yami has no agent named gemini. Agents: claude.");
+  });
+
+  it("gives setup the note's file, and rejects a path that is no note before a session starts", async () => {
+    const seen: NoteAgent[] = [];
+    const { claude, notes, missing } = fixture({}, { setup: (note) => (seen.push(note), {}) });
+    await notes.session("Ideas.md");
+    expect(seen.map(({ path, agent, file }) => [path, agent, file.path])).toEqual([["Ideas.md", "claude", "Ideas.md"]]);
+    missing.add("Gone.md");
+    await expect(notes.session("Gone.md")).rejects.toThrow("There is no note at Gone.md.");
+    expect(claude.started).toHaveLength(1);
+    expect(notes.ids["Gone.md"]).toBeUndefined();
+  });
+
+  it("types a session's state by what every setup gives", async () => {
+    const { value } = fixture();
+    const always = new NoteSessions(value, { setup: () => ({ state: 1 }) });
+    const one: number = (await always.session("Ideas.md")).state;
+    expect(one).toBe(1);
+    const sometimes = new NoteSessions(value, { setup: ({ path }) => (path === "Ideas.md" ? { state: 1 } : {}) });
+    // @ts-expect-error A setup that gives no state on one path makes the state possibly undefined.
+    const none: number = (await sometimes.session("Plans.md")).state;
+    expect(none).toBeUndefined();
+    // @ts-expect-error A state type needs a state from every setup.
+    expect(new NoteSessions<number>(value, { setup: () => ({}) })).toBeDefined();
+    const stateless: undefined = (await new NoteSessions(value).session("Ideas.md")).state;
+    expect(stateless).toBeUndefined();
   });
 
   it("follows a renamed note and folder, forgets a removed note, and forgets on request", async () => {

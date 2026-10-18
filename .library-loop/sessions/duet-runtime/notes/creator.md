@@ -32,3 +32,14 @@ Watch next round:
 - Not verified: the composer's `render` reads `controller.registered`, which throws when no agents are left. An open conversation note after `setAgents([])` may break. Write a test with a real composer before you fix it.
 - The consumer may want `TFile` in `setup`. I gave a path on purpose.
 - Retired agents still never prune. The showcase has no use of noteSessions or animate (Policy item).
+
+## Round 3 (0.12.0)
+Decided (all three accepted, per the ruling, and the overseer's no-agents item):
+- F2.1: `NoteSessionSetup<State>` is a type: `state` required when `undefined extends State` is false. Inference still works (probed with tsgo). `npm test` now runs `tsc -p tsconfig.test.json` first, so `@ts-expect-error` cases are real tests. Fixed 6 old type errors in tests (reads, wiki, manager).
+- F2.2: `NoteAgent.file: TFile`, looked up in `options()` before the start; `There is no note at <path>.` rejects otherwise (BREAK). Host gets `file(path)`.
+- F2.3: composer `draw(part, value, write)` writes a part only when its value changes. Test: `test/unit/obsidian/composer.test.ts` over happy-dom (new devDependency), set up by hand in a node env, with Obsidian's DOM helpers polyfilled.
+- No agents: `controller.registered` is `| undefined` (BREAK), `harness` too. While a session is open, `registered` is the session's agent (by `SessionSlot.agent`), else `#chosen()`. `unavailable` gives `noAgents` text (`noAgentsMessage(manifest.name)`, also the ribbon's). Composer shows `.yami-unavailable`, keeps the draft, disables Send.
+
+Watch next round:
+- The new CSS for `.yami-unavailable` and the no-agents flow are not run in real Obsidian by me. The consumer's test:obsidian may show it.
+- Retired agents still never prune. The showcase has no use of noteSessions or animate (Policy item, for the user at the end).

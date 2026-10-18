@@ -6,7 +6,7 @@ import { Flow, type ActionResult, type ModuleAct, type ModuleAction, type YamiMo
 import type { Session } from "../module/session.js";
 import { Yami } from "../module/yami.js";
 import type { WikiOptions } from "../wiki/wiki.js";
-import { vaultRoot, type ConversationAgent } from "./agents.js";
+import { noAgentsMessage, vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
 import { ChangeFeed } from "./change-feed.js";
 import { showFolderColors } from "./colors.js";
@@ -104,7 +104,7 @@ export class ObsidianYami extends Yami {
   readonly #idleMinutes: number | (() => number);
   readonly #animate: boolean | (() => boolean);
   readonly #works = new Set<AgentWork>();
-  readonly #noteSessions = new Set<NoteSessions<unknown>>();
+  readonly #noteSessions = new Set<{ close(): Promise<void> }>();
   readonly #noteEvents = new Set<NoteEvents>();
   /** The functions that bring the commands of each agent up to date. */
   readonly #agentCommands: (() => void)[] = [];
@@ -137,6 +137,7 @@ export class ObsidianYami extends Yami {
       animate: this.animate,
       idleMinutes: () => read(this.#idleMinutes),
       onActivity: () => this.updateStatus(),
+      noAgents: noAgentsMessage(plugin.manifest.name),
     });
     runs = new ObsidianConversations(app, conversations, () => [...this.#registered, ...this.#retired]);
     this.app = app;
@@ -274,7 +275,7 @@ export class ObsidianYami extends Yami {
    * const notes = this.yami.noteSessions({
    *   ids: data.sessions,
    *   save: (ids) => this.saveData({ ...data, sessions: ids }),
-   *   setup: ({ path }) => { const reply = new Reply(path); return { options: { instructions, access: "read-only", tools: reply.tools, skills: [] }, state: reply }; },
+   *   setup: ({ file }) => { const reply = new Reply(file); return { options: { instructions, access: "read-only", tools: reply.tools, skills: [] }, state: reply }; },
    * });
    * const { session, state: reply } = await notes.session(file.path, "claude");
    * await notes.forget(file.path);
@@ -283,6 +284,7 @@ export class ObsidianYami extends Yami {
     const notes = new NoteSessions<State>(
       {
         agents: () => this.#registered,
+        file: (path) => this.app.vault.getFileByPath(path),
         idleMinutes: () => read(this.#idleMinutes),
         addWork: (work) => this.addWork(work),
         follow: (events) => {

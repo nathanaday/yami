@@ -315,7 +315,7 @@ describe("checks", () => {
     const wiki = await fixture();
     await note(`${SOURCES}/pending.md`, { type: "source", description: "Pending.", file: "[[x.pdf]]", status: "pending" }, "");
     await wiki.refresh();
-    const context = (sources: string[]) => ({ vault, wiki, session: "s", path: "s.md", properties: { sources: sources.map(link) } });
+    const context = (sources: string[]) => ({ vault, wiki, path: "s.md", properties: { sources: sources.map(link) } });
     const absorbed = { path: "p", properties: { check: "property", field: "sources", property: "status", value: "absorbed" }, body: "" };
     expect(await runCheck(absorbed, context([`${SOURCES}/codex-notes.md`]))).toMatchObject({ status: "met" });
     expect(await runCheck(absorbed, context([`${SOURCES}/codex-notes.md`, `${SOURCES}/pending.md`]))).toMatchObject({
@@ -797,7 +797,7 @@ describe("what the index leaves out", () => {
     expect(paths.some((p) => p.startsWith("internal/wiki/changes/") || p.startsWith("internal/wiki/snapshots/") || p.startsWith("internal/wiki/skills/"))).toBe(false);
     expect((await wiki.search("codex app-server")).map((h) => h.path)).not.toContain(result.path);
     const check = { path: "p", properties: { check: "property", field: "changes", property: "status", value: "applied", atLeast: 1 }, body: "" };
-    expect(await runCheck(check, { vault, wiki, session: "s", path: "s.md", properties: { changes: [link(result.path)] } })).toMatchObject({ status: "met" });
+    expect(await runCheck(check, { vault, wiki, path: "s.md", properties: { changes: [link(result.path)] } })).toMatchObject({ status: "met" });
   });
 });
 

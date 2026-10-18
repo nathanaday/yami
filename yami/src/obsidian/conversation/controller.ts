@@ -1,5 +1,6 @@
 import { type App, Notice, type TFile } from "obsidian";
 import type {
+  Agent,
   AgentEvent,
   AgentSession,
   ApprovalSetting,
@@ -78,6 +79,8 @@ type TurnWaiter = (turn: TurnEnd) => void;
 export interface ControllerOptions {
   animate: () => boolean;
   idleMinutes: () => number;
+  /** What the composer says, and a message's notice, when Yami has no agents. */
+  noAgents: string;
   newConversation: (agent: ConversationAgent) => void;
   onActivity: () => void;
   onTurnEnd: (turn: TurnEnd) => void;
@@ -120,6 +123,8 @@ export class ConversationController {
    * host removes or replaces the agent meanwhile. None: the agent that the note names.
    */
   pinned: ConversationAgent | undefined;
+  /** The agent that the session started with, with its name and color then. */
+  #startedWith: ConversationAgent | undefined;
 
   constructor(
     private readonly app: App,
@@ -129,9 +134,13 @@ export class ConversationController {
     private readonly prompts: PermissionPrompts,
     private readonly options: ControllerOptions,
   ) {
-    this.presence = new Presence(() => this.registered, options.animate);
+    this.presence = new Presence(() => this.registered ?? { name: this.agentName, color: "" }, options.animate);
     this.slot = new SessionSlot({
-      agent: () => this.registered.agent,
+      agent: () => {
+        const chosen = this.#chosen();
+        if (!chosen) throw new Error(options.noAgents);
+        return chosen.agent;
+      },
       options: () => ({
         instructions: INSTRUCTIONS,
         model: this.property("model"),
@@ -148,6 +157,7 @@ export class ConversationController {
       record: (id) => (this.properties.session === id ? undefined : this.setProperty("session", id)),
       idleMinutes: options.idleMinutes,
       started: (session) => {
+        this.#startedWith = this.#entryOf(this.slot.agent);
         session.on((event) => this.handle(event));
         void Promise.all([session.models(), session.commands()])
           .then(([models, commands]) => {
@@ -170,22 +180,42 @@ export class ConversationController {
     return typeof value === "string" ? value : undefined;
   }
 
-  /** The agent of the note: a run's pinned agent, or the agent that the note names in its `agent` property, or else the first agent. */
-  get registered(): ConversationAgent {
+  /** The agent that a new session starts: a run's pinned agent, or the agent that the note names in its `agent` property, or else the first agent. */
+  #chosen(): ConversationAgent | undefined {
     if (this.pinned) return this.pinned;
     const agents = this.agents();
     const name = this.property("agent");
-    const found = agents.find((candidate) => candidate.name === name) ?? agents[0];
-    if (!found) throw new Error("Yami has no agents.");
-    return found;
+    return agents.find((candidate) => candidate.name === name) ?? agents[0];
   }
 
-  get harness(): Harness {
-    return this.registered.agent.harness;
+  /**
+   * The agent of the conversation. While its session is open, the agent that the session runs, with its name
+   * and color now, or as they were when the host removed it. Otherwise the agent that a new session starts. None
+   * when Yami has no agents and no session is open.
+   */
+  get registered(): ConversationAgent | undefined {
+    const agent = this.slot.live && this.slot.agent;
+    if (!agent) return this.#chosen();
+    return this.#entryOf(agent) ?? this.#startedWith ?? this.#chosen();
   }
 
+  /** The entry of an agent among the pinned agent and the host's agents now. */
+  #entryOf(agent: Agent | undefined): ConversationAgent | undefined {
+    return [this.pinned, ...this.agents()].find((candidate) => candidate && candidate.agent === agent);
+  }
+
+  /** Why the conversation takes no new message now, such as `<plugin> has no agents. Add one in its settings.` None when it takes one. */
+  get unavailable(): string | undefined {
+    return this.#chosen() ? undefined : this.options.noAgents;
+  }
+
+  get harness(): Harness | undefined {
+    return this.registered?.agent.harness;
+  }
+
+  /** The name of the agent, or the name that the note gives when Yami has no agents. */
   get agentName(): string {
-    return this.registered.name;
+    return this.registered?.name ?? this.property("agent") ?? "agent";
   }
 
   get ended(): boolean {
@@ -193,15 +223,15 @@ export class ConversationController {
   }
 
   get model(): string | undefined {
-    return this.property("model") || this.registered.agent.preferences.model || undefined;
+    return this.property("model") || this.registered?.agent.preferences.model || undefined;
   }
 
   get effort(): string | undefined {
-    return this.property("effort") || this.registered.agent.preferences.effort || undefined;
+    return this.property("effort") || this.registered?.agent.preferences.effort || undefined;
   }
 
   get approval(): ApprovalSetting {
-    return (this.property("approval") as ApprovalSetting | undefined) ?? this.registered.agent.preferences.approval ?? "ask";
+    return (this.property("approval") as ApprovalSetting | undefined) ?? this.registered?.agent.preferences.approval ?? "ask";
   }
 
   get working(): boolean {
@@ -297,7 +327,7 @@ export class ConversationController {
 
   async setApproval(approval: ApprovalSetting): Promise<void> {
     const previous = this.property("approval");
-    await this.setProperty("approval", approval === (this.registered.agent.preferences.approval ?? "ask") ? undefined : approval);
+    await this.setProperty("approval", approval === (this.registered?.agent.preferences.approval ?? "ask") ? undefined : approval);
     if (!(await this.configure({ approval }))) await this.setProperty("approval", previous);
     this.changed();
   }
@@ -350,6 +380,12 @@ export class ConversationController {
   }
 
   private async run(message: string, waiter?: TurnWaiter): Promise<void> {
+    const unavailable = this.unavailable;
+    if (unavailable) {
+      new Notice(unavailable);
+      this.turnEnded("failed", unavailable, undefined, waiter);
+      return;
+    }
     this.phase = "starting";
     this.status = "Starting";
     this.interruptPending = false;
@@ -551,9 +587,12 @@ export class ConversationController {
         if (!MODES[value.toLowerCase()]) new Notice("Modes: ask, edits, plan, auto, sandbox.");
         else await this.setApproval(MODES[value.toLowerCase()]!);
         return;
-      case "new":
-        this.options.newConversation(this.registered);
+      case "new": {
+        const agent = this.registered;
+        if (agent) this.options.newConversation(agent);
+        else new Notice(this.options.noAgents);
         return;
+      }
       case "end":
         await this.end();
     }

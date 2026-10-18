@@ -749,11 +749,13 @@ button.yami-send.is-stop svg {
   cursor: default;
 }
 
-.yami-ended {
+.yami-ended,
+.yami-unavailable {
   display: none;
 }
 
-.yami-composer.is-ended .yami-ended {
+.yami-composer.is-ended .yami-ended,
+.yami-composer.is-unavailable:not(.is-ended) .yami-unavailable {
   display: flex;
   align-items: center;
   justify-content: center;

@@ -829,8 +829,9 @@ What happens to the work that runs when an agent changes:
 | An idle conversation | Its agent session closes at once; the next message starts the new agent as above. |
 | A session's run | The run keeps its agent until it ends, with its worker, its review, and its agents. The run's conversation keeps the agent's name and color. |
 | A session of `noteSessions` | As a conversation: a turn goes on, and then the session closes. Its next `session()` call starts the agent of that name now, or rejects with `Yami has no agent named <name>.` when none has it. |
+| An open conversation note when no agent is left | It does not break. A turn that runs goes on with its agent, and then its agent session closes. The message box says `<plugin name> has no agents. Add one in its settings.`, keeps the text that the person types, and sends nothing. A message that comes another way, such as a queued one, shows the same text in a notice. When `setAgents` adds an agent again, the message box takes messages at once, and the next message continues the note's harness session when the harness still has it. |
 
-So no process of an agent that is gone stays open once its work ends. `yami.close()`, which the plugin's unload calls, also closes the sessions of the agents that `setAgents` removed.
+So no process of an agent that is gone stays open once its work ends. A composer writes only the parts whose value changed, so a `setAgents` that leaves a note's agent with its name and color writes nothing in that note's message box. `yami.close()`, which the plugin's unload calls, also closes the sessions of the agents that `setAgents` removed.
 
 The other options are fixed at `createYami`, because they choose the parts of the plugin: `modules`, `wiki` but `exclude` and `defaultAlgorithm`, `commands`, `statusBar`, and `folderColors`.
 
@@ -898,16 +899,16 @@ A plugin can turn off each part that it replaces with its own, and extend a part
 A host can run agent sessions of its own, outside conversation notes and session runs, and still show them as Yami shows its own:
 
 - `yami.addWork({ name, path?, stop? })` shows the work in the status bar until the function that it returns ends it. With a `path` and a `stop`, `yami-stop` in that note calls `stop`. `path` is read at each use, so a getter can follow a rename. `yami.works` lists the work that has not ended.
-- `yami.noteSessions({ ids?, save?, idleMinutes?, setup? })` gives the harness sessions of notes, one for each note and agent, for agents that work in a note that is not a conversation note, such as an agent that answers in the margin. `notes.session(path, agent?)` gives `{ session, continued, state }`: the open session of the note and the agent, or a new one that continues the session the host stored for them, or a session that starts new when the harness lost it (`resumeOrStart`). `continued` is false only for a session that starts new, with none of the note's earlier exchange, so the host then sends the whole context. `agent` is the name of an agent of the Yami; default: the first. It rejects with `Yami has no agent named <name>. Agents: <names>.`, or `Yami has no agents.` While the session is in a turn, it is a work of `addWork`, so the status bar shows it and `yami-stop` in the note interrupts it.
-- `setup(note)` makes each session that starts, once for each harness session: its `options` (such as `instructions`, `access`, `tools`, and `skills`), the host's own `state` of it, and `started(session)`, which hears the session before `notes.session()` gives it. `note` is `{ path, agent }` (`NoteAgent`), and `path` follows a rename. So state that belongs to one harness session, such as tools bound to its reply queue, lives with that session: the host keeps no map of its own, and subscribes to the session's events once, in `started`. A session that closed and starts again gets a new setup. `state` is typed by what `setup` gives; with no `setup`, it is `undefined` and the session takes the agent's preferences.
+- `yami.noteSessions({ ids?, save?, idleMinutes?, setup? })` gives the harness sessions of notes, one for each note and agent, for agents that work in a note that is not a conversation note, such as an agent that answers in the margin. `notes.session(path, agent?)` gives `{ session, continued, state }`: the open session of the note and the agent, or a new one that continues the session the host stored for them, or a session that starts new when the harness lost it (`resumeOrStart`). `continued` is false only for a session that starts new, with none of the note's earlier exchange, so the host then sends the whole context. `agent` is the name of an agent of the Yami; default: the first. It rejects with `Yami has no agent named <name>. Agents: <names>.`, or `Yami has no agents.`, and, before a new session starts, with `There is no note at <path>.` when the vault has no note at `path`. While the session is in a turn, it is a work of `addWork`, so the status bar shows it and `yami-stop` in the note interrupts it.
+- `setup(note)` makes each session that starts, once for each harness session: its `options` (such as `instructions`, `access`, `tools`, and `skills`), the host's own `state` of it, and `started(session)`, which hears the session before `notes.session()` gives it. `note` is `{ path, file, agent }` (`NoteAgent`): `path` follows a rename, and `file` is the note's `TFile`, which Obsidian keeps for the note across a rename, so a host binds its state to the note with no lookup, as `hub.acquire(file, holder)`. So state that belongs to one harness session, such as tools bound to its reply queue, lives with that session: the host keeps no map of its own, and subscribes to the session's events once, in `started`. A session that closed and starts again gets a new setup. `state` is typed by what `setup` gives. When a state type cannot be undefined, every setup must give a state, so `state` is never undefined: `noteSessions<Reply>({ setup: () => ({ options }) })` does not compile. A setup that gives a state on one path and none on another makes the type `State | undefined`. With no `setup`, `state` is `undefined` and the session takes the agent's preferences.
 - The host stores the ids, as `SessionIds`: for each note path, the session id of each agent by the agent's name. It gives the stored ones in `ids`, and `save` gets every id after each change: a session that starts, a renamed note or folder, a removed note, and `notes.forget(path)`, which closes the note's sessions and drops their ids. `notes.ids` gives them too.
 
 ```ts
 const notes = this.yami.noteSessions({
   ids: this.data.sessions,
   save: (ids) => this.saveData({ ...this.data, sessions: ids }),
-  setup: ({ path }) => {
-    const reply = new Reply(path);                             // the host's own state of one harness session
+  setup: ({ file }) => {
+    const reply = new Reply(file);                             // the host's own state of one harness session
     return { options: { instructions, access: "read-only", tools: reply.tools, skills: [] }, state: reply, started: (session) => session.on(reply.hear) };
   },
 });
@@ -959,6 +960,7 @@ const conversations = new ConversationManager(this.app, hub, new PermissionPromp
   animate: () => true,
   idleMinutes: () => 15,
   onActivity: () => {},
+  noAgents: `${this.manifest.name} has no agents. Add one in its settings.`,   // optional; the default names Yami
 });
 conversations.install(this);
 
@@ -987,6 +989,7 @@ A conversation note is a document with `type: conversation`; the format is in `y
 - The composer shows approval requests and questions above the message box, with `Y`, `A`, and `N` keys. With no composer open, `PermissionPrompts` shows a dialog.
 - `/model`, `/effort`, `/mode`, `/new`, and `/end` are local commands. Other `/` commands come from the harness. `[[` suggests notes.
 - The agent process closes after `idleMinutes` without a composer; the next message resumes the session from the `session` property.
+- `controller.registered` is the agent of the note: while its session is open, the agent that the session runs, also one that the host removed; otherwise the agent that the next message starts. It is `undefined` when no agent is left and no session is open. `controller.unavailable` is then the `noAgents` text of the options, and the composer shows it, with the class `is-unavailable` on `.yami-composer`, and sends nothing. `controller.agentName` falls back to the note's `agent` property, so the name stays in the message box.
 
 ### The wiki in Obsidian (`obsidian/wiki/`)
 

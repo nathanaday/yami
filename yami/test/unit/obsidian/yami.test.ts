@@ -78,8 +78,16 @@ async function fakePlugin() {
   const vaultEvents = new Map<string, ((...args: unknown[]) => void)[]>();
   const onVault = (name: string, callback: (...args: unknown[]) => void) => (vaultEvents.set(name, [...(vaultEvents.get(name) ?? []), callback]), {});
   let active: { path: string; basename: string; extension: string } | null = null;
+  /** The paths of the notes in the vault. */
+  const notes = new Set<string>();
   const app = {
-    vault: { adapter: new FileSystemAdapter(root), on: onVault, offref: () => undefined, getConfig: () => undefined, getFileByPath: () => null },
+    vault: {
+      adapter: new FileSystemAdapter(root),
+      on: onVault,
+      offref: () => undefined,
+      getConfig: () => undefined,
+      getFileByPath: (path: string) => (notes.has(path) ? { path } : null),
+    },
     metadataCache: { on, offref: () => undefined, getFileCache: () => null, getCache: () => null },
     workspace: { on, onLayoutReady: () => undefined, iterateAllLeaves: () => undefined, getActiveFile: () => active, getActiveViewOfType: () => null },
   };
@@ -113,6 +121,7 @@ async function fakePlugin() {
   return {
     plugin,
     root,
+    notes,
     commands,
     status,
     working: () => classes.has("is-working"),
@@ -175,6 +184,8 @@ describe("createYami", () => {
     expect([...fake!.commands.keys()].filter((id) => id.startsWith("yami-new-conversation-") || id.startsWith("yami-run-session-"))).toEqual([]);
     fake!.ribbon();
     expect(notices()).toEqual(["Test Plugin has no agents. Add one in its settings."]);
+    // A conversation note says the same.
+    expect((yami.conversations as unknown as { options: { noAgents: string } }).options.noAgents).toBe("Test Plugin has no agents. Add one in its settings.");
   });
 });
 
@@ -260,6 +271,7 @@ describe("noteSessions", () => {
     const claude = new ScriptedAgent();
     const yami = await build({ agents: [claude] });
     const notes = yami.noteSessions({ setup: () => ({ options: { skills: [] } }) });
+    fake!.notes.add("Ideas.md");
     const { session } = await notes.session("Ideas.md", "claude");
     expect(claude.last!.options.skills).toEqual([]);
     claude.queue(() => new Promise(() => undefined));
@@ -271,10 +283,21 @@ describe("noteSessions", () => {
     expect(fake!.status.text).toBe("");
   });
 
+  it("gives setup the note's file from the vault", async () => {
+    const yami = await build({ agents: [new ScriptedAgent()] });
+    const files: unknown[] = [];
+    const notes = yami.noteSessions({ setup: ({ file }) => (files.push(file), {}) });
+    await expect(notes.session("Ideas.md")).rejects.toThrow("There is no note at Ideas.md.");
+    fake!.notes.add("Ideas.md");
+    await notes.session("Ideas.md");
+    expect(files).toEqual([{ path: "Ideas.md" }]);
+  });
+
   it("follows the vault's renames and removals with no call of the host", async () => {
     const claude = new ScriptedAgent();
     const yami = await build({ agents: [claude] });
     const notes = yami.noteSessions();
+    fake!.notes.add("Projects/Ideas.md");
     const { session } = await notes.session("Projects/Ideas.md");
     fake!.vault("rename", { path: "Work" }, "Projects");
     expect(Object.keys(notes.ids)).toEqual(["Work/Ideas.md"]);

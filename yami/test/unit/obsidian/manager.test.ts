@@ -225,10 +225,10 @@ describe("ConversationManager", () => {
   beforeEach(() => {
     fake = fakeApp();
     session = fakeSession();
-    claude = new FakeAgent("claude", async () => session);
+    claude = new FakeAgent("claude", async () => session as unknown as AgentSession);
     agents = [
       { name: "claude", color: "#d97757", agent: claude },
-      { name: "codex", color: "#4f8cf7", agent: new FakeAgent("codex", async () => session) },
+      { name: "codex", color: "#4f8cf7", agent: new FakeAgent("codex", async () => session as unknown as AgentSession) },
     ];
     manager = new ConversationManager(fake.app as never, fakeHub(fake.text) as never, {} as never, {
       agents: () => agents,
@@ -519,7 +519,7 @@ describe("ConversationManager", () => {
       await settle();
       expect(first.closed).toBe(true);
       const controller = manager.conversation(file);
-      expect(controller.registered.color).toBe("#123456");
+      expect(controller.registered?.color).toBe("#123456");
       void controller.send("Again");
       await settle();
       expect(replaced.sessions).toHaveLength(1);

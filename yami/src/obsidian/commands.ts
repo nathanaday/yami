@@ -3,6 +3,7 @@ import { basename } from "../document/document.js";
 import type { YamiModule } from "../module/module.js";
 import type { SessionAct } from "../module/session.js";
 import { WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
+import { noAgentsMessage } from "./agents.js";
 import { moduleIcon } from "./icons.js";
 import { WikiCompareModal } from "./wiki/compare-modal.js";
 import { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
@@ -49,7 +50,7 @@ export function addConversationCommands(yami: ObsidianYami): () => void {
   const { plugin, conversations } = yami;
   const start = (name?: string) => {
     const agent = name === undefined ? yami.registered[0] : yami.registered.find((candidate) => candidate.name === name);
-    if (!agent) return void new Notice(name === undefined ? `${plugin.manifest.name} has no agents. Add one in its settings.` : `${plugin.manifest.name} has no agent named ${name}.`);
+    if (!agent) return void new Notice(name === undefined ? noAgentsMessage(plugin.manifest.name) : `${plugin.manifest.name} has no agent named ${name}.`);
     void yami.notify(conversations.create(agent).then((file) => `Opened ${file.path}.`));
   };
   plugin.addRibbonIcon("message-square-plus", "New conversation", () => start());

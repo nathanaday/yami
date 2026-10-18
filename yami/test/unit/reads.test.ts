@@ -15,7 +15,7 @@ afterEach(async () => {
 
 /** A module with a second flow, an article, and an action on its sessions that applies once a session is done. */
 class Rich extends Hello {
-  readonly id = "rich";
+  readonly id: string = "rich";
   readonly guide = this.article("Style guide", "Short lines.");
   readonly tidy = this.flow({ name: "tidy", description: "Tidies.", articles: [this.guide], promises: [this.note] });
   readonly archive = this.action({ id: "archive", name: "Archive this greeting", on: this.greet, when: (p) => p.state === "done", run: async (s) => `Archived ${s.path}.` });
@@ -24,7 +24,7 @@ class Rich extends Hello {
 async function fresh(turns: Turn[] = []) {
   const rich = new Rich();
   t = await testYami({ modules: [rich], turns });
-  t.yami.agents.push(new ScriptedAgent());
+  t.yami.setAgents([...t.yami.agents, new ScriptedAgent()]);
   return { ...t, rich };
 }
 
