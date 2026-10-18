@@ -47,6 +47,7 @@ export function judge(config, side, input) {
 }
 
 function read(config, side, p) {
+  if (config.shared.includes(p)) return null;
   if (inside(p, config.dirs[other(side)])) {
     return `${rel(config, p)} is in the ${NAME[other(side)]}, which the ${side} never sees. ${HINT[side]}`;
   }
@@ -55,12 +56,12 @@ function read(config, side, p) {
 }
 
 function write(config, side, p) {
-  if (inside(p, config.dirs[side])) return null;
-  if (inside(p, config.dirs[other(side)])) return read(config, side, p);
-  if (inside(p, config.exchange)) return exchange(config, side, p, "write");
   if (config.shared.some((s) => inside(p, s))) {
     return `${rel(config, p)} is shared policy, which only the user changes. Propose the change in your report.`;
   }
+  if (inside(p, config.dirs[side])) return null;
+  if (inside(p, config.dirs[other(side)])) return read(config, side, p) ?? `${rel(config, p)} is in the ${NAME[other(side)]}.`;
+  if (inside(p, config.exchange)) return exchange(config, side, p, "write");
   return `the ${side} writes only in ${rel(config, config.dirs[side])}/ and its own session files. ${rel(config, p)} is outside them.`;
 }
 

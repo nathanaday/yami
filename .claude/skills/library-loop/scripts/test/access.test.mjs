@@ -146,6 +146,14 @@ describe("a consumer in another repository", () => {
     allowed(judgeAs("creator", "git log -- .", host.at("lib")));
     denied(judge(duo, "creator", { tool_name: "Read", tool_input: { file_path: other.at("app/src/b.ts") }, cwd: host.root }), /is in the consumer app/);
     allowed(judge(duo, "consumer", { tool_name: "Write", tool_input: { file_path: other.at("app/src/c.ts") }, cwd: host.root }));
+    settings.sessions.duo.shared = ["design.md", path.relative(host.root, other.at("app/design.md"))];
+    other.file("app/design.md", "# app policy\n");
+    writeFileSync(host.at(".library-loop/config.json"), JSON.stringify(settings));
+    const shared = loadConfig(host.root);
+    allowed(judge(shared, "creator", { tool_name: "Read", tool_input: { file_path: other.at("app/design.md") }, cwd: host.root }));
+    denied(judge(shared, "creator", { tool_name: "Write", tool_input: { file_path: other.at("app/design.md") }, cwd: host.root }), /is shared policy/);
+    denied(judge(shared, "consumer", { tool_name: "Edit", tool_input: { file_path: other.at("app/design.md") }, cwd: host.root }), /is shared policy/);
+    denied(judge(shared, "creator", { tool_name: "Read", tool_input: { file_path: other.at("app/src/b.ts") }, cwd: host.root }), /in the consumer app/);
     denied(judge(duo, "consumer", { tool_name: "Write", tool_input: { file_path: host.at("app/src/c.ts") }, cwd: host.root }), /writes only in/);
   });
 });
