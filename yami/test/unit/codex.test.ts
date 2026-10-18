@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { afterEach, describe, expect, it } from "vitest";
 import { startCodexSession, unwrapShell } from "../../src/agent/codex.js";
+import { READ_ONLY_RULE } from "../../src/agent/scratch.js";
 import { isSkillRead } from "../../src/agent/skills.js";
 import { type AgentEvent, type AgentSession, defineTool, type PermissionDecision, type PermissionRequest } from "../../src/agent/index.js";
 
@@ -96,6 +97,11 @@ describe("codex adapter", () => {
     await allowed.session.close();
     const denied = await start("deny");
     expect(JSON.parse((await denied.session.send("permissions")).text)).toEqual({ permissions: {}, scope: "turn" });
+  });
+
+  it("tells a read-only session where its commands write, after the host's instructions", async () => {
+    session = await startCodexSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, access: "read-only", instructions: "Be brief." });
+    expect((await session.send("instructions")).text).toBe(`Be brief.\n\n${READ_ONLY_RULE}`);
   });
 
   it("passes instructions to the thread as developer instructions", async () => {
@@ -271,6 +277,8 @@ describe("codex adapter", () => {
       'default_permissions=":workspace"',
       'default_permissions="yami-read-only"',
       `permissions.yami-read-only.filesystem={":root"="read", "${scratch}"="write"}`,
+      // The host's config cannot turn the network of the profile on.
+      "permissions.yami-read-only.network.enabled=false",
       `shell_environment_policy.set.TMPDIR="${scratch}"`,
       `shell_environment_policy.set.TMP="${scratch}"`,
       `shell_environment_policy.set.TEMP="${scratch}"`,

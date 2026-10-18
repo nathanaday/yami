@@ -121,13 +121,17 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
     it("stops a running command on interrupt", { timeout: TIMEOUT }, async () => {
       const { session, events } = await start("allow");
       const toolStarted = new Promise<void>((resolve) => session.on((event) => event.type === "tool-start" && resolve()));
-      const turn = session.send("Run exactly this shell command and nothing else: sleep 45");
+      // Each harness sleeps for its own time, so the suites can run at the same time.
+      const command = `sleep ${harness === "claude" ? 45 : 46}`;
+      const running = () => execSync(`pgrep -fl '^${command}$' || true`).toString().trim();
+      const turn = session.send(`Run exactly this shell command and nothing else: ${command}`);
       await toolStarted;
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // The test is of a command that runs, so it interrupts once the command has started.
+      while (!running()) await new Promise((resolve) => setTimeout(resolve, 200));
       await session.interrupt();
       expect((await turn).status).toBe("interrupted");
       await new Promise((resolve) => setTimeout(resolve, 3000));
-      expect(execSync("pgrep -fl '^sleep 45$' || true").toString().trim()).toBe("");
+      expect(running()).toBe("");
       expect(events.filter((event) => event.type === "closed")).toHaveLength(0);
     });
 
@@ -249,6 +253,23 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
       expect(output).toMatch(/ok\s+example\.com\/sum/);
       expect(output).toContain("vet-ok");
       expect(execSync("git status --porcelain", { cwd: repo }).toString().trim()).toBe("");
+      expect(requests).toEqual([]);
+    });
+
+    it("keeps a read-only session's commands off the network: an outside host fails, and so does a push to a local bare remote", { timeout: TIMEOUT }, async () => {
+      const { vault, repo } = readOnlyRepo({ "a.txt": "a\n" });
+      const remote = mkdtempSync(path.join(tmpdir(), `yami-${harness}-read-only-remote-`));
+      execSync("git init -q --bare", { cwd: remote });
+      execSync(`git remote add origin ${remote}`, { cwd: repo });
+      const { result, output, requests } = await runReadOnly(
+        vault,
+        `\`curl -sS -m 20 -o /dev/null -w "http=%{http_code}" https://example.org; echo " curl-exit=$?"\`, then \`git -C ${repo} push origin HEAD:refs/heads/main; echo "push-exit=$?"\`.`,
+      );
+      expect(result.status).toBe("completed");
+      expect(output).toMatch(/curl-exit=[1-9]/);
+      expect(output).not.toMatch(/http=(?!000)\d{3}/);
+      expect(output).toMatch(/push-exit=[1-9]/);
+      expect(execSync("git for-each-ref", { cwd: remote }).toString().trim()).toBe("");
       expect(requests).toEqual([]);
     });
 

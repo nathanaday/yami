@@ -8,7 +8,22 @@ import { join } from "node:path";
  * whose sandbox must deny each one by name.
  */
 export function createScratch(): string {
-  return mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "yami-read-only-"));
+  return mkdtempSync(join(SCRATCH_PARENT, "yami-read-only-"));
+}
+
+/** The folder that holds every scratch folder. */
+export const SCRATCH_PARENT = process.platform === "win32" ? tmpdir() : "/tmp";
+
+/**
+ * What a read-only session's instructions say about writes, on both harnesses. Claude Code's own notes on its
+ * sandbox say that commands write the working directory, which a read-only session denies.
+ */
+export const READ_ONLY_RULE =
+  "This session is read-only. Your commands write only in $TMPDIR, a scratch folder that goes when the session ends. Put any file that a command must write there, such as a coverage profile or a build output. The working directory and every other folder are not writable, whatever other notes on the sandbox say.";
+
+/** The instructions of a session: the host's, and for a read-only session the rule of its writes after them. */
+export function sessionInstructions(instructions: string | undefined, readOnly: boolean): string | undefined {
+  return [instructions, readOnly && READ_ONLY_RULE].filter(Boolean).join("\n\n") || undefined;
 }
 
 /**

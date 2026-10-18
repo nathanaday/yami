@@ -52,8 +52,11 @@ export interface SessionOptions {
    * things through `tools`. The session has a scratch folder of its own under `/tmp`, which it removes when
    * it closes. Its commands write only there, with `TMPDIR` and the usual caches (`GOCACHE`, `XDG_CACHE_HOME`,
    * `npm_config_cache`, and others) pointed at it, so a test suite that writes a cache or a temporary file
-   * runs; a command that writes anywhere else fails. Claude Code runs the commands in its sandbox, and Codex
-   * in a permissions profile that writes only the scratch folder.
+   * runs; a command that writes anywhere else fails. The commands reach no network beyond what the user's
+   * settings allow: on Claude Code, the hosts that the user's settings allow, and on Codex none. The session's
+   * instructions end with this rule of its writes. Claude Code runs the commands in its sandbox, and Codex
+   * in a permissions profile that writes only the scratch folder. A Claude Code session does not start when a
+   * user or managed setting lets the sandbox write a folder that holds the scratch folder, such as `/tmp`.
    */
   access?: "edit" | "read-only";
   /**

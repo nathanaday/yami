@@ -121,17 +121,20 @@ export async function resolveLink(vault: Vault, name: string, folders: string[])
 /** A wiki link, `[[target#heading|alias]]`, or an embed with `!`. Group 1 is the target; group 2 the heading and the alias. */
 export const LINK = /!?\[\[([^\]|#]+)((?:#[^\]|]*)?(?:\|[^\]]*)?)\]\]/g;
 
-/** The lines of a `## heading` section: its heading's line, and the line after its end. A heading starts at column 0. */
+/** A level-2 heading line, as Markdown reads it: up to three spaces, `##`, and a space, a tab, or the end of the line. */
+const LEVEL_2 = /^ {0,3}##(?:[ \t].*)?$/m;
+
+/** The lines of a `## heading` section: its heading's line, and the line after its end. Yami writes its headings at column 0. */
 function sectionLines(lines: string[], heading: string): [number, number] | undefined {
   const start = lines.findIndex((line) => line.trimEnd() === `## ${heading}`);
   if (start === -1) return undefined;
-  const end = lines.findIndex((line, index) => index > start && line.startsWith("## "));
+  const end = lines.findIndex((line, index) => index > start && LEVEL_2.test(line));
   return [start, end === -1 ? lines.length : end];
 }
 
-/** Throws when the content for a `## heading` section holds a line that starts with `## `. */
+/** Throws when the content for a `## heading` section holds a level-2 heading line, which would start a section of its own. */
 export function checkSection(heading: string, content: string): void {
-  const line = /^## .*$/m.exec(content)?.[0];
+  const line = LEVEL_2.exec(content)?.[0];
   if (line) throw new Error(`The text for the ${heading} section holds the heading line "${line.trim()}", which would start a section of its own. Write it as plain text, or as a ### heading.`);
 }
 
@@ -144,7 +147,7 @@ export function sectionText(body: string, heading: string): string {
 
 /**
  * Replaces the `## heading` section of a body, or appends it. The content has no heading. It throws on content
- * with a line that starts with `## `, which would start a section of its own.
+ * with a level-2 heading line, which would start a section of its own: see `checkSection`.
  */
 export function replaceSection(body: string, heading: string, content: string): string {
   checkSection(heading, content);

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.0 · library-loop module-forms round 4
+
+A read-only session's commands reach no network beyond what the user's own settings allow, on both harnesses, so a command that the session allows without a request has no effect outside the machine. A read-only Claude Code session does not start when a setting would let its commands write beside the scratch folder. Its instructions tell the agent where its commands write. An interrupt of a Claude Code session stops its running command again. `checkSection` is public.
+
+### Breaking
+- **A read-only Codex session has no network, also when the host's `config` turns it on.** The adapter sends `permissions.yami-read-only.network.enabled=false` after the host's `config`. Before, a host entry `permissions.yami-read-only.network.enabled=true` let the commands reach any host. Migrate: a session whose commands need the network gets `access: "edit"`.
+- **A read-only Claude Code session does not start when a setting lets the sandbox write a folder that holds its scratch folder,** such as `/tmp`, `/private`, or `/`: an entry of `sandbox.filesystem.allowWrite`, or an `Edit(…)` allow rule, in the user's settings (when `settingSources` holds `user`) or in the managed settings. The sandbox can deny only the folders there that exist when the session starts, so a command could write a new one. `startSession` throws `A read-only session does not start: "/tmp" in sandbox.filesystem.allowWrite of /Users/me/.claude/settings.json lets commands write /tmp, which holds the session's scratch folder, and the sandbox cannot deny a folder there that does not exist yet. Remove the entry or name a folder that does not hold /tmp, or give the session access "edit".` Migrate: name a folder below `/tmp` in the setting, such as `/tmp/build`, or remove it.
+- **A Claude Code session has no background tasks.** The adapter sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`. Claude Code 2.1.302 moves a running command to the background on an interrupt, so a stop left the command running after the run had ended `stopped`; the live test "stops a running command on interrupt" failed on 0.8.0. Now an interrupt stops the command, and the agent cannot start a command or a subagent in the background. Migrate: a host that wants background tasks passes `env: { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "" }` to `ClaudeAgent`, and accepts that an interrupt leaves a running command alive.
+- **`replaceSection` and `flow.create` refuse a level-2 heading as Markdown reads it:** `##` after up to three spaces, then a space or the end of the line. Before, they let through `   ## Deliverables` and a bare `##`, which Obsidian shows as a heading. Migrate: a tool that passes a person's text through demotes such a line to `###`, or returns the error.
+
+### Added
+- `checkSection(heading, text)` from `yami/document`: throws the error of `replaceSection`, and writes nothing, so a tool checks a text before it writes any file. Migrate a workaround: `replaceSection("", "Request", order.request)` → `checkSection("Request", order.request)`.
+- The instructions of a read-only session end with the rule of its writes, on both harnesses, after the host's `instructions`: `This session is read-only. Your commands write only in $TMPDIR, a scratch folder that goes when the session ends. Put any file that a command must write there, such as a coverage profile or a build output. The working directory and every other folder are not writable, whatever other notes on the sandbox say.` Claude Code's own notes on its sandbox say that commands write the working directory.
+- A live test on both harnesses: a read-only command cannot reach `https://example.org`, and a `git push` to a bare repository on the same machine fails.
+
+### Changed
+- A read-only Claude Code session's sandbox sets `network.strictAllowlist`, so the sandbox denies a host that the user's settings do not allow, with no request. Before, Claude Code asked with a `SandboxNetworkAccess` request, which the adapter denied because it was not `Bash`.
+- A read-only Claude Code session also denies each command that the managed settings run outside the sandbox (`sandbox.excludedCommands`), as it does for the user's.
+- `sectionText` and `replaceSection` end a section at a level-2 heading line that is indented by up to three spaces, as Markdown does.
+- The live test "stops a running command on interrupt" interrupts once the command runs, and each harness sleeps for its own time, so the two suites can run at the same time.
+- The README says what a read-only command can reach on each harness, that a test suite that fetches its dependencies fails under read-only, and how WebFetch and WebSearch stand outside the sandbox.
+
 ## 0.8.0 · library-loop module-forms round 3
 
 Each read-only session gets a scratch folder of its own, and its commands write only there, on both harnesses. The temporary folder and the usual caches point at it, so `go test`, `go vet`, `npm test`, and a suite that writes a temporary file run in a read-only agent, and a repository and the vault stay unchanged. `replaceSection` refuses a text that would start a section.

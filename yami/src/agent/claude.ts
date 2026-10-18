@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { clearTimeout, setTimeout } from "node:timers";
 import {
   type CanUseTool,
@@ -26,7 +26,7 @@ import { claudePermissionMode } from "./approval.js";
 import { AsyncQueue } from "./async-queue.js";
 import { lineDiff } from "./diff.js";
 import { findExecutables, harnessEnv, pathDisplay } from "./executable.js";
-import { createScratch, removeScratch, scratchEnv } from "./scratch.js";
+import { createScratch, removeScratch, SCRATCH_PARENT, scratchEnv, sessionInstructions } from "./scratch.js";
 import { askPermission, BaseSession } from "./session.js";
 import { setAgents } from "./skills.js";
 import {
@@ -143,7 +143,8 @@ export class ClaudeAgent extends Agent<ClaudePreferences> {
 }
 
 export async function startClaudeSession(options: ClaudeSessionOptions): Promise<ClaudeSession> {
-  const env = await harnessEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: options.clientName, ...options.env });
+  // On an interrupt, Claude Code moves a running command to the background, where it outlives the turn and the run.
+  const env = await harnessEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: options.clientName, CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1", ...options.env });
   const executable = options.executablePath ?? findExecutables("claude", env, [join(homedir(), ".claude", "local")])[0];
   const session = new ClaudeSession(options, env, executable);
   try {
@@ -194,9 +195,13 @@ export class ClaudeSession extends BaseSession {
     for (const appTool of tools?.tools ?? []) this.appTools.set(`mcp__${tools!.name}__${appTool.name}`, appTool);
     const readOnly = options.access === "read-only";
     const settingSources = options.settingSources ?? ["user", "project", "local"];
-    this.unsandboxed = readOnly && settingSources.includes("user") ? unsandboxedCommands(env) : [];
+    const cwd = options.cwd ?? process.cwd();
+    const binding = readOnly ? bindingSettings(env, settingSources, cwd) : [];
+    refuseWideWrites(binding, cwd);
+    this.unsandboxed = binding.flatMap(({ settings }) => strings(settings.sandbox?.excludedCommands));
     const hidden = [...setAgents(options.skills ?? []).map((name) => `Agent(${name})`), ...this.unsandboxed.map((pattern) => `Bash(${pattern})`)];
     this.scratch = readOnly ? createScratch() : undefined;
+    const instructions = sessionInstructions(options.instructions, readOnly);
     this.query = query({
       prompt: this.input,
       options: {
@@ -213,9 +218,7 @@ export class ClaudeSession extends BaseSession {
         strictMcpConfig: readOnly || !settingSources.includes("user"),
         permissionMode: claudePermissionMode(options.approval ?? "ask"),
         ...(tools && { mcpServers: { [tools.name]: this.toolServer(tools) } }),
-        ...(options.instructions && {
-          systemPrompt: { type: "preset", preset: "claude_code", append: options.instructions },
-        }),
+        ...(instructions && { systemPrompt: { type: "preset", preset: "claude_code", append: instructions } }),
         includePartialMessages: true,
         canUseTool: this.canUseTool,
         stderr: (data) => {
@@ -224,7 +227,7 @@ export class ClaudeSession extends BaseSession {
         ...(options.resume ? { resume: options.resume } : { sessionId: this.id }),
         ...options.sdkOptions,
         // Read-only is a limit, so it comes after the host's options. The Skill tool is not a built-in tool of the list; the skills option turns it on.
-        ...(readOnly && { tools: READ_ONLY_TOOLS, skills: "all" as const, sandbox: readOnlySandbox(this.scratch!, options.cwd ?? process.cwd()) }),
+        ...(readOnly && { tools: READ_ONLY_TOOLS, skills: "all" as const, sandbox: readOnlySandbox(this.scratch!, cwd) }),
         ...(tools &&
           options.sdkOptions?.mcpServers && {
             mcpServers: { ...options.sdkOptions.mcpServers, [tools.name]: this.toolServer(tools) },
@@ -565,13 +568,21 @@ export class ClaudeSession extends BaseSession {
  * as an `Edit(…)` allow rule or `sandbox.filesystem.allowWrite`, can let the sandbox write a folder, and
  * the sandbox writes the working directory and a few folders of its own by default; a denial wins over
  * each. So the sandbox denies by name every folder beside the scratch folder's path from the root, and the
- * defaults. Where Claude Code has no sandbox, the session does not start.
+ * defaults. Where Claude Code has no sandbox, the session does not start. A command reaches only the hosts
+ * that the user's settings allow: for any other host, `strictAllowlist` denies it without a request.
  */
 function readOnlySandbox(scratch: string, cwd: string): Options["sandbox"] {
   const real = realPath(scratch);
   const defaults = [cwd, homedir(), "/tmp/claude", "/private/tmp/claude"].filter((path) => !holds(realPath(path), real));
   const denyWrite = [...new Set([...defaults, ...foldersBeside([real, "/dev"])])];
-  return { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false, filesystem: { allowWrite: [scratch], denyWrite } };
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    network: { strictAllowlist: true },
+    filesystem: { allowWrite: [scratch], denyWrite },
+  };
 }
 
 /** Each entry of each folder on the paths from the root to `open` that is not on those paths: what a deny list names to leave only `open`. */
@@ -613,18 +624,93 @@ function realPath(path: string): string {
   }
 }
 
+/** A settings file of Claude Code, with the folder from which it reads a path that starts with one `/`. */
+interface SettingsFile {
+  file: string;
+  root: string;
+  settings: { sandbox?: { excludedCommands?: unknown; filesystem?: { allowWrite?: unknown } }; permissions?: { allow?: unknown } };
+}
+
+/** Where Claude Code reads its managed settings: `managed-settings.json`, then each file of `managed-settings.d`. */
+const MANAGED_FOLDER: Partial<Record<NodeJS.Platform, string>> = { darwin: "/Library/Application Support/ClaudeCode", win32: "C:\\Program Files\\ClaudeCode" };
+
 /**
- * The commands that the user's Claude Code settings run outside the sandbox, `sandbox.excludedCommands`,
- * as Bash rule patterns. Claude Code runs one without asking when an allow rule matches, so a read-only
- * session denies them. It ignores the project's list once the sandbox may not be left.
+ * The settings that can widen a read-only session's sandbox: the user's, when the session loads them, and the
+ * managed ones. Claude Code ignores the project's and the local ones once the sandbox may not be left, and the
+ * adapter's `sandbox` option replaces the host's.
  */
-function unsandboxedCommands(env: Record<string, string>): string[] {
-  try {
-    const listed = JSON.parse(readFileSync(join(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "settings.json"), "utf8"))?.sandbox?.excludedCommands;
-    return Array.isArray(listed) ? listed.filter((pattern): pattern is string => typeof pattern === "string") : [];
-  } catch {
-    return [];
+function bindingSettings(env: Record<string, string>, sources: SettingSource[], cwd: string): SettingsFile[] {
+  const user = env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  const managed = MANAGED_FOLDER[process.platform] ?? "/etc/claude-code";
+  const dropIns = join(managed, "managed-settings.d");
+  const files = [
+    ...(sources.includes("user") ? [{ file: join(user, "settings.json"), root: user }] : []),
+    { file: join(managed, "managed-settings.json"), root: cwd },
+    ...entries(dropIns)
+      .filter((name) => name.endsWith(".json") && !name.startsWith("."))
+      .sort()
+      .map((name) => ({ file: join(dropIns, name), root: cwd })),
+  ];
+  return files.flatMap(({ file, root }) => {
+    try {
+      const settings = JSON.parse(readFileSync(file, "utf8"));
+      return settings && typeof settings === "object" ? [{ file, root, settings }] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * Throws when a setting lets the sandbox write a folder that holds the scratch folders, such as `/tmp`. The sandbox
+ * denies each folder there that exists when the session starts, so a command could still write a new one.
+ */
+function refuseWideWrites(files: SettingsFile[], cwd: string): void {
+  for (const { file, root, settings } of files) {
+    const writes = [
+      ...strings(settings.sandbox?.filesystem?.allowWrite).map((raw) => ({ raw, key: "sandbox.filesystem.allowWrite", path: allowWritePath(raw, root) })),
+      ...strings(settings.permissions?.allow).flatMap((raw) => {
+        const rule = /^Edit\((.+)\)$/.exec(raw.trim());
+        return rule ? [{ raw, key: "permissions.allow", path: editRulePath(rule[1]!, root, cwd) }] : [];
+      }),
+    ];
+    for (const { raw, key, path } of writes) {
+      const folder = writeRoot(path);
+      if (holds(folder, SCRATCH_PARENT) || holds(realPath(folder), realPath(SCRATCH_PARENT))) {
+        throw new Error(
+          `A read-only session does not start: "${raw}" in ${key} of ${file} lets commands write ${folder}, which holds the session's scratch folder, and the sandbox cannot deny a folder there that does not exist yet. Remove the entry or name a folder that does not hold ${SCRATCH_PARENT}, or give the session access "edit".`,
+        );
+      }
+    }
   }
+}
+
+/** A path of `sandbox.filesystem.allowWrite`, as Claude Code reads it: `//` or `/` starts an absolute path, `~` the home folder, and another path is relative to the settings file's folder. */
+function allowWritePath(raw: string, root: string): string {
+  return raw.startsWith("//") ? raw.slice(1) : resolve(root, withHome(raw));
+}
+
+/** A path of an `Edit(…)` rule, as Claude Code reads it: `//` starts an absolute path, `/` a path in the settings file's folder, `~` the home folder, and another path is relative to the working directory. */
+function editRulePath(raw: string, root: string, cwd: string): string {
+  if (raw.startsWith("//")) return raw.slice(1);
+  if (raw.startsWith("/")) return join(root, raw.slice(1));
+  return resolve(cwd, withHome(raw));
+}
+
+function withHome(path: string): string {
+  return path === "~" ? homedir() : path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+}
+
+/** The folder that a path lets a command write. For a glob, it is the folder before the glob's first segment. */
+function writeRoot(path: string): string {
+  const glob = path.search(/[*?[{]/);
+  if (glob === -1) return resolve(path);
+  const prefix = path.slice(0, glob);
+  return resolve(prefix.endsWith("/") ? prefix : dirname(prefix));
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function permissionKind(toolName: string): PermissionKind {

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { afterEach, describe, expect, it } from "vitest";
 import { startClaudeSession } from "../../src/agent/claude.js";
+import { READ_ONLY_RULE } from "../../src/agent/scratch.js";
 import { type AgentEvent, type AgentSession, defineTool, setAgents } from "../../src/agent/index.js";
 
 const FAKE = fileURLToPath(new URL("../fixtures/fake-claude.mjs", import.meta.url));
@@ -92,7 +93,8 @@ describe("claude adapter", () => {
       expect(text).toContain("--tools=Read,Glob,Grep,Bash,WebSearch,WebFetch,Agent ");
       const settings = JSON.parse(/--settings (\{.*\})(?= --|$)/.exec(text)?.[1] ?? "{}");
       const { filesystem, ...sandbox } = settings.sandbox;
-      expect(sandbox).toEqual({ enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false });
+      // A host that the user's settings do not allow is denied with no request, so no command reaches it.
+      expect(sandbox).toEqual({ enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false, network: { strictAllowlist: true } });
       const [scratch] = filesystem.allowWrite;
       expect(scratch).toMatch(/^\/tmp\/yami-read-only-/);
       expect(existsSync(scratch)).toBe(true);
@@ -129,6 +131,53 @@ describe("claude adapter", () => {
       "permission: deny: This session is read-only, so it asks for nothing. Run only commands that read or check, such as git log or the tests.",
     );
     expect(asked).toEqual([]);
+  });
+
+  it("tells a read-only session where its commands write, after the host's instructions, and tells an edit session nothing", async () => {
+    session = await startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: [], access: "read-only", instructions: "Be brief." });
+    expect(JSON.parse((await session.send("initialize")).text)).toMatchObject({ appendSystemPrompt: `Be brief.\n\n${READ_ONLY_RULE}` });
+    await session.close();
+    session = await startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: [], instructions: "Be brief." });
+    expect(JSON.parse((await session.send("initialize")).text)).toMatchObject({ appendSystemPrompt: "Be brief." });
+  });
+
+  it("does not start a read-only session when a setting of the user lets the sandbox write a folder that holds the scratch folder", async () => {
+    const config = mkdtempSync(join(tmpdir(), "yami-claude-config-"));
+    try {
+      const open = (settings: object, access: "edit" | "read-only" = "read-only") => {
+        writeFileSync(join(config, "settings.json"), JSON.stringify(settings));
+        return startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: ["user"], env: { CLAUDE_CONFIG_DIR: config }, access });
+      };
+      const file = join(config, "settings.json");
+      await expect(open({ sandbox: { filesystem: { allowWrite: ["/tmp"] } } })).rejects.toThrow(
+        `A read-only session does not start: "/tmp" in sandbox.filesystem.allowWrite of ${file} lets commands write /tmp, which holds the session's scratch folder, and the sandbox cannot deny a folder there that does not exist yet. Remove the entry or name a folder that does not hold /tmp, or give the session access "edit".`,
+      );
+      await expect(open({ permissions: { allow: ["Edit(//private/**)"] } })).rejects.toThrow(`"Edit(//private/**)" in permissions.allow of ${file} lets commands write /private,`);
+      await expect(open({ sandbox: { filesystem: { allowWrite: ["//"] } } })).rejects.toThrow(`"//" in sandbox.filesystem.allowWrite`);
+      await expect(open({ sandbox: { filesystem: { allowWrite: ["/tmp/yami-*"] } } })).rejects.toThrow(`"/tmp/yami-*" in sandbox.filesystem.allowWrite of ${file} lets commands write /tmp,`);
+      // A rule's path that starts with one slash is relative to the folder of its settings file, and a folder below /tmp holds no scratch folder.
+      for (const settings of [
+        { permissions: { allow: ["Edit(/tmp/**)", "Edit", "Read(//tmp/**)"] } },
+        { sandbox: { filesystem: { allowWrite: ["/tmp/build", "~/cache", "out"] } } },
+      ]) {
+        session = await open(settings);
+        await session.close();
+      }
+      session = await open({ sandbox: { filesystem: { allowWrite: ["/tmp"] } } }, "edit");
+    } finally {
+      rmSync(config, { recursive: true, force: true });
+    }
+  });
+
+  it("turns off Claude Code's background tasks, so that an interrupt stops a running command, and a host's env can turn them on", async () => {
+    const background = async (env?: Record<string, string>) => {
+      session = await startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: [], env });
+      const { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS } = JSON.parse((await session.send("env CLAUDE_CODE_DISABLE_BACKGROUND_TASKS")).text);
+      await session.close();
+      return CLAUDE_CODE_DISABLE_BACKGROUND_TASKS;
+    };
+    expect(await background()).toBe("1");
+    expect(await background({ CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "" })).toBe("");
   });
 
   it("gives an edit session no scratch folder and no sandbox of its own", async () => {

@@ -19,7 +19,15 @@
 - Audit: 0.7.0 CHANGELOG uses generic names.
 - Guard blocks `git stash` and any Bash text with "git add" (use Edit for such text).
 
+## Round 4 (0.9.0)
+- Ruling, network. Claude: `network.strictAllowlist: true` in the read-only sandbox. Before it, Claude Code sent `SandboxNetworkAccess {host}` to canUseTool, and the "not Bash" rule denied it only by luck. Codex: the profile has no network by default, but a host `--config permissions.yami-read-only.network.enabled=true` turned it on (http=200). Now `network.enabled=false` comes after the host's config. Live test "off the network" (curl example.org, git push to a local bare remote).
+- Ruling, refuse. Probes: project/local `allowWrite`, `Edit(//tmp/**)`, `additionalDirectories`, `sdkOptions.settings`, and `allowedTools` do NOT widen a read-only sandbox. Only the user and managed layers do (from the CLI source: `Kae`, `ffe`). Path rules (KAr/qAr): allowWrite `//x`=`/x`, `/x` absolute, relative to the settings folder; Edit `//x` absolute, `/x` = settings folder + x (user: the config dir; managed: cwd), else relative to cwd. `bindingSettings` + `refuseWideWrites` in claude.ts. User-layer live proof is impossible without editing the real ~/.claude settings. Unit test only.
+- F3.2: `READ_ONLY_RULE` + `sessionInstructions` (scratch.ts), in both adapters' instructions, not in Yami's prompts. The fake-claude `initialize` prompt returns the SDK's initialize request (appendSystemPrompt).
+- F3.3: one `LEVEL_2` regex (document.ts) for check and section end. F3.1: `checkSection` exported.
+- Found: Claude Code 2.1.302 backgrounds a running Bash command on interrupt (`turnAbortBackgrounds`). The live interrupt test failed on 0.8.0 too. Fix: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` default in env; a host sets "" to opt out ("0" is truthy there). Interrupt test now waits for the process, and uses sleep 45/46 by harness (the suites run in parallel).
+- Guard: Write is allowed only in yami/ and session files; Bash text "git log" is blocked (use Edit for README text).
+
 ## Watch next round
-- Policy proposals 1–3 in round-03/response.md; if item 1 is rejected, restore the Bash denial.
-- Residual on Claude: a user setting that allows /tmp itself (an ancestor of the scratch). Offered: refuse to start then.
+- Policy proposals 1–2 in round-04/response.md (background tasks, network/refuse facts).
+- Did the consumer's plugin use Claude background tasks? 0.9.0 turns them off.
 - Out of scope, to decline: ingest workers as agents, agents that call agents, checks on an agent's output.

@@ -26,7 +26,7 @@ import type {
 } from "./codex-protocol.js";
 import { findExecutables, harnessEnv, pathDisplay } from "./executable.js";
 import { RpcConnection, RpcError } from "./rpc.js";
-import { createScratch, removeScratch, scratchEnv } from "./scratch.js";
+import { createScratch, removeScratch, scratchEnv, sessionInstructions } from "./scratch.js";
 import { type ActiveTurn, askPermission, BaseSession } from "./session.js";
 import { isSkillRead, setSkills, skillList, skillTurn, slashCommand } from "./skills.js";
 import {
@@ -45,7 +45,7 @@ import {
 export interface CodexSessionOptions extends SessionOptions {
   /** Defaults to the Codex configuration. */
   webSearch?: "disabled" | "cached" | "live";
-  /** Lets shell commands use the network without asking. Defaults to the Codex configuration. */
+  /** Lets shell commands use the network without asking. Defaults to the Codex configuration. A read-only session has no network. */
   networkAccess?: boolean;
   /** Raw `key=value` TOML entries, each sent to `codex app-server` as `--config`. A read-only session sends its own after them. */
   config?: string[];
@@ -134,11 +134,12 @@ function serverArgs(config: string[] = []): string[] {
 }
 
 /**
- * The server configuration of a read-only session: a permissions profile that reads everything and writes only the
- * scratch folder, and the variables of `scratchEnv` for its commands. Codex's read-only sandbox writes nowhere, and
- * its workspace sandbox always writes the working directory. Codex resolves a profile only from the server's
- * configuration, not from a thread's, and a server with profiles needs `default_permissions`. It comes after the
- * host's `config`, so the host cannot lift read-only.
+ * The server configuration of a read-only session: a permissions profile that reads everything, writes only the
+ * scratch folder, and has no network, and the variables of `scratchEnv` for its commands. Codex's read-only sandbox
+ * writes nowhere, and its workspace sandbox always writes the working directory. Codex resolves a profile only from
+ * the server's configuration, not from a thread's, and a server with profiles needs `default_permissions`. It comes
+ * after the host's `config`, so the host cannot lift read-only; an entry of the host such as
+ * `permissions.yami-read-only.network.enabled=true` would otherwise turn the network on.
  */
 function readOnlyConfig(scratch: string | undefined): string[] {
   if (!scratch) return [];
@@ -146,6 +147,7 @@ function readOnlyConfig(scratch: string | undefined): string[] {
   return [
     `default_permissions=${toml(READ_ONLY_PROFILE)}`,
     `permissions.${READ_ONLY_PROFILE}.filesystem={${toml(":root")}=${toml("read")}, ${toml(scratch)}=${toml("write")}}`,
+    `permissions.${READ_ONLY_PROFILE}.network.enabled=false`,
     ...Object.entries(scratchEnv(scratch)).map(([key, value]) => `shell_environment_policy.set.${key}=${toml(value)}`),
   ];
 }
@@ -298,7 +300,7 @@ export class CodexSession extends BaseSession {
       ...(readOnly ? { permissions: READ_ONLY_PROFILE } : { sandbox: "workspace-write" }),
       // Skill sets are listed here, not as Codex extra skill roots: from a root, Codex reads a skill it chose with a
       // command that asks for approval under `ask`, and sometimes from a wrong path. See isSkillRead.
-      developerInstructions: [this.options.instructions, skillList(setSkills(this.options.skills ?? []))].filter(Boolean).join("\n\n") || null,
+      developerInstructions: [sessionInstructions(this.options.instructions, readOnly), skillList(setSkills(this.options.skills ?? []))].filter(Boolean).join("\n\n") || null,
       config,
     };
     const dynamicTools = tools && [

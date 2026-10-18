@@ -32,6 +32,12 @@ function turn(prompt) {
     assistant([{ type: 'text', text: process.argv.slice(2).join(' ') }]);
     return result(process.argv.slice(2).join(' '));
   }
+  // `initialize`: the reply is the SDK's initialize request, so a test sees the options that go there, such as the system prompt.
+  if (prompt === 'initialize') {
+    const text = JSON.stringify(initialize);
+    assistant([{ type: 'text', text }]);
+    return result(text);
+  }
   // `env <names>`: the reply is those variables of the CLI's environment, as JSON.
   if (prompt.startsWith('env ')) {
     const text = JSON.stringify(Object.fromEntries(prompt.split(' ').slice(1).map((name) => [name, process.env[name]])));
@@ -58,6 +64,7 @@ function turn(prompt) {
   result(`echo: ${prompt}`);
 }
 
+let initialize = {};
 createInterface({ input: process.stdin }).on('line', (line) => {
   const message = JSON.parse(line);
   if (message.type === 'control_response') {
@@ -65,6 +72,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     waiting.delete(message.response.request_id);
     answer?.(message.response.response ?? {});
   } else if (message.type === 'control_request') {
+    if (message.request.subtype === 'initialize') initialize = message.request;
     const response = message.request.subtype === 'initialize'
       ? { commands: [], agents: [], output_style: 'default', available_output_styles: [], models: [], account: { email: 'test@example.com' } }
       : {};
