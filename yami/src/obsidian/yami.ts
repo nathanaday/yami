@@ -1,7 +1,6 @@
-import { MarkdownView, Notice, type App, type Plugin, type TAbstractFile, type TFile } from "obsidian";
+import { MarkdownView, Menu, Notice, type App, type Plugin, type TAbstractFile, type TFile } from "obsidian";
 import type { Agent } from "../agent/agent.js";
 import type { Harness } from "../agent/types.js";
-import { CONVERSATION_FOLDER } from "../conversation/conversations.js";
 import { basename } from "../document/document.js";
 import { Flow, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
 import type { Session } from "../module/session.js";
@@ -16,6 +15,7 @@ import { checkModuleIcons } from "./icons.js";
 import { addConversationCommands, addModuleCommands, addNewModuleCommand, addSessionCommands, addWikiCommands } from "./commands.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
+import { NoteSessions, type AgentWork, type NoteSessionsOptions } from "./note-sessions.js";
 import { PermissionPrompts } from "./prompts/permission-modal.js";
 import { ObsidianVault } from "./vault.js";
 import { ignoredPaths, openNote, pickOne, watchWiki, type OpenMode } from "./wiki/open.js";
@@ -25,7 +25,10 @@ export const HARNESS_COLORS: Record<Harness, string> = { claude: "#d97757", code
 /** Minutes after which an agent process with no open message box closes. */
 export const IDLE_MINUTES = 15;
 
-/** An agent with the name and color it has in the vault. Both default to its harness's. */
+/**
+ * An agent with the name and color it has in the vault. Both default to its harness's. `yami.registered`
+ * gives each as a `ConversationAgent`, with the name and the color filled in.
+ */
 export interface AgentEntry {
   agent: Agent;
   name?: string;
@@ -35,16 +38,24 @@ export interface AgentEntry {
 export type CommandGroup = "conversations" | "sessions" | "wiki" | "modules";
 
 export interface YamiPluginOptions {
-  /** The plugin's agents. The first is the default. Yami sets their working directory, tools, and skills. */
+  /**
+   * The plugin's agents. The first is the default. Yami sets their working directory, tools, and skills.
+   * Each needs a name of its own. `yami.setAgents` changes them while the plugin runs. None is allowed.
+   */
   agents: (Agent | AgentEntry)[];
   /** The plugin's modules. The wiki module is built in. */
   modules?: YamiModule[];
   /** Options of the wiki. The conversation folder and Obsidian's Excluded files always stay out of its index. */
   wiki?: WikiOptions;
-  /** The folder of conversation notes. Default `conversations`. */
-  conversationFolder?: string;
-  /** Minutes after which an agent process with no open message box closes. Default 15. */
-  idleMinutes?: number;
+  /** The folder of conversation notes. Default `conversations`. A function is read at each use. */
+  conversationFolder?: string | (() => string);
+  /** Minutes after which an agent process with no open message box and no turn closes. Default 15. A function is read at each use. */
+  idleMinutes?: number | (() => number);
+  /**
+   * Whether an agent's edits play as typing in a note that the person sees. Default true. A function is read
+   * at each edit. Edits never play as typing while the system asks for reduced motion.
+   */
+  animate?: boolean | (() => boolean);
   /**
    * The groups of commands to add. Default: every group. `modules` is the New module command. The commands
    * of the modules' flows and actions are always added.
@@ -65,6 +76,20 @@ export function createYami(plugin: Plugin, options: YamiPluginOptions): Obsidian
   return new ObsidianYami(plugin, options);
 }
 
+/** The registered agents of entries: a name and a color for each, and no name twice. */
+function registerAgents(entries: readonly (Agent | AgentEntry)[]): ConversationAgent[] {
+  const registered = entries.map((entry): ConversationAgent => {
+    const { agent, name, color } = "harness" in entry ? { agent: entry, name: undefined, color: undefined } : entry;
+    return { agent, name: name ?? agent.harness, color: color ?? HARNESS_COLORS[agent.harness] };
+  });
+  const names = registered.map((r) => r.name);
+  const twice = names.find((name, i) => names.indexOf(name) !== i);
+  if (twice) throw new Error(`Two agents are named ${twice}: give each a name of its own.`);
+  return registered;
+}
+
+const read = <T>(value: T | (() => T)): T => (typeof value === "function" ? (value as () => T)() : value);
+
 /** A Yami in Obsidian: the SDK's Yami, with the conversation notes, the shared documents, and the helpers that commands use. */
 export class ObsidianYami extends Yami {
   readonly app: App;
@@ -73,22 +98,21 @@ export class ObsidianYami extends Yami {
   readonly hub: CollabHub;
   /** The conversation notes, with their message box. Other plugins start conversations with it. */
   readonly conversations: ConversationManager;
-  /** The agents with their names and colors, as conversations show them. */
-  readonly registered: ConversationAgent[];
+  #registered: ConversationAgent[];
+  /** The agents that `setAgents` removed, so that a run that is live keeps its agent's name and color. */
+  #retired: ConversationAgent[] = [];
+  readonly #idleMinutes: number | (() => number);
+  readonly #works = new Set<AgentWork>();
+  readonly #noteSessions = new Set<NoteSessions>();
+  /** The functions that bring the commands of each agent up to date. */
+  readonly #agentCommands: (() => void)[] = [];
   #status: HTMLElement | undefined;
   readonly #sessionsFeed = new ChangeFeed("sessions", 150);
   readonly #wikiFeed = new ChangeFeed("wiki", 300);
 
   constructor(plugin: Plugin, options: YamiPluginOptions) {
     const app = plugin.app;
-    const registered = options.agents.map((entry): ConversationAgent => {
-      const { agent, name, color } = "harness" in entry ? { agent: entry, name: undefined, color: undefined } : entry;
-      return { agent, name: name ?? agent.harness, color: color ?? HARNESS_COLORS[agent.harness] };
-    });
-    const names = registered.map((r) => r.name);
-    const twice = names.find((name, i) => names.indexOf(name) !== i);
-    if (twice) throw new Error(`Two agents are named ${twice}: give each a name of its own.`);
-    const folder = options.conversationFolder ?? CONVERSATION_FOLDER;
+    const registered = registerAgents(options.agents);
     const exclude = options.wiki?.exclude;
     // The run conversations need the conversation manager, which the hub comes before. Both wait until
     // super() succeeds, so a Yami that fails to build leaves no hub in the window.
@@ -99,22 +123,24 @@ export class ObsidianYami extends Yami {
       modules: options.modules,
       wiki: { ...options.wiki, exclude: () => [...ignoredPaths(app), ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] },
       conversations: { open: (open) => runs!.open(open) },
-      conversationFolder: folder,
+      conversationFolder: options.conversationFolder,
     });
+    this.#registered = registered;
+    this.#idleMinutes = options.idleMinutes ?? IDLE_MINUTES;
+    const animate = options.animate ?? true;
     const hub = installCollab(app, plugin);
     const conversations = new ConversationManager(app, hub, new PermissionPrompts(app), {
-      agents: () => registered,
-      folder: () => folder,
-      animate: () => !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-      idleMinutes: () => options.idleMinutes ?? IDLE_MINUTES,
+      agents: () => this.#registered,
+      folder: () => this.conversationFolder,
+      animate: () => read(animate) && !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      idleMinutes: () => read(this.#idleMinutes),
       onActivity: () => this.updateStatus(),
     });
-    runs = new ObsidianConversations(app, conversations, () => registered);
+    runs = new ObsidianConversations(app, conversations, () => [...this.#registered, ...this.#retired]);
     this.app = app;
     this.plugin = plugin;
     this.hub = hub;
     this.conversations = conversations;
-    this.registered = registered;
 
     conversations.install(plugin);
     watchWiki(app, plugin, this.wiki);
@@ -144,6 +170,7 @@ export class ObsidianYami extends Yami {
     plugin.register(() => {
       // Closing the conversations ends every turn, so the runs end too; the teardown does not wait for them.
       void this.close().catch((error) => console.error(error));
+      for (const notes of this.#noteSessions) void notes.close().catch((error) => console.error(error));
       void conversations
         .destroy()
         .catch((error) => console.error(error))
@@ -151,8 +178,8 @@ export class ObsidianYami extends Yami {
     });
 
     const groups = { conversations: true, sessions: true, wiki: true, modules: true, ...options.commands };
-    if (groups.conversations) addConversationCommands(this);
-    if (groups.sessions) addSessionCommands(this);
+    if (groups.conversations) this.#agentCommands.push(addConversationCommands(this));
+    if (groups.sessions) this.#agentCommands.push(addSessionCommands(this));
     if (groups.wiki) addWikiCommands(this);
     if (groups.modules) addNewModuleCommand(this);
     checkModuleIcons(this.modules);
@@ -166,15 +193,88 @@ export class ObsidianYami extends Yami {
     );
     if (options.folderColors ?? true) showFolderColors(this, plugin);
     if (options.statusBar ?? true) {
-      this.#status = plugin.addStatusBarItem();
-      this.#status.addClass("yami-status");
+      const status = plugin.addStatusBarItem();
+      status.addClass("yami-status");
+      status.addEventListener("click", (event) => this.#openWork(event));
+      this.#status = status;
       this.onSession(() => this.updateStatus());
     }
   }
 
-  /** The name the agent is registered under. */
-  agentName(agent: Agent): string {
-    return this.registered.find((r) => r.agent === agent)?.name ?? agent.harness;
+  /** The agents with their names and colors, as conversations and commands show them. `setAgents` changes them. */
+  get registered(): readonly ConversationAgent[] {
+    return this.#registered;
+  }
+
+  /**
+   * Replaces the agents while the plugin runs, from the host's settings for example. It takes the entries of
+   * the `agents` option, and throws before it changes anything when two have one name. Yami sets the working
+   * directory, the tools, and the skills of a new agent. The commands of each agent follow at once (New
+   * conversation with each, Run this session with each), and so do the status bar, the composers, the acts
+   * of the sessions, and `onSessionsChange`. A conversation or a run keeps the agent it works with until its
+   * turn or the run ends. Then a conversation closes the agent session of an agent that is gone or replaced,
+   * so no process of a removed agent stays open, and its next message starts the agent of the note's name
+   * now. A note whose agent is gone goes on with the first agent. The sessions of `noteSessions` do the same.
+   * @example
+   * this.yami.setAgents(this.settings.profiles.map((p) => ({ agent: this.agentOf(p), name: p.name, color: p.color })));
+   */
+  override setAgents(agents: readonly (Agent | AgentEntry)[]): void {
+    const registered = registerAgents(agents);
+    super.setAgents(registered.map((r) => r.agent));
+    const kept = new Set(registered.map((r) => r.agent));
+    this.#retired = [...this.#retired, ...this.#registered].filter((r) => !kept.has(r.agent));
+    this.#registered = registered;
+    for (const sync of this.#agentCommands) sync();
+    this.conversations.agentsChanged();
+    for (const notes of this.#noteSessions) notes.agentsChanged();
+    this.updateStatus();
+    this.#sessionsFeed.changed();
+  }
+
+  /**
+   * Shows a piece of agent work in the status bar, as conversations and runs show, until the function that it
+   * returns ends it. When the work has a `path` and a `stop`, `yami-stop` in that note calls `stop`. A host
+   * adds the work of the agent sessions that it runs itself; a session of `noteSessions` adds its turns itself.
+   * @example
+   * const end = yami.addWork({ name: "claude", path: file.path, stop: () => session.interrupt() });
+   * try { await session.send(prompt); } finally { end(); }
+   */
+  addWork(work: AgentWork): () => void {
+    this.#works.add(work);
+    this.updateStatus();
+    return () => {
+      if (this.#works.delete(work)) this.updateStatus();
+    };
+  }
+
+  /** The agent work that `addWork` added and that has not ended, oldest first. */
+  get works(): readonly AgentWork[] {
+    return [...this.#works];
+  }
+
+  /**
+   * Harness sessions of notes: one for each note and agent, for agents that work in a note that is not a
+   * conversation note, such as an agent that answers in the margin. A session starts when the host asks for
+   * it. It continues the session that the host stored for the note and agent, or starts a new one when the
+   * harness lost it. It closes after the idle minutes with no turn, follows a renamed note, is forgotten with
+   * a removed note, follows `setAgents`, and closes when the plugin unloads. The host stores the ids: it
+   * gives the stored ones in `ids`, and `save` gets every id after each change.
+   * @example
+   * const notes = this.yami.noteSessions({ ids: data.sessions, save: (ids) => this.saveData({ ...data, sessions: ids }) });
+   * const { session } = await notes.session(file.path, "claude", { instructions, access: "read-only", tools, skills: [] });
+   * await notes.forget(file.path);
+   */
+  noteSessions(options: NoteSessionsOptions = {}): NoteSessions {
+    const notes = new NoteSessions({ agents: () => this.#registered, idleMinutes: () => read(this.#idleMinutes), addWork: (work) => this.addWork(work) }, options);
+    this.#noteSessions.add(notes);
+    this.plugin.registerEvent(this.app.vault.on("rename", (file, old) => notes.renamed(old, file.path)));
+    this.plugin.registerEvent(this.app.vault.on("delete", (file) => notes.removed(file.path)));
+    return notes;
+  }
+
+  /** The name the agent is registered under, also for an agent that `setAgents` removed while a run used it. */
+  override agentName(agent: Agent): string {
+    return [...this.#registered, ...this.#retired].find((r) => r.agent === agent)?.name ?? agent.harness;
   }
 
   /**
@@ -230,7 +330,7 @@ export class ObsidianYami extends Yami {
   }
 
   /** The agent registered under a name: conversation notes name their agent so. */
-  agentNamed(name: unknown): Agent | undefined {
+  override agentNamed(name: unknown): Agent | undefined {
     return this.registered.find((r) => r.name === name)?.agent;
   }
 
@@ -289,20 +389,37 @@ export class ObsidianYami extends Yami {
     );
   }
 
-  /** Says in the status bar which agents work. */
+  /** The agents that work now, with the note each works in: conversations and `addWork`, or else the live runs. */
+  #working(): { text: string; path?: string }[] {
+    const agents = [
+      ...this.conversations.working.map((controller) => ({ name: controller.agentName, path: controller.file.path })),
+      ...[...this.#works].map((work) => ({ name: work.name, path: work.path })),
+    ];
+    if (agents.length) return agents.map(({ name, path }) => ({ text: `${name} working${path ? ` in ${basename(path)}` : ""}`, path }));
+    return this.running.map((session) => ({ text: `Checking ${basename(session.path)}`, path: session.path }));
+  }
+
+  /** Opens the note where the agent works. With several, a menu lists them. */
+  #openWork(event: MouseEvent): void {
+    const working = this.#working().filter((entry) => entry.path);
+    if (working.length === 1) return void this.open(working[0]!.path!);
+    if (!working.length) return;
+    const menu = new Menu();
+    for (const entry of working) menu.addItem((item) => item.setTitle(entry.text).onClick(() => void this.open(entry.path!)));
+    menu.showAtMouseEvent(event);
+  }
+
+  /**
+   * Says in the status bar which agents work: `claude working in Ideas` for one agent of a conversation or of
+   * `addWork`, `2 agents working` for several, and else `Checking Weekly` or `Checking 2 sessions` for the live
+   * runs. A click opens the note where the agent works; with several, a menu lists them.
+   */
   updateStatus(): void {
     if (!this.#status) return;
-    const working = this.conversations.working;
-    const running = this.running;
-    const text =
-      working.length === 1
-        ? `${working[0]!.agentName} working in ${working[0]!.file.basename}`
-        : working.length
-          ? `${working.length} agents working`
-          : running.length
-            ? `Checking ${running.length === 1 ? basename(running[0]!.path) : `${running.length} sessions`}`
-            : "";
+    const working = this.#working();
+    const checking = !this.conversations.working.length && !this.#works.size;
+    const text = working.length === 1 ? working[0]!.text : !working.length ? "" : checking ? `Checking ${working.length} sessions` : `${working.length} agents working`;
     this.#status.setText(text);
-    this.#status.toggleClass("is-working", working.length > 0 || running.length > 0);
+    this.#status.toggleClass("is-working", working.length > 0);
   }
 }

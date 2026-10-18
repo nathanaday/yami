@@ -1,11 +1,11 @@
 import type { EditorView } from "@codemirror/view";
 import { around } from "monkey-around";
 import { type App, MarkdownView, normalizePath, type Plugin, TFile, type Vault } from "obsidian";
-import type { AgentPeer } from "./agent-peer.js";
+import { AgentPeer, type AgentIdentity } from "./agent-peer.js";
 import { bindingPlugin, type BindingHost, EditorBinding, setBindingHost } from "./binding.js";
 import { presenceExtensions } from "./presence.js";
 import { DISK_ORIGIN, SharedNote } from "./shared-note.js";
-import { normalizeNewlines } from "./text-ops.js";
+import { deltaOps, normalizeNewlines, type TextOp } from "../../document/text-ops.js";
 
 /** How long a note stays shared after its last holder lets go, so a quick follow-up keeps the same document. */
 const LINGER_MS = 20_000;
@@ -22,12 +22,24 @@ export interface DiskWriter {
   peer(note: SharedNote): AgentPeer;
 }
 
-/** Follows the hub's notes, for example to record what agents wrote. */
+/** One change to the text of a shared note. */
+export interface NoteChange {
+  /** The path of the note now. */
+  path: string;
+  /** The changes, in ascending order, on the text before the change. */
+  ops: TextOp[];
+  /** The agent that made the change: an edit, a write of its tools, or its own output such as a reply. None for the person's typing and for another program's write. */
+  agent?: AgentIdentity;
+}
+
+/** Follows the hub's notes, for example to record what agents wrote. Each member is optional. */
 export interface HubObserver {
   /** A note became shared. The returned function runs when the note stops being shared. */
-  shared(note: SharedNote): () => void;
+  shared?(note: SharedNote): () => void;
   /** A writer created a note with its own tools. `text` is the note's text at creation. */
-  created(file: TFile, text: string, writer: DiskWriter): void;
+  created?(file: TFile, text: string, writer: DiskWriter): void;
+  /** The text of a shared note changed. */
+  changed?(change: NoteChange): void;
 }
 
 /**
@@ -137,6 +149,12 @@ export class CollabHub implements BindingHost {
     );
   }
 
+  /**
+   * Follows the shared notes: each note that becomes shared, each note that a writer creates, and each change
+   * to the text of a shared note, with the agent that made it. Returns the function that stops it.
+   * @example
+   * hub.observe({ changed: ({ path, ops, agent }) => agent && record(path, ops, agent.name) });
+   */
   observe(observer: HubObserver): () => void {
     this.observers.add(observer);
     return () => this.observers.delete(observer);
@@ -189,12 +207,29 @@ export class CollabHub implements BindingHost {
       author: (target) => this.author(target),
     });
     this.notes.set(file.path, note);
-    this.detach.set(note, [...this.observers].map((observer) => observer.shared(note)));
+    this.detach.set(
+      note,
+      [...this.observers].flatMap((observer) => (observer.shared ? [observer.shared(note)] : [])),
+    );
     note.doc.on("update", (_update: Uint8Array, origin: unknown) => {
       if (origin !== DISK_ORIGIN) this.scheduleSave(note);
     });
+    note.text.observe((event, transaction) => this.changed(note, deltaOps(event.delta), transaction.origin));
     for (const binding of this.bindings) if (binding.file === file) binding.refresh();
     return note;
+  }
+
+  private changed(note: SharedNote, ops: TextOp[], origin: unknown): void {
+    if (!ops.length) return;
+    const peer = AgentPeer.of(origin);
+    const change: NoteChange = { path: note.path, ops, ...(peer && { agent: { name: peer.identity.name, color: peer.identity.color } }) };
+    for (const observer of [...this.observers]) {
+      try {
+        observer.changed?.(change);
+      } catch (error) {
+        console.error("Yami: a hub observer failed", error);
+      }
+    }
   }
 
   /** Shares a note that a writer created, so its later changes merge as the writer's edits. */
@@ -202,7 +237,7 @@ export class CollabHub implements BindingHost {
     const writer = [...this.writers].find((candidate) => candidate.writes(file.path));
     if (!writer || this.notes.has(file.path)) return;
     const text = await this.read(file);
-    for (const observer of this.observers) observer.created(file, text, writer);
+    for (const observer of this.observers) observer.created?.(file, text, writer);
     if (this.writers.has(writer)) await this.acquire(file, writer);
   }
 

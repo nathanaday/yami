@@ -27,8 +27,8 @@ export interface YamiOptions {
   wiki?: WikiOptions;
   /** How the conversation notes of runs are kept. Default: notes written straight to the vault, with every approval denied. */
   conversations?: Conversations;
-  /** The folder of conversation notes. Default `conversations`. */
-  conversationFolder?: string;
+  /** The folder of conversation notes. Default `conversations`. A function is read at each use, so the folder can follow a setting. */
+  conversationFolder?: string | (() => string);
 }
 
 export type SessionListener = (session: Session, status: SessionStatus) => void;
@@ -52,8 +52,10 @@ export class Yami {
   readonly vault: Vault;
   /** The vault's one wiki, which every module uses. */
   readonly wiki: Wiki;
-  readonly agents: Agent[];
-  readonly conversationFolder: string;
+  #agents: Agent[] = [];
+  /** Agents that `setAgents` removed. A live run can still use one, and `close` closes it. */
+  readonly #retired = new Set<Agent>();
+  readonly #conversationFolder: string | (() => string);
   readonly #conversations: Conversations;
   readonly #wikiModule = new WikiModule();
   readonly #code: YamiModule[];
@@ -67,10 +69,9 @@ export class Yami {
 
   constructor(options: YamiOptions) {
     this.vault = options.vault;
-    this.conversationFolder = options.conversationFolder ?? CONVERSATION_FOLDER;
-    const folder = this.conversationFolder;
+    this.#conversationFolder = options.conversationFolder ?? CONVERSATION_FOLDER;
     const exclude = options.wiki?.exclude;
-    this.wiki = new Wiki(this.vault, { ...options.wiki, exclude: () => [folder, ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] });
+    this.wiki = new Wiki(this.vault, { ...options.wiki, exclude: () => [this.conversationFolder, ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] });
     this.#code = [this.#wikiModule, ...(options.modules ?? [])];
     const ids = new Set<string>();
     for (const module of this.#code) {
@@ -83,9 +84,41 @@ export class Yami {
     const colors = assignColors(this.modules);
     for (const module of this.modules) module.attach(this, colors.get(module)!);
     this.#conversations = options.conversations ?? new FileConversations(this.vault);
-    this.agents = options.agents ?? [];
+    this.#setAgents(options.agents ?? []);
+  }
+
+  /** The agents that run sessions, the first being the default. `setAgents` changes them. */
+  get agents(): readonly Agent[] {
+    return this.#agents;
+  }
+
+  /**
+   * Replaces the agents. Yami sets the working directory, the tools, and the skills of each agent that is new.
+   * A run that is live keeps the agent it started with until it ends, also an agent that is gone; the next
+   * run takes an agent from the new list. Sessions' acts follow the list at once.
+   * @example
+   * yami.setAgents([claude, new CodexAgent()]);
+   */
+  setAgents(agents: readonly Agent[]): void {
+    this.#setAgents(agents);
+  }
+
+  // The constructor calls this one, so a subclass's `setAgents` never runs before the subclass is built.
+  #setAgents(agents: readonly Agent[]): void {
     const skills = this.skills();
-    for (const agent of this.agents) agent.setPreferences({ cwd: this.vault.root, tools: this.tools({ agent }), skills });
+    for (const agent of agents) {
+      if (this.#agents.includes(agent)) continue;
+      this.#retired.delete(agent);
+      agent.setPreferences({ cwd: this.vault.root, tools: this.tools({ agent }), skills });
+    }
+    for (const agent of this.#agents) if (!agents.includes(agent)) this.#retired.add(agent);
+    this.#agents = [...agents];
+  }
+
+  /** The folder of conversation notes, as the option gives it now. */
+  get conversationFolder(): string {
+    const folder = this.#conversationFolder;
+    return typeof folder === "function" ? folder() : folder;
   }
 
   /** The modules: the built-in wiki module first, then the plugin's, then the vault modules that `discover` found. */
@@ -178,7 +211,7 @@ export class Yami {
     const colors = assignColors(this.modules);
     for (const module of this.modules) module.attach(this, colors.get(module)!);
     const skills = this.skills();
-    for (const agent of this.agents) agent.setPreferences({ skills });
+    for (const agent of [...this.#agents, ...this.#retired]) agent.setPreferences({ skills });
     for (const module of added) {
       try {
         await module.install();
@@ -407,9 +440,9 @@ export class Yami {
     });
   }
 
-  /** Kills every live run, waits for the harness sessions of every run to close, and closes every agent session. */
+  /** Kills every live run, waits for the harness sessions of every run to close, and closes every agent session, also of an agent that `setAgents` removed. */
   async close(): Promise<void> {
     await Promise.all([...this.#sessions.values()].map((session) => session.kill()));
-    await Promise.all(this.agents.map((agent) => agent.closeAll()));
+    await Promise.all([...this.#agents, ...this.#retired].map((agent) => agent.closeAll()));
   }
 }

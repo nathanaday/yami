@@ -1,6 +1,6 @@
 import type * as Y from "yjs";
 import type { AgentPeer } from "./agent-peer.js";
-import { diffOps, shiftOps } from "./text-ops.js";
+import { diffOps, shiftOps } from "../../document/text-ops.js";
 
 const TICK_MS = 24;
 const STILL_MS = 140;

@@ -3,7 +3,7 @@ import type { AgentInfo, AgentSession, ApprovalSetting, Harness, SessionOptions,
 export interface AgentPreferences {
   /** Tools that run in the host, given to every session. A session's own `tools` replace them. */
   tools?: ToolSet;
-  /** Skill-set folders, given to every session. See `SessionOptions.skills`. */
+  /** Skill-set folders, given to every session. A session's own `skills` replace them: `skills: []` gives a session none. See `SessionOptions.skills`. */
   skills?: string[];
   /** Working directory of the agent. Defaults to the current process directory. */
   cwd?: string;
@@ -18,9 +18,19 @@ export interface AgentPreferences {
   access?: "edit" | "read-only";
 }
 
-/** What one session can set on top of the agent's preferences. */
-export type SessionStart<P extends AgentPreferences> = Partial<P> &
+/**
+ * What one session can set on top of the agent's preferences. Each option that the session sets replaces the
+ * agent's preference, also `tools` and `skills`: they do not add to the agent's.
+ */
+export type SessionStart<P extends AgentPreferences = AgentPreferences> = Partial<P> &
   Pick<SessionOptions, "resume" | "onPermission" | "onQuestion" | "tools" | "skills" | "beforeFileChange">;
+
+/** A harness session from `resumeOrStart`, and whether it continued the one asked for. */
+export interface ResumedSession {
+  session: AgentSession;
+  /** True when the session continues `resume`; false for a new session. */
+  continued: boolean;
+}
 
 /**
  * Holds the preferences for one harness and starts sessions with them.
@@ -47,7 +57,11 @@ export abstract class Agent<P extends AgentPreferences = AgentPreferences> {
   /** Runs the harness once to confirm that it starts and is signed in. */
   abstract connect(): Promise<AgentInfo>;
 
-  /** Starts a harness process and resolves when the session is ready for `send`. */
+  /**
+   * Starts a harness process and resolves when the session is ready for `send`. With `resume`, it rejects
+   * when the harness cannot continue that session, for example when it no longer has it: Claude Code exits
+   * at its start, and Codex answers `no rollout found for thread id …`. `resumeOrStart` starts a new one then.
+   */
   async startSession(options: SessionStart<P> = {}): Promise<AgentSession> {
     const session = await this.createSession({ ...this.current, ...options });
     this.sessions.add(session);
@@ -55,6 +69,26 @@ export abstract class Agent<P extends AgentPreferences = AgentPreferences> {
       if (event.type === "closed") this.sessions.delete(session);
     });
     return session;
+  }
+
+  /**
+   * Continues the harness session `options.resume` when the harness still has it, and otherwise starts a new
+   * session with the same options. `continued` says which. With no `resume`, it starts a new session. When
+   * the resume fails for any reason, it starts a new session, and when that fails too, it rejects with the
+   * error of the new start; so a refusal, such as a read-only session that does not start, comes once.
+   * @example
+   * const { session, continued } = await agent.resumeOrStart({ resume: saved, access: "read-only", tools });
+   * if (!continued) await session.send(fullContext);
+   */
+  async resumeOrStart(options: SessionStart<P> = {}): Promise<ResumedSession> {
+    if (options.resume) {
+      try {
+        return { session: await this.startSession(options), continued: true };
+      } catch {
+        // The harness can have lost the session, for example after it cleaned up old ones.
+      }
+    }
+    return { session: await this.startSession({ ...options, resume: undefined }), continued: false };
   }
 
   async closeAll(): Promise<void> {

@@ -3,7 +3,7 @@ import { type EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { editorInfoField, MarkdownView, type TFile } from "obsidian";
 import type * as Y from "yjs";
 import type { NoteView, SharedNote } from "./shared-note.js";
-import { diffOps } from "./text-ops.js";
+import { diffOps } from "../../document/text-ops.js";
 
 /** Marks editor transactions that came from the shared note. The value is the Yjs transaction origin. */
 export const syncAnnotation = Annotation.define<unknown>();

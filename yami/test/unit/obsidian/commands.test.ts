@@ -51,25 +51,25 @@ describe("the commands of the modules in Obsidian", () => {
     } as unknown as ObsidianYami;
     const sync = addModuleCommands(host);
     const listed = () => [...commands.values()].map((c) => `${c.id} · ${c.name} · ${c.icon}`);
-    expect(listed()).toEqual(["hello-new-greet · Hello world: new greet · box"]);
+    expect(listed()).toEqual(["yami-hello-new-greet · Hello world: new greet · box"]);
 
     await write("internal/notes/notes.md", { type: "module", name: "Notes", icon: "search" });
     await write("internal/notes/flows/daily-note/FLOW.md", { name: "daily-note", description: "A daily note." });
     await yami.discover();
     sync();
-    expect(listed()).toEqual(["hello-new-greet · Hello world: new greet · box", "notes-new-daily-note · Notes: new daily note · search"]);
+    expect(listed()).toEqual(["yami-hello-new-greet · Hello world: new greet · box", "yami-notes-new-daily-note · Notes: new daily note · search"]);
     sync();
     expect(removed).toEqual([]);
 
     await write("internal/notes/flows/daily-note/FLOW.md", { name: "daily-note", description: "A daily page." });
     await yami.discover();
     sync();
-    expect(removed).toEqual(["notes-new-daily-note"]);
-    expect(listed()).toContain("notes-new-daily-note · Notes: new daily note · search");
+    expect(removed).toEqual(["yami-notes-new-daily-note"]);
+    expect(listed()).toContain("yami-notes-new-daily-note · Notes: new daily note · search");
 
     await t.vault.remove("internal/notes/flows/daily-note/FLOW.md");
     await yami.discover();
     sync();
-    expect(listed()).toEqual(["hello-new-greet · Hello world: new greet · box"]);
+    expect(listed()).toEqual(["yami-hello-new-greet · Hello world: new greet · box"]);
   });
 });

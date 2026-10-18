@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { copyStyles } from "../../src/build/esbuild.js";
+import { copyStyles, pluginBuild } from "../../src/build/esbuild.js";
 import { STATUS_LABELS, type Session } from "../../src/index.js";
 import { review, ScriptedAgent, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
 import { Hello } from "../fixtures/hello.js";
@@ -197,8 +197,20 @@ describe("copyStyles", () => {
       const css = await readFile(join(dir, "styles.css"), "utf8");
       expect(css).toContain(".yami-composer");
       expect(css.endsWith(`/* ${join(dir, "panel.css")} */\n.panel { color: red; }\n`)).toBe(true);
+      await copyStyles([join(dir, "a.css"), join(dir, "b.css")], [join(dir, "panel.css")]);
+      expect(await readFile(join(dir, "a.css"), "utf8")).toBe(css);
+      expect(await readFile(join(dir, "b.css"), "utf8")).toBe(css);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("pluginBuild", () => {
+  it("gives its plugins, then the host's, so a host adds one with no spread", () => {
+    const install = { name: "install", setup() {} };
+    const options = pluginBuild({ production: true, plugins: [install] });
+    expect(options.plugins.map((plugin) => plugin.name)).toEqual(["claude-sdk-in-renderer", "mcp-validator", "install"]);
+    expect(options).toMatchObject({ minify: true, sourcemap: false, format: "cjs" });
   });
 });

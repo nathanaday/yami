@@ -19,15 +19,17 @@ export class Presence {
   private readonly peers = new Map<SharedNote, AgentPeer>();
   private status: string | undefined;
 
+  /** A function for `identity` is read for each new cursor, so a cursor shows the agent's name and color as they are then. */
   constructor(
-    private readonly identity: AgentIdentity,
+    private readonly identity: AgentIdentity | (() => AgentIdentity),
     private readonly animate: () => boolean,
   ) {}
 
   peer(note: SharedNote): AgentPeer {
     let peer = this.peers.get(note);
     if (!peer) {
-      peer = new AgentPeer(note, { name: this.identity.name, color: this.identity.color }, this.animate);
+      const { name, color } = typeof this.identity === "function" ? this.identity() : this.identity;
+      peer = new AgentPeer(note, { name, color }, this.animate);
       peer.setStatus(this.status);
       this.peers.set(note, peer);
     }

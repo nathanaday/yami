@@ -41,3 +41,4 @@ export {
   type SessionState,
 } from "./schema.js";
 export { moduleLedger, vaultLedger, type LedgerView } from "./bases.js";
+export { applyOps, deltaOps, diffOps, normalizeNewlines, shiftOps, type TextOp } from "./text-ops.js";

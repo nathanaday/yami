@@ -7,9 +7,10 @@ import type { AgentEvent } from "../../../src/agent/index.js";
 import { renderTurn, TurnTranscript, userBlock } from "../../../src/conversation/index.js";
 import * as Y from "yjs";
 import { AgentPeer } from "../../../src/obsidian/collab/agent-peer.js";
+import { CollabHub, type NoteChange } from "../../../src/obsidian/collab/hub.js";
 import { LiveRegion } from "../../../src/obsidian/collab/region.js";
 import { LOCAL_ORIGIN, SharedNote } from "../../../src/obsidian/collab/shared-note.js";
-import { applyOps, diffOps } from "../../../src/obsidian/collab/text-ops.js";
+import { applyOps, diffOps } from "../../../src/document/text-ops.js";
 
 beforeAll(() => {
   (globalThis as { window?: unknown }).window = globalThis;
@@ -32,22 +33,6 @@ afterEach(() => {
 function type(note: SharedNote, index: number, text: string) {
   note.applyOps([{ from: index, to: index, insert: text }], LOCAL_ORIGIN);
 }
-
-describe("diffOps", () => {
-  it.each([
-    ["The quick brown fox", "The slow brown fox"],
-    ["one\ntwo\nthree", "one\n2\nthree\nfour"],
-    ["", "new text"],
-    ["old text", ""],
-    ["abc", "abc"],
-  ])("turns %j into %j", (before, after) => {
-    expect(applyOps(before, diffOps(before, after))).toBe(after);
-  });
-
-  it("joins a delete and an insert at one spot into one replacement", () => {
-    expect(diffOps("The quick fox", "The slow fox")).toEqual([{ from: 4, to: 9, insert: "slow" }]);
-  });
-});
 
 describe("SharedNote", () => {
   it("starts from the editor text and keeps the disk text as the base", async () => {
@@ -92,6 +77,38 @@ describe("SharedNote", () => {
     expect(note.content).toBe(">> Hello there world");
     note.agentUndo.undo();
     expect(note.content).toBe(">> Hello world");
+  });
+});
+
+describe("the hub's feed of changes", () => {
+  it("gives each change to a shared note as ops, with the agent that made it or none", async () => {
+    const text = "The quick fox";
+    const hub = new CollabHub({ vault: { adapter: { read: async () => text }, modify: async () => undefined } } as never);
+    const changes: NoteChange[] = [];
+    const stop = hub.observe({ changed: (change) => changes.push(change) });
+    hub.observe({
+      changed: () => {
+        throw new Error("observer bug");
+      },
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const holder = {};
+    const note = await hub.acquire(file, holder);
+    const peer = new AgentPeer(note, { name: "claude", color: "#d97757" }, () => false);
+    await peer.edit(diffOps(note.content, "The slow fox"));
+    type(note, note.content.length, "!");
+    note.applyOps([{ from: 0, to: 0, insert: "> " }], peer.writer);
+    expect(changes).toEqual([
+      { path: "Note.md", ops: [{ from: 4, to: 9, insert: "slow" }], agent: { name: "claude", color: "#d97757" } },
+      { path: "Note.md", ops: [{ from: 12, to: 12, insert: "!" }] },
+      { path: "Note.md", ops: [{ from: 0, to: 0, insert: "> " }], agent: { name: "claude", color: "#d97757" } },
+    ]);
+    expect(error).toHaveBeenCalledTimes(3);
+    error.mockRestore();
+    stop();
+    type(note, 0, "x");
+    expect(changes).toHaveLength(3);
+    hub.destroy();
   });
 });
 

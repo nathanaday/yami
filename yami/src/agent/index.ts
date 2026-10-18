@@ -1,4 +1,4 @@
-export { Agent, type AgentPreferences, type SessionStart } from "./agent.js";
+export { Agent, type AgentPreferences, type ResumedSession, type SessionStart } from "./agent.js";
 export { ActiveTurn, askPermission, BaseSession, oneLine } from "./session.js";
 export { claudePermissionMode, codexApprovalPolicy } from "./approval.js";
 export { lineDiff } from "./diff.js";

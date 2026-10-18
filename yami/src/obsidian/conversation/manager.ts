@@ -9,7 +9,8 @@ import { Composer } from "./composer.js";
 import { ConversationController } from "./controller.js";
 
 export interface ConversationOptions {
-  agents: () => ConversationAgent[];
+  /** The agents, read at each use. */
+  agents: () => readonly ConversationAgent[];
   /** The folder of new conversation notes. */
   folder: () => string;
   animate: () => boolean;
@@ -172,6 +173,15 @@ export class ConversationManager {
       listeners.delete(listener);
       if (!listeners.size && this.turnListeners.get(file) === listeners) this.turnListeners.delete(file);
     };
+  }
+
+  /**
+   * Tells each conversation that the agents changed: a conversation whose agent session belongs to an agent
+   * that is gone or replaced closes it once its turn ends, and its next message starts the agent of the note's
+   * name now. A conversation note whose agent no agent has any more goes on with the first agent.
+   */
+  agentsChanged(): void {
+    for (const controller of this.controllers.values()) controller.agentsChanged();
   }
 
   /** The composer of the active view, if it shows a conversation. */

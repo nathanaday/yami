@@ -50,7 +50,7 @@ describe("Yami in Obsidian", () => {
     await page().waitForTimeout(600);
   }
 
-  async function newConversation(command = "yami:new-conversation-claude") {
+  async function newConversation(command = "yami:yami-new-conversation-claude") {
     await page().evaluate((id) => (window as any).app.commands.executeCommandById(id), command);
     await page().waitForSelector(".yami-composer textarea", { timeout: 15_000 });
   }
@@ -100,7 +100,7 @@ describe("Yami in Obsidian", () => {
   /** Creates a hello session and waits until it is open and Obsidian has read its properties. */
   async function newGreeting(): Promise<string> {
     const before = await activePath();
-    await run("yami:hello-new-greeting");
+    await run("yami:yami-hello-new-greeting");
     await page().waitForFunction(
       (previous) => {
         const app = (window as any).app;
@@ -132,7 +132,7 @@ describe("Yami in Obsidian", () => {
     };
 
     // Search: results as the user types, Tab to the next algorithm, Enter opens the note.
-    await command("yami:wiki-search");
+    await command("yami:yami-wiki-search");
     await page().keyboard.type("sourdough starter");
     await page().waitForSelector(".yami-wiki-hit .yami-wiki-hit-name");
     const names = () => page().$$eval(".yami-wiki-hit-name", (els) => els.map((el) => el.textContent));
@@ -146,7 +146,7 @@ describe("Yami in Obsidian", () => {
 
     // Related notes start from the active note, with PPR, and list its neighbors with no query.
     await open("wiki/topics/Levain.md");
-    await command("yami:wiki-related");
+    await command("yami:yami-wiki-related");
     await page().waitForSelector(".yami-wiki-hit .yami-wiki-hit-name");
     expect(await names()).toContain("Sourdough");
     await close();
@@ -154,7 +154,7 @@ describe("Yami in Obsidian", () => {
     // Compare: one column for each algorithm, and the query from the selection.
     // Line 5 is the first line below the properties: "The starter of [[Sourdough]]".
     await page().evaluate(() => (window as any).app.workspace.activeEditor.editor.setSelection({ line: 5, ch: 4 }, { line: 5, ch: 11 }));
-    await command("yami:wiki-compare");
+    await command("yami:yami-wiki-compare");
     await page().waitForSelector(".yami-wiki-compare-cell");
     expect(await page().inputValue(".yami-wiki-compare-input")).toBe("starter");
     expect(await page().$$eval(".yami-wiki-compare-results th", (els) => els.slice(1).map((el) => el.firstElementChild?.textContent))).toEqual([
@@ -167,36 +167,36 @@ describe("Yami in Obsidian", () => {
     await close();
 
     // Match: the selection is an alias of Levain.
-    await command("yami:wiki-match");
+    await command("yami:yami-wiki-match");
     await page().waitForSelector(".yami-wiki-badge.is-hit");
     expect(await page().textContent(".yami-wiki-list .yami-wiki-hit-name")).toBe("Levain");
     await close();
 
     // Lint: the dead link in this note, and the vault's findings after a new note, without a rebuild.
-    await command("yami:wiki-lint-note");
+    await command("yami:yami-wiki-lint-note");
     await page().waitForSelector(".yami-wiki-badge.is-error");
     expect(await page().textContent(".yami-wiki-badge.is-error")).toBe("dead-link");
     await close();
     await page().evaluate(async () => void (await (window as any).app.vault.create("wiki/topics/Rye.md", "---\ntype: topic\n---\nNo description.\n")));
-    await command("yami:wiki-lint-vault");
+    await command("yami:yami-wiki-lint-vault");
     await page().waitForSelector(".yami-wiki-list .yami-wiki-hit");
     expect(await page().$$eval(".yami-wiki-list .yami-wiki-hit-meta", (els) => els.some((el) => el.textContent?.startsWith("wiki/topics/Rye.md · has no description")))).toBe(true);
     await close();
 
     // Snapshot: the first version, its archive, and the versions list.
-    await command("yami:wiki-snapshot");
+    await command("yami:yami-wiki-snapshot");
     const snapshot = await obsidian.waitForNote("internal/wiki/snapshots/v1.md", (text) => text.includes("hash:"), 15_000);
     expect(snapshot).toContain("type: snapshot");
     expect(snapshot).toContain("notes: 3");
     expect(readFileSync(path.join(obsidian.vault, "internal/wiki/snapshots/v1.json.gz")).length).toBeGreaterThan(20);
-    await command("yami:wiki-versions");
+    await command("yami:yami-wiki-versions");
     await page().waitForSelector(".yami-wiki-list .yami-wiki-hit");
     expect(await page().textContent(".yami-wiki-list .yami-wiki-hit-name")).toBe("Version 1");
     await close();
 
     // Restore: a hand edit is kept as version 2 before version 1 comes back as version 3.
     await page().evaluate(async () => void (await (window as any).app.vault.create("wiki/topics/Spelt.md", "---\ntype: topic\ndescription: Spelt.\n---\nAdded by hand.\n")));
-    await command("yami:wiki-restore");
+    await command("yami:yami-wiki-restore");
     await page().waitForSelector(".prompt-input");
     await page().keyboard.type("Version 1");
     await page().keyboard.press("Enter");
@@ -212,7 +212,7 @@ describe("Yami in Obsidian", () => {
       await vault.create("Papers/Attention.md", "# Attention\n\nTransformers use attention.\n");
       await vault.create("Papers/Diffusion.md", "# Diffusion\n\nDenoising models.\n");
     });
-    await command("yami:wiki-ingest-folder");
+    await command("yami:yami-wiki-ingest-folder");
     await page().waitForSelector(".prompt-input");
     // The vault root is not a choice.
     expect(await page().$$eval(".suggestion-item", (els) => els.map((el) => el.textContent))).not.toContain("/");
@@ -243,7 +243,7 @@ describe("Yami in Obsidian", () => {
       await vault.createFolder("journals/garden-log");
       await vault.create("journals/garden-log/Tomatoes.md", "Plant after the frost.\n");
     });
-    await command("yami:journals-publish");
+    await command("yami:yami-journals-publish");
     await page().waitForSelector(".prompt-input");
     await page().keyboard.type("Garden Log");
     await page().keyboard.press("Enter");
@@ -266,7 +266,7 @@ describe("Yami in Obsidian", () => {
     }, made.copies[0]);
     await page().evaluate((file) => (window as any).app.workspace.getLeaf().openFile((window as any).app.vault.getFileByPath(file)), made.session);
     await page().waitForFunction((file) => (window as any).app.metadataCache.getFileCache((window as any).app.vault.getFileByPath(file))?.frontmatter?.status === "out", made.session);
-    await command("yami:librarian-return");
+    await command("yami:yami-librarian-return");
     await obsidian.waitForNote(made.session, (text) => text.includes("status: returned"), 15_000);
     expect(await obsidian.read("wiki/topics/Compost.md")).toContain("Compost feeds the soil and holds water.");
     expect(existsSync(path.join(obsidian.vault, made.copies[0]))).toBe(false);
@@ -280,7 +280,7 @@ describe("Yami in Obsidian", () => {
     await page().waitForSelector('.yami-panel [data-key="module:threads"]');
     expect(await page().$('.yami-panel [data-key="module:hello"]')).toBeNull();
 
-    await run("yami:new-module");
+    await run("yami:yami-new-module");
     await page().waitForSelector(".modal-container input", { timeout: 5_000 });
     await page().keyboard.type("Hello");
     await page().keyboard.press("Enter");
@@ -303,7 +303,7 @@ describe("Yami in Obsidian", () => {
     expect(await page().$eval('.yami-panel [data-key="module:hello"] .yami-module-icon svg', (el) => el.classList.contains("lucide-hand"))).toBe(true);
     await page().waitForFunction(() => {
       const commands = (window as any).app.commands.commands;
-      return Boolean(commands["yami:hello-new-greeting"]) && !commands["yami:hello-new-task"];
+      return Boolean(commands["yami:yami-hello-new-greeting"]) && !commands["yami:yami-hello-new-task"];
     }, undefined, { timeout: 10_000 });
     expect(await page().$$(".yami-panel .yami-problem-row")).toHaveLength(0);
   });
@@ -410,7 +410,7 @@ describe("Yami in Obsidian", () => {
   });
 
   it("talks to Codex in a Codex conversation", { timeout: TIMEOUT }, async () => {
-    await newConversation("yami:new-conversation-codex");
+    await newConversation("yami:yami-new-conversation-codex");
     await send("Reply with exactly the word: kiwi");
     await idle();
     const text = await obsidian.waitForNote(await activePath(), () => true);
@@ -419,7 +419,7 @@ describe("Yami in Obsidian", () => {
   });
 
   it("calls a module tool from both agents", { timeout: TIMEOUT }, async () => {
-    for (const command of ["yami:new-conversation-claude", "yami:new-conversation-codex"]) {
+    for (const command of ["yami:yami-new-conversation-claude", "yami:yami-new-conversation-codex"]) {
       await newConversation(command);
       await send("Call the status tool of the threads module with no thread, then reply with only the number of open threads that it listed, as a digit.");
       await idle();
@@ -704,12 +704,13 @@ describe("Yami in Obsidian", () => {
 
   it("offers the commands of the sessions, the flows, and the actions", async () => {
     const ids = await page().evaluate(() => Object.keys((window as any).app.commands.commands).filter((id) => id.startsWith("yami:")));
-    for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search", "open-panel", "open-wiki-navigator"]) {
-      expect(ids, id).toContain(`yami:${id}`);
+    for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search"]) {
+      expect(ids, id).toContain(`yami:yami-${id}`);
     }
+    for (const id of ["open-panel", "open-wiki-navigator"]) expect(ids, id).toContain(`yami:${id}`);
     // A thread's document holds sections only the tools write, and the wiki's ingest starts from files.
-    expect(ids).not.toContain("yami:threads-new-thread");
-    expect(ids).not.toContain("yami:wiki-new-ingest");
+    expect(ids).not.toContain("yami:yami-threads-new-thread");
+    expect(ids).not.toContain("yami:yami-wiki-new-ingest");
   });
 
   it("runs a hello session from its document, also with a note elsewhere whose properties do not parse", { timeout: TIMEOUT }, async () => {
@@ -720,7 +721,7 @@ describe("Yami in Obsidian", () => {
       await vault.create("tool/Old session.md", "---\ndescription: Fix a scroll stop: the editor counted as out of view.\n---\nAn old note.\n");
     });
     const session = await newGreeting();
-    await run("yami:run-session-claude");
+    await run("yami:yami-run-session-claude");
     const doc = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
     expect(doc).toContain("state: done");
     expect(doc).toContain("flow: greeting");
@@ -748,7 +749,7 @@ describe("Yami in Obsidian", () => {
       return created.path as string;
     }, name);
     await page().waitForFunction((path) => (window as any).app.workspace.getActiveFile()?.path === path, session);
-    await run("yami:run-session-claude");
+    await run("yami:yami-run-session-claude");
     const doc = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
     expect(doc).toContain("state: done");
     expect(doc).toContain("[[internal/hello/agents/proofreader/AGENT|proofreader]]");
@@ -775,7 +776,7 @@ describe("Yami in Obsidian", () => {
 
     // While the agent starts: the kill closes the session that is starting, and the turn that would follow never runs.
     const starting = await newGreeting();
-    await run("yami:run-session-claude");
+    await run("yami:yami-run-session-claude");
     const first = `${await conversationOf(starting)}.md`;
     await page().waitForFunction(
       (path) => {
@@ -786,7 +787,7 @@ describe("Yami in Obsidian", () => {
       first,
       { timeout: 30_000, polling: 50 },
     );
-    await run("yami:kill-session");
+    await run("yami:yami-kill-session");
     expect(await obsidian.waitForNote(starting, (text) => /state: (stopped|done|failed|needs-attention)/.test(text), 60_000)).toContain("state: stopped");
 
     // In the middle of a turn: the harness session closes at once.
@@ -796,10 +797,10 @@ describe("Yami in Obsidian", () => {
       (window as any).__allow = setInterval(() => (document.querySelector(".yami-permission .mod-cta") as HTMLElement | null)?.click(), 200);
     });
     try {
-      await run("yami:run-session-claude");
+      await run("yami:yami-run-session-claude");
       const second = `${await conversationOf(working)}.md`;
       await page().waitForFunction((path) => ((window as any).app.plugins.plugins.yami.yami.hub.get(path)?.content ?? "").includes("sleep 30"), second, { timeout: 120_000, polling: 200 });
-      await run("yami:kill-session");
+      await run("yami:yami-kill-session");
       const killed = await obsidian.waitForNote(working, (text) => /state: (stopped|done|failed|needs-attention)/.test(text), 30_000);
       expect(killed).toContain("state: stopped");
       expect(killed).toMatch(/iteration 1: 0 met, 1 unmet; stopped/);
@@ -818,21 +819,21 @@ describe("Yami in Obsidian", () => {
       (window as any).__allow = setInterval(() => (document.querySelector(".yami-permission .mod-cta") as HTMLElement | null)?.click(), 200);
     });
     try {
-      await run("yami:run-session-claude");
+      await run("yami:yami-run-session-claude");
       const conversation = (await obsidian.waitForNote(session, (text) => /\nconversation: "\[\[conversations\//.test(text), 60_000)).match(/\nconversation: "\[\[(conversations\/[^|\]]+)\|/)![1]!;
       await page().waitForFunction(
         (path) => ((window as any).app.plugins.plugins.yami.yami.hub.get(path)?.content ?? "").includes("sleep 30"),
         `${conversation}.md`,
         { timeout: 120_000, polling: 200 },
       );
-      expect(await page().evaluate(() => (window as any).app.commands.findCommand("yami:resume-session").checkCallback(true))).toBe(false);
-      await run("yami:stop-session");
+      expect(await page().evaluate(() => (window as any).app.commands.findCommand("yami:yami-resume-session").checkCallback(true))).toBe(false);
+      await run("yami:yami-stop-session");
       const stopped = await obsidian.waitForNote(session, (text) => /state: (stopped|done|failed|needs-attention)/.test(text), 60_000);
       expect(stopped).toContain("state: stopped");
       expect(stopped).toMatch(/iteration 1: 0 met, 1 unmet; stopped/);
       expect(await page().evaluate(() => (window as any).app.plugins.plugins.yami.yami.running.length)).toBe(0);
 
-      await run("yami:resume-session");
+      await run("yami:yami-resume-session");
       const done = await obsidian.waitForNote(session, (text) => /state: (done|failed|needs-attention)/.test(text), 180_000);
       expect(done).toContain("state: done");
       expect(done).toContain(`conversation: "[[${conversation}|`);
@@ -857,11 +858,11 @@ describe("Yami in Obsidian", () => {
     await edit("name: greeting\n", "name: greeting\naccess: readonly\n");
     await page().waitForSelector(`.yami-panel .yami-problem-row[data-key^="problem:${flow}:"]`, { timeout: 10_000 });
     expect(await page().textContent(".yami-panel .yami-problem-row .yami-row-desc")).toContain("access");
-    await page().waitForFunction(() => !(window as any).app.commands.commands["yami:hello-new-greeting"], undefined, { timeout: 10_000 });
+    await page().waitForFunction(() => !(window as any).app.commands.commands["yami:yami-hello-new-greeting"], undefined, { timeout: 10_000 });
     expect(await page().$('.yami-panel [data-key="module:threads"]')).not.toBeNull();
     await edit("access: readonly\n", "");
     await page().waitForSelector(".yami-panel .yami-problem-row", { state: "detached", timeout: 10_000 });
-    await page().waitForFunction(() => Boolean((window as any).app.commands.commands["yami:hello-new-greeting"]), undefined, { timeout: 10_000 });
+    await page().waitForFunction(() => Boolean((window as any).app.commands.commands["yami:yami-hello-new-greeting"]), undefined, { timeout: 10_000 });
 
     // A person edits the base skill: the panel says so, and a delete brings back this version's text.
     await page().evaluate((file) => (window as any).app.vault.process((window as any).app.vault.getFileByPath(file), (text: string) => `${text}\nAlways answer in French.\n`), BASE_SKILL);
@@ -873,7 +874,7 @@ describe("Yami in Obsidian", () => {
 
     await page().evaluate(() => (window as any).app.vault.delete((window as any).app.vault.getFolderByPath("internal/hello"), true));
     await page().waitForSelector('.yami-panel [data-key="module:hello"]', { state: "detached", timeout: 10_000 });
-    await page().waitForFunction(() => !Object.keys((window as any).app.commands.commands).some((id) => id.startsWith("yami:hello-")), undefined, { timeout: 10_000 });
+    await page().waitForFunction(() => !Object.keys((window as any).app.commands.commands).some((id) => id.startsWith("yami:yami-hello-")), undefined, { timeout: 10_000 });
     expect(await page().evaluate(() => (window as any).app.plugins.plugins.yami.yami.module("hello"))).toBeUndefined();
   });
 });

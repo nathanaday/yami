@@ -21,6 +21,7 @@ import type { TurnEnd } from "../api.js";
 import type { CollabHub, DiskWriter } from "../collab/hub.js";
 import { LiveRegion } from "../collab/region.js";
 import { LOCAL_ORIGIN, type SharedNote } from "../collab/shared-note.js";
+import { SessionSlot } from "../note-sessions.js";
 import type { PermissionPrompts } from "../prompts/permission-modal.js";
 
 const INSTRUCTIONS = `You are running inside Obsidian, the note-taking app, through Yami. Your working directory is the root of the user's vault.
@@ -96,37 +97,67 @@ export class ConversationController {
   /** Who waits for the turn of each queued message, in the order of `queue`. */
   private readonly queueWaiters: (TurnWaiter | undefined)[] = [];
   status: string | undefined;
-  private session: AgentSession | undefined;
-  private starting: Promise<AgentSession> | undefined;
+  /** The agent session of the note: it starts when needed, and closes after the idle minutes with no composer. */
+  private readonly slot: SessionSlot;
   private note: SharedNote | undefined;
   private turn: Turn | undefined;
   private readonly presence: Presence;
   private readonly listeners = new Set<() => void>();
   private readonly holders = new Set<object>();
-  private idleTimer: number | undefined;
   /** The path of the conversation note that the agent was last told. */
   private toldPath: string | undefined;
   /** Properties written to the note that the metadata cache may not show yet. */
   private readonly written: Record<string, string | undefined> = {};
   /** An interrupt that came while the agent was starting, for the turn that follows. */
   private interruptPending = false;
-  /** Whether the agent session continued the one the note records, or had to start a new one. */
-  private continued = false;
   /**
    * The tools of the agent sessions that start after this is set, in place of the agent's own; none for
    * the agent's. A run sets them, as for its review. They last while the app runs, not in the note.
    */
   tools: ToolSet | undefined;
+  /**
+   * The agent of a run's conversation, which keeps it until the run closes the conversation, also when the
+   * host removes or replaces the agent meanwhile. None: the agent that the note names.
+   */
+  pinned: ConversationAgent | undefined;
 
   constructor(
     private readonly app: App,
     private readonly hub: CollabHub,
     readonly file: TFile,
-    private readonly agents: () => ConversationAgent[],
+    private readonly agents: () => readonly ConversationAgent[],
     private readonly prompts: PermissionPrompts,
     private readonly options: ControllerOptions,
   ) {
-    this.presence = new Presence(this.registered, options.animate);
+    this.presence = new Presence(() => this.registered, options.animate);
+    this.slot = new SessionSlot({
+      agent: () => this.registered.agent,
+      options: () => ({
+        instructions: INSTRUCTIONS,
+        model: this.property("model"),
+        effort: this.property("effort"),
+        approval: this.approval,
+        access: this.property("access") as "edit" | "read-only" | undefined,
+        ...(this.tools && { tools: this.tools }),
+        onPermission: (request) => this.ask(request),
+        onQuestion: (request) => this.question(request),
+        // Shares a note before the agent's tool changes it, so the change merges as the agent's edit.
+        beforeFileChange: (paths) => this.turn && this.hub.prepare(this.turn.writer, paths),
+      }),
+      resume: () => this.property("session"),
+      record: (id) => (this.properties.session === id ? undefined : this.setProperty("session", id)),
+      idleMinutes: options.idleMinutes,
+      started: (session) => {
+        session.on((event) => this.handle(event));
+        void Promise.all([session.models(), session.commands()])
+          .then(([models, commands]) => {
+            this.models = models;
+            this.commands = commands;
+            this.changed();
+          })
+          .catch(() => undefined);
+      },
+    });
   }
 
   get properties(): Record<string, unknown> {
@@ -139,8 +170,9 @@ export class ConversationController {
     return typeof value === "string" ? value : undefined;
   }
 
-  /** The agent of the note, by its `agent` property, or the first agent. */
+  /** The agent of the note: a run's pinned agent, or the agent that the note names in its `agent` property, or else the first agent. */
   get registered(): ConversationAgent {
+    if (this.pinned) return this.pinned;
     const agents = this.agents();
     const name = this.property("agent");
     const found = agents.find((candidate) => candidate.name === name) ?? agents[0];
@@ -184,16 +216,16 @@ export class ConversationController {
   /** A composer shows the conversation. While one does, the note stays shared and the agent warm. */
   async attach(holder: object): Promise<void> {
     this.holders.add(holder);
-    window.clearTimeout(this.idleTimer);
+    this.slot.hold(holder);
     this.note ??= await this.hub.acquire(this.file, this);
     if (!this.ended) void this.ensureSession().catch(() => undefined);
   }
 
   detach(holder: object): void {
     this.holders.delete(holder);
+    this.slot.release(holder);
     if (this.holders.size || this.working) return;
     this.releaseNote();
-    this.scheduleIdle();
   }
 
   async send(text: string): Promise<void> {
@@ -230,7 +262,7 @@ export class ConversationController {
     this.queue.length = 0;
     for (const waiter of this.queueWaiters.splice(0)) waiter?.({ path: this.file.path, status: "interrupted" });
     if (this.phase === "starting") this.interruptPending = true;
-    await this.session?.interrupt();
+    await this.slot.live?.interrupt();
     this.changed();
   }
 
@@ -240,7 +272,13 @@ export class ConversationController {
    */
   async connect(): Promise<boolean> {
     await this.ensureSession();
-    return this.continued;
+    return this.slot.continued;
+  }
+
+  /** Closes, once idle, an agent session whose agent the host removed or replaced, and shows the agent as it is now. */
+  agentsChanged(): void {
+    this.slot.refresh();
+    this.changed();
   }
 
   async setModel(model: string | undefined): Promise<void> {
@@ -269,7 +307,7 @@ export class ConversationController {
    * them from the note. Returns false when the agent refuses them.
    */
   private async configure(settings: SessionSettings): Promise<boolean> {
-    const session = this.session ?? (await this.starting?.catch(() => undefined));
+    const session = this.slot.session ?? (await this.slot.starting?.catch(() => undefined));
     if (!session || session.closed) return true;
     try {
       await session.configure(settings);
@@ -301,7 +339,6 @@ export class ConversationController {
   }
 
   async destroy(): Promise<void> {
-    window.clearTimeout(this.idleTimer);
     this.queue.length = 0;
     for (const waiter of this.queueWaiters.splice(0)) waiter?.({ path: this.file.path, status: "interrupted" });
     for (const pending of [...this.pending]) {
@@ -393,8 +430,6 @@ export class ConversationController {
       if (event.type === "turn-end") void this.finishTurn(turn, event.result.status, event.result.error, event.result.text);
     }
     if (event.type === "closed") {
-      this.session = undefined;
-      this.starting = undefined;
       this.toldPath = undefined;
       // A session closed on purpose, by the person or by Yami, interrupts its turn; one that broke fails it.
       if (this.turn) void this.finishTurn(this.turn, event.error ? "failed" : "interrupted", event.error ?? `${this.agentName} stopped.`);
@@ -428,10 +463,7 @@ export class ConversationController {
     const running = next ? this.run(next, nextWaiter) : undefined;
     this.turnEnded(status, error, text, turn.waiter);
     if (running) await running;
-    else if (!this.holders.size) {
-      this.releaseNote();
-      this.scheduleIdle();
-    }
+    else if (!this.holders.size) this.releaseNote();
   }
 
   private turnEnded(status: TurnStatus, error?: string, text?: string, waiter?: TurnWaiter): void {
@@ -460,71 +492,15 @@ export class ConversationController {
   }
 
   private ensureSession(): Promise<AgentSession> {
-    if (this.session && !this.session.closed) return Promise.resolve(this.session);
-    this.starting ??= this.startAgent()
-      .then(async (session) => {
-        this.session = session;
-        session.on((event) => this.handle(event));
-        if (this.properties.session !== session.id) await this.setProperty("session", session.id);
-        void Promise.all([session.models(), session.commands()])
-          .then(([models, commands]) => {
-            this.models = models;
-            this.commands = commands;
-            this.changed();
-          })
-          .catch(() => undefined);
-        return session;
-      })
-      .finally(() => {
-        this.starting = undefined;
-      });
-    return this.starting;
-  }
-
-  /** Starts the agent's session. When the stored conversation is gone, starts a new one. */
-  private async startAgent(): Promise<AgentSession> {
-    const start = (resume?: string) =>
-      this.registered.agent.startSession({
-        instructions: INSTRUCTIONS,
-        resume,
-        model: this.property("model"),
-        effort: this.property("effort"),
-        approval: this.approval,
-        access: this.property("access") as "edit" | "read-only" | undefined,
-        ...(this.tools && { tools: this.tools }),
-        onPermission: (request) => this.ask(request),
-        onQuestion: (request) => this.question(request),
-        // Shares a note before the agent's tool changes it, so the change merges as the agent's edit.
-        beforeFileChange: (paths) => this.turn && this.hub.prepare(this.turn.writer, paths),
-      });
-    const resume = this.property("session");
-    this.continued = false;
-    if (!resume) return start();
-    try {
-      const session = await start(resume);
-      this.continued = true;
-      return session;
-    } catch {
-      // The stored conversation is gone, for example after the harness cleaned up old sessions.
-      return start();
-    }
+    return this.slot.open();
   }
 
   /** Closes the agent session. The next message resumes it from the note. */
   async closeSession(): Promise<void> {
-    const session = this.session ?? (await this.starting?.catch(() => undefined));
-    this.session = undefined;
     // A resumed session hears the path again; the note can be renamed while it is closed.
     this.toldPath = undefined;
     this.presence.clear();
-    await session?.close();
-  }
-
-  private scheduleIdle(): void {
-    window.clearTimeout(this.idleTimer);
-    this.idleTimer = window.setTimeout(() => {
-      if (!this.working && !this.holders.size) void this.closeSession();
-    }, this.options.idleMinutes() * 60_000);
+    await this.slot.close();
   }
 
   /** Shows an approval request in the composer, or in a dialog when no composer is open. */

@@ -45,15 +45,18 @@ export interface Note {
 }
 
 export interface WikiOptions {
-  /** Folders and files that stay out of the index. A function is read at each refresh, so it can follow a setting. */
+  /**
+   * Folders and files that stay out of the index. A function is read at each query, so it can follow a
+   * setting: when it gives another list, the index reads the vault again.
+   */
   exclude?: string[] | (() => string[]);
   /** Note types that stay out of the index. Default: the records that are not knowledge, and copy it: conversation, session, module, change, snapshot. */
   skipTypes?: string[];
   embedder?: Embedder;
   /** Where the embeddings are kept. Default `internal/wiki/cache/embeddings.json`. */
   cachePath?: string;
-  /** The algorithm of a query that names none. Default `bm25`. */
-  defaultAlgorithm?: string;
+  /** The algorithm of a query that names none. Default `bm25`. A function is read at each query, so it can follow a setting. */
+  defaultAlgorithm?: string | (() => string);
 }
 
 export const FIELD_WEIGHTS = { title: 3, aliases: 3, tags: 2, description: 2, body: 1 };
@@ -84,6 +87,8 @@ export class Wiki {
   private chunkBm25 = new Bm25([], { text: 1 });
   private cache: EmbeddingCache | undefined;
   private fresh = false;
+  /** The excluded paths of the last refresh, so a changed list makes the index stale. */
+  private excludedAt = "";
   /** Counts the invalidations, so a refresh that a change overtook does not mark the index fresh. */
   private changes = 0;
   private pending: Promise<void> | undefined;
@@ -108,10 +113,17 @@ export class Wiki {
     return this.options.embedder;
   }
 
+  /** The algorithm of a query that names none, as the option gives it now. */
+  get defaultAlgorithm(): string {
+    const algorithm = this.options.defaultAlgorithm;
+    return typeof algorithm === "function" ? algorithm() : algorithm;
+  }
+
   /** Reads every note and builds the index, the graph, and the communities. */
   async refresh(): Promise<void> {
     const changes = this.changes;
     const exclude = this.excluded();
+    this.excludedAt = exclude.join("\n");
     const all = await this.vault.list("");
     this.everyPath = new Set(all);
     this.everyName = new Map();
@@ -200,6 +212,7 @@ export class Wiki {
 
   /** Refreshes when the index is stale. Calls that arrive during a refresh wait for that one. */
   async ensure(): Promise<void> {
+    if (this.fresh && this.excluded().join("\n") !== this.excludedAt) this.invalidate();
     while (!this.fresh) {
       this.pending ??= this.refresh().finally(() => (this.pending = undefined));
       await this.pending;
@@ -252,7 +265,7 @@ export class Wiki {
   async search(text: string, query: Omit<Query, "text"> = {}): Promise<Hit[]> {
     await this.ensure();
     const full: Query = { ...query, text };
-    const name = full.algorithm ?? this.options.defaultAlgorithm;
+    const name = full.algorithm ?? this.defaultAlgorithm;
     const algorithm: Algorithm | undefined = algorithms[name];
     if (!algorithm) throw new Error(`No algorithm named "${name}". The algorithms are ${Object.keys(algorithms).join(", ")}.`);
     const scored = await algorithm(this, full);

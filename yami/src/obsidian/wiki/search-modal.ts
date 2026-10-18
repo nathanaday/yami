@@ -25,7 +25,7 @@ export class WikiSearchModal extends SuggestModal<Hit> {
     options: WikiSearchOptions = {},
   ) {
     super(app);
-    this.algorithm = options.algorithm ?? lastAlgorithm ?? wiki.options.defaultAlgorithm;
+    this.algorithm = options.algorithm ?? lastAlgorithm ?? wiki.defaultAlgorithm;
     this.seeds = options.seeds ?? [];
     this.limit = 30;
     this.modalEl.addClass("yami-wiki-search");

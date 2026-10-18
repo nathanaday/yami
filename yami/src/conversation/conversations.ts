@@ -72,21 +72,14 @@ export class FileConversations implements Conversations {
 
   async open(options: OpenConversation): Promise<Conversation> {
     const start = (resume?: string) =>
-      options.agent.startSession({ resume, approval: options.approval, access: options.access, onPermission: this.onPermission, ...(options.tools && { tools: options.tools }) });
+      options.agent.resumeOrStart({ resume, approval: options.approval, access: options.access, onPermission: this.onPermission, ...(options.tools && { tools: options.tools }) });
     let path: string;
     let session: AgentSession;
     let continued = false;
     if (options.resume && (await this.vault.exists(options.resume))) {
       path = options.resume;
       const recorded = (await readDocument(this.vault, path)).properties.session;
-      try {
-        if (typeof recorded !== "string") throw new Error("The note records no session.");
-        session = await start(recorded);
-        continued = true;
-      } catch {
-        // The recorded session can be gone, for example after the harness cleaned up old sessions.
-        session = await start();
-      }
+      ({ session, continued } = await start(typeof recorded === "string" ? recorded : undefined));
       await updateDocument(this.vault, path, (doc) => {
         doc.properties.session = session.id;
         doc.properties.status = "active";
@@ -97,7 +90,7 @@ export class FileConversations implements Conversations {
       path = availablePath(folder, noteName(options.name), (candidate) => existing.has(candidate) || this.#opening.has(candidate));
       this.#opening.add(path);
       try {
-        session = await start();
+        ({ session } = await start());
         await this.vault.write(
           path,
           newConversation({

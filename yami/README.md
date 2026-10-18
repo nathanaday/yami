@@ -8,7 +8,7 @@ The Yami library. The design policy is in [`design.md`](../design.md).
 | `yami/obsidian` | The Obsidian layer: `createYami`, the vault adapter, shared documents, conversation notes, the approval prompts, and the commands. |
 | `yami/wiki` | The knowledge base: one index over every note, the link graph, the query algorithms, match, lint, changes, and versions. |
 | `yami/agent` | Starts a harness, Claude Code or Codex, and runs conversations with it. |
-| `yami/document` | Reads and writes the vault documents that Yami defines, and generates the ledgers. |
+| `yami/document` | Reads and writes the vault documents that Yami defines, generates the ledgers, and holds the text operations, with no Obsidian. |
 | `yami/conversation` | The conversation note format: properties, the user and agent blocks, and the turn transcript. |
 | `yami/testing` | A vault on the file system, a scripted agent, and `testYami`, to test a module in Node. |
 | `yami/esbuild` | The esbuild options of an Obsidian plugin built on Yami. |
@@ -83,7 +83,7 @@ export class Notes extends YamiModule {
 
 The plugin's build needs `pluginBuild` from `yami/esbuild`, which loads `.md` files as text, and its `tsconfig.json` needs `"types": ["yami/markdown"]`. With these, the plugin gets:
 
-- **Commands** for each agent (New conversation with claude, Run this session with Claude), for the session open in the editor (Resume this session, Stop this session, Kill this session's agent), for each flow (Notes: new weekly review), for each action (Notes: publish this summary), for the wiki (search, lint, versions, ingest), and New module.
+- **Commands** for each agent (New conversation with claude, Run this session with Claude), for the session open in the editor (Resume this session, Stop this session, Kill this session's agent), for each flow (Notes: new weekly review), for each action (Notes: publish this summary), for the wiki (search, lint, versions, ingest), and New module. Each id starts with `yami-`, so it never collides with an id of the plugin's own. See [Turning a part off, and extending it](#turning-a-part-off-and-extending-it).
 - **Every agent** works in the vault, with Yami's self-check tool (`yami_check`), the agent tool (`yami_agent`), the tools of every module (`notes_find_sources`, `wiki_search`, …), the base skill (`/yami:run`), and the skills of every module (`/notes:summarize`). A reviewer gets only the tools that change nothing, and `yami_review`.
 - **Every module** installs its documents into the vault when the workspace is ready, and never overwrites a file that exists.
 - **Vault modules**: a person can define a module in the vault with markdown only. Yami finds it at start and as it changes, and the plugin gets its commands. See [Vault modules](#vault-modules).
@@ -208,6 +208,13 @@ The ledgers are Obsidian bases: live views over the properties of the session do
 The schemas of the built-in types are `MODULE`, `SESSION`, and `CONVERSATION`, and of the forms `AGENT`, `POLICY`, `PROMISE`, `SKILL`, and `FLOW`. `FORMS` gives each form's folder, file, and schema: `FORMS.policy` is `{ folder: "policies", file: "POLICY.md", schema: POLICY }`. `documentName(path)` gives the name of a form from its folder. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form. A field's type is `text`, `number`, `boolean`, `date`, `list`, `link`, `links`, or `map` (names with values).
 
 `vaultLedger` and `moduleLedger` return the text of the two bases.
+
+**The text operations** are here too, because they need no Obsidian: `diffOps(before, after)` gives the changes that turn one text into another, as `TextOp`s `{ from, to, insert }` in ascending order; `applyOps(text, ops)` applies them; `deltaOps(delta)` turns a Yjs text delta into ops; `shiftOps(ops, offset)` moves them; and `normalizeNewlines(text)` turns `\r\n` and `\r` into `\n`. A plugin's unit test imports them from `yami/document` and mocks no Obsidian class, since `yami/document` never loads `obsidian`. `yami/obsidian` gives the same functions, for code that imports it anyway.
+
+```ts
+import { applyOps, diffOps } from "yami/document";
+expect(applyOps("The quick fox", diffOps("The quick fox", "The slow fox"))).toBe("The slow fox");
+```
 
 ## `yami/conversation`
 
@@ -440,9 +447,10 @@ The session ends `done` when every check is met and the review finds every polic
 
 ### The Yami
 
-`new Yami({ vault, agents, modules, wiki, conversations, conversationFolder })` is the runtime of one vault. In Obsidian, `createYami` builds it. The wiki module is built in and comes first in `yami.modules`, then the plugin's modules, then the vault modules.
+`new Yami({ vault, agents, modules, wiki, conversations, conversationFolder })` is the runtime of one vault. In Obsidian, `createYami` builds it. `conversationFolder` is a folder, or a function that Yami reads at each use; `yami.conversationFolder` gives the folder now. The wiki module is built in and comes first in `yami.modules`, then the plugin's modules, then the vault modules.
 
-- It sets each agent's working directory to the vault, and gives it `yami.tools({ agent })`, one tool set named `yami` with Yami's own tools and the tools of every module, and `yami.skills()`, Yami's skill set `internal/yami` with the base skill, and each module's internal folder that holds skills.
+- `yami.agents` lists the agents, the first being the default, and `yami.setAgents(agents)` replaces them while Yami runs. A live run keeps the agent it started with until it ends, also an agent that is gone, and the next run takes one from the new list; the sessions' acts follow at once. In Obsidian, `ObsidianYami.setAgents` takes names and colors too.
+- It sets each agent's working directory to the vault, at the start and for each agent that `setAgents` adds, and gives it `yami.tools({ agent })`, one tool set named `yami` with Yami's own tools and the tools of every module, and `yami.skills()`, Yami's skill set `internal/yami` with the base skill, and each module's internal folder that holds skills.
 - `yami.tools(caller?)` gives the tool set for a caller, `{ agent, module, session, access, approval }`, all optional: `yami_agent` of the set runs agents on the caller's agent (default: the Yami's first), names a bare name in the caller's `module`, links the caller's `session` from their notes, and takes the caller's `access` and `approval` (default: the agent's preferences). Each run's worker gets the set for its session: `yami.tools({ agent, module: "notes", session: "notes/Weekly.md", access: "edit", approval: "accept-edits" })`.
 - Yami's own tools: `yami_check({ session })`, which every agent gets, runs the checks of a session's promises and returns `session.check()`, with no record in the document. `yami_agent({ agent, task })`, which every agent gets, runs an agent: see [Agents](#agents). `yami_review({ verdicts })` is only in the tool set of one review's conversation, bound to that review: it records the reviewer's verdicts, and refuses a verdict of the wrong kind, an item of no review, and any call after the review ends. It returns `{ recorded, errors, remaining }`; called with no `verdicts`, `yami_review({})`, it shows what is left to judge.
 - `yami.wiki` is the vault's one `Wiki`. The conversation folder stays out of its index.
@@ -450,7 +458,7 @@ The session ends `done` when every check is met and the review finds every polic
 - `yami.discover()`, `yami.problems`, `yami.onModulesChange(listener)`, and `yami.createModule(name)`: the vault modules. See [Vault modules](#vault-modules).
 - `yami.ingest({ files | folder, name?, policies? })` captures files as sources of the wiki and creates an ingest session that links them, with the policies on top of the wiki's own.
 - `conversations` decides how the conversation notes of runs are kept. The default writes them straight to the vault and denies every approval; `createYami` gives notes with the message box, so a person can watch a run and answer its approvals. A `Conversations` of a host's own must start the agent's sessions with `OpenConversation.tools` when the run gives them, in place of the agent's tools: the worker, the review, and the agents rely on it. It must also give two conversations that open at the same time two notes, as two agents of one session need.
-- `yami.close()` kills every live run, waits for the harness sessions of every run to close, and closes every agent session.
+- `yami.close()` kills every live run, waits for the harness sessions of every run to close, and closes every agent session, also of an agent that `setAgents` removed.
 
 ### Agents
 
@@ -541,7 +549,7 @@ await wiki.versions();                                                          
 await wiki.restore(3);                                                              // version 3 back, as a new version
 ```
 
-- **The index holds every note** of the vault, except the folders in `exclude`, the types in `skipTypes` (conversation, session, module, change, and snapshot by default), the forms of every module (the folders `agents/`, `flows/`, `policies/`, `promises/`, and `skills/` of `internal/<module>/`), and the frozen copies of sources. Links resolve as Obsidian resolves them, over every note, indexed or not: by path, or by name, and a name that several notes share goes to the shortest path. `locate(target)` gives that note; `resolve(target)` gives it only when the index holds it. A link to a note the index leaves out, such as a session, is not dead, and it is not an edge of the graph. A note holds a tag and every tag above it, so `tags: ["school"]` finds a note tagged `school/cs513`.
+- **The index holds every note** of the vault, except the folders in `exclude` (a list, or a function that the wiki reads at each query, so the list can follow a setting: when it gives another list, the next query reads the vault again), the types in `skipTypes` (conversation, session, module, change, and snapshot by default), the forms of every module (the folders `agents/`, `flows/`, `policies/`, `promises/`, and `skills/` of `internal/<module>/`), and the frozen copies of sources. Links resolve as Obsidian resolves them, over every note, indexed or not: by path, or by name, and a name that several notes share goes to the shortest path. `locate(target)` gives that note; `resolve(target)` gives it only when the index holds it. A link to a note the index leaves out, such as a session, is not dead, and it is not an edge of the graph. A note holds a tag and every tag above it, so `tags: ["school"]` finds a note tagged `school/cs513`.
 - **`refresh()` reads the vault again.** About 500 notes take a quarter of a second. The tools and the checks call it, so they see the agent's writes. The embeddings are the one cache, keyed by the hash of each chunk, in `internal/wiki/cache/embeddings.json`; a refresh embeds only new chunks.
 - **A hit** has the `path`, a `score` in `[0, 1]` with the best at 1, a `snippet`, and `why`: "title match", "linked from Codex harness", "in the community of Claude harness", or the chunk that matched.
 - **The tag hierarchy** is by the tags' names: `ml/vision` is below `ml`. `wiki.neighbors(note)` gives the note's own tags, the tags above them (the top first), and the tags one level below them, each with the count of notes that hold it or a tag below it. `wiki.tag(tag)` gives the tags above a tag, the tags one level below it, and the notes that hold it themselves, by name; `wiki.tag()` gives the top, each tag with no `/`. Both are async, and read the vault again first when the index is stale. `wiki.tags()` lists every tag with its count. `wiki.holds(path, properties)` says whether the index holds a note: the rule of its refresh, which a change feed can use. A note's `ownTags` are the tags its `tags` property holds, and `tags` adds every tag above them. Tags are lower case, without `#` or empty parts, so `#ML//Vision/` is `ml/vision`. The index builds the hierarchy at each refresh, and stores nothing.
@@ -579,7 +587,7 @@ A **snapshot** is `internal/wiki/snapshots/v<N>.md`, which the module ledger lis
 
 ### The algorithms
 
-Every algorithm is one function in `algorithms`, with the same query and scores in `[0, 1]`. A query names one with `algorithm`; `defaultAlgorithm` in the options sets the default, `bm25` until the benchmark says otherwise.
+Every algorithm is one function in `algorithms`, with the same query and scores in `[0, 1]`. A query names one with `algorithm`; `defaultAlgorithm` in the options sets the default, `bm25` until the benchmark says otherwise. It is a name, or a function that the wiki reads at each query, so a setting can choose it; `wiki.defaultAlgorithm` gives the name now.
 
 | Algorithm | How it ranks |
 | --- | --- |
@@ -646,7 +654,7 @@ Each harness has its own entry point, so a host bundles only the harness SDKs th
 
 | Part | What it does |
 | --- | --- |
-| `Agent` | Base class. Holds the preferences of one harness. `startSession()` starts a harness process, and `closeAll()` stops each session that the agent started. |
+| `Agent` | Base class. Holds the preferences of one harness. `startSession()` starts a harness process, `resumeOrStart()` continues a session or starts a new one, and `closeAll()` stops each session that the agent started. |
 | `AgentSession` | One conversation: `send`, `interrupt`, `close`, `on`, `models`, `commands`, `configure`, and `id` for `resume`. |
 | `BaseSession` | The shared turn queue and event delivery. An adapter implements `startTurn`, `interruptTurn`, `close`, `models`, `commands`, and `configure`. |
 | `ClaudeAgent`, `CodexAgent` | The harness adapters. |
@@ -660,6 +668,17 @@ Each adapter takes two kinds of settings:
 | Constructor options, fixed for the agent | `executable`, `env`, `preferences` | `settingSources`, `sdkOptions` | `config` |
 | Preferences, can change for each session | `cwd`, `model`, `effort`, `instructions`, `approval`, `access` | `maxBudgetUsd` | `webSearch`, `networkAccess` |
 | Session options | `resume`, `onPermission`, `onQuestion`, `tools`, `skills`, `beforeFileChange` | | |
+
+A session's own options go over the agent's preferences: each option that the session sets replaces the agent's, and `tools` and `skills` do too, so they do not add to the agent's. A session that sets `tools` gets those tools and none of the agent's; `skills: []` gives it no skill set. So a host that starts a session on an agent of a Yami, which has Yami's tools and skill sets, leaves them out: `agent.startSession({ tools: noteTools, skills: [] })`.
+
+### Resume
+
+With `resume`, `startSession` rejects when the harness cannot continue that session, for example when it no longer has it: Claude Code exits at its start, and Codex answers `no rollout found for thread id …`. `resumeOrStart(options)` continues the session when the harness has it, and otherwise starts a new session with the same options. It resolves with `{ session, continued }`, where `continued` is false for a new session. When the resume fails for any reason, it starts a new session; when that fails too, it rejects with the error of the new start, so a refusal such as `A read-only session does not start: …` reaches the caller once. The conversation notes and `noteSessions` use it.
+
+```ts
+const { session, continued } = await agent.resumeOrStart({ resume: saved, access: "read-only", tools });
+if (!continued) await session.send(fullContext);
+```
 
 ### Turns
 
@@ -776,27 +795,120 @@ The Obsidian layer. It holds what needs the Obsidian API: `createYami`, the vaul
 
 | Option | Default | What it sets |
 | --- | --- | --- |
-| `agents` | | The plugin's agents, the first being the default. An entry `{ agent, name, color }` names an agent in the vault; the name defaults to the harness, and the color to `HARNESS_COLORS`. |
+| `agents` | | The plugin's agents, the first being the default. An entry `{ agent, name, color }` names an agent in the vault; the name defaults to the harness, and the color to `HARNESS_COLORS`. Each name must be its own. An empty list is allowed: the plugin then has no agent commands, and the ribbon icon says `Yami has no agents.` `yami.setAgents` changes the agents later. |
 | `modules` | none | The plugin's modules. The wiki module is built in. |
 | `wiki` | | Options of the wiki, such as an `embedder` or the `defaultAlgorithm`. The conversation folder and Obsidian's Excluded files always stay out of its index. |
-| `conversationFolder` | `conversations` | The folder of conversation notes. |
-| `idleMinutes` | 15 | Minutes after which an agent process with no open message box closes. |
+| `conversationFolder` | `conversations` | The folder of conversation notes. A value, or a function that Yami reads at each use. |
+| `idleMinutes` | 15 | Minutes after which an agent process with no open message box and no turn closes. A value, or a function that Yami reads at each use. |
+| `animate` | `true` | Whether an agent's edits play as typing in a note that the person sees. A value, or a function that Yami reads at each edit. While the system asks for reduced motion (`prefers-reduced-motion: reduce`), edits never play as typing. |
 | `commands` | every group | `{ conversations, sessions, wiki, modules }`: the groups of commands to add. `modules` is the New module command. The commands of the modules' flows and actions are always added. |
 | `statusBar` | `true` | A status bar item that says which agents work. |
 | `folderColors` | `true` | Each module's folder in the module's color in the file explorer, its internal folder muted, and `internal/` gray (`INTERNAL_COLOR`). `folderColorRules(yami)` gives the CSS. |
 
-It gives each module's commands the module's icon, and warns in the console of a module whose icon Obsidian does not have. It discovers the vault modules a moment after a module document, a file in a form's folder, or the base skill changes, or a file is created, renamed, or removed (`watchModules`), and then adds and removes each flow's command as the flow appears and goes, and updates the folder colors. Removing a command needs Obsidian 1.7.2 or later. New module asks for a name in a prompt with one text field: Enter creates the module with `yami.createModule` and opens its module document, and Escape cancels. It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations, and removes the shared-document hub.
+It gives each module's commands the module's icon, and warns in the console of a module whose icon Obsidian does not have. It discovers the vault modules a moment after a module document, a file in a form's folder, or the base skill changes, or a file is created, renamed, or removed (`watchModules`), and then adds and removes each flow's command as the flow appears and goes, and updates the folder colors. Removing a command needs Obsidian 1.7.2 or later. New module asks for a name in a prompt with one text field: Enter creates the module with `yami.createModule` and opens its module document, and Escape cancels. It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations and the sessions of `noteSessions`, and removes the shared-document hub.
 
-The commands and their ids. Obsidian adds the plugin's id before each, as `<plugin id>:new-module`, so a test runs one with `app.commands.executeCommandById`:
+### Agents and options that change while the plugin runs
 
-| Group | Id | Name |
+A person edits a plugin's settings while it runs. Two things follow a change with no reload:
+
+- **The options that Yami reads at each use**: `conversationFolder`, `idleMinutes`, and `animate`, and the wiki's `exclude` and `defaultAlgorithm`. Give a function, such as `() => this.settings.idleMinutes`, and the next use reads the new value: the next conversation note goes in the new folder, the wiki's next query leaves the new folder out, and the next idle wait takes the new minutes.
+- **The agents**, through `yami.setAgents(entries)`. It takes the entries of the `agents` option, and throws `Two agents are named <name>: give each a name of its own.` before it changes anything. Yami sets the working directory, the tools, and the skills of each new agent. At once, the commands of each agent follow (`yami-new-conversation-<name>` and `yami-run-session-<name>` for each agent now, and none for an agent that is gone), and so do the composers' names and colors, the status bar, the acts of the sessions, and `onSessionsChange`. A command of an agent finds the agent by its name when it runs, so a replaced agent runs as it is now.
+
+```ts
+async saveSettings() {
+  await this.saveData(this.settings);
+  this.yami.setAgents(this.settings.profiles.map((p) => ({ agent: this.agentOf(p), name: p.name, color: p.color })));
+}
+```
+
+What happens to the work that runs when an agent changes:
+
+| Work | When its agent is replaced or removed |
+| --- | --- |
+| A conversation's turn | The turn goes on with the agent it started with. When the turn ends, the conversation closes that agent session, and its next message starts the agent of the note's name now, which continues the harness session that the note records when it can. A conversation note whose agent no agent has any more goes on with the first agent. |
+| An idle conversation | Its agent session closes at once; the next message starts the new agent as above. |
+| A session's run | The run keeps its agent until it ends, with its worker, its review, and its agents. The run's conversation keeps the agent's name and color. |
+| A session of `noteSessions` | As a conversation: a turn goes on, and then the session closes. Its next `session()` call starts the agent of that name now, or rejects with `Yami has no agent named <name>.` when none has it. |
+
+So no process of an agent that is gone stays open once its work ends. `yami.close()`, which the plugin's unload calls, also closes the sessions of the agents that `setAgents` removed.
+
+The other options are fixed at `createYami`, because they choose the parts of the plugin: `modules`, `wiki` but `exclude` and `defaultAlgorithm`, `commands`, `statusBar`, and `folderColors`.
+
+### What `createYami` adds to a vault and to its agents
+
+A plugin author tells users what appears in their vault. With no modules of the plugin's own, `enable` writes these files when they are missing, and never overwrites one that exists (except the base skill, see [The Yami](#the-yami)):
+
+| File | What it is |
+| --- | --- |
+| `Yami.base` | The vault ledger: every module, and every session grouped by module. |
+| `internal/yami/skills/run/SKILL.md` | The base skill, `/yami:run`, which every session run invokes. |
+| `internal/wiki/wiki.md` | The wiki module's document. |
+| `internal/wiki/sessions.base` | The wiki module's ledger: its ingest sessions, versions, and changes. |
+| `internal/wiki/policies/cite-every-claim/POLICY.md`, `one-plan/POLICY.md`, `one-topic/POLICY.md` | The policies of an ingest session. |
+| `internal/wiki/promises/change-applied/PROMISE.md`, `clean-topics/PROMISE.md`, `sources-absorbed/PROMISE.md` | The promises of an ingest session. |
+| `internal/wiki/skills/ingest/SKILL.md`, with `drafter.md`, `extractor.md`, and `page-forms.md` | The ingest skill, `/wiki:ingest`, and the briefs of its workers. |
+
+Each module of the plugin adds its own: its module document, its ledger, and its forms under `internal/<module>/`. Later, Yami writes notes only for work that a person or an agent starts: a conversation note in the conversation folder, a session document in a module's folder, and for the wiki, sources, topics, changes, and snapshots. The colors of the folders are CSS, not files.
+
+Each agent gets, from its preferences, in every session it starts:
+
+- **One tool set, `yami`:** `yami_check` and `yami_agent`, then the wiki's `wiki_search`, `wiki_match`, `wiki_lint`, `wiki_tags`, `wiki_neighbors`, `wiki_chunks`, and `wiki_change`, then the tools of each module of the plugin as `<module id>_<tool>`.
+- **The skill sets:** `internal/yami`, with `/yami:run`; `internal/wiki`, with `/wiki:ingest`; and the internal folder of each module that has skills.
+
+A session that the host starts itself sets its own `tools` and `skills`, which replace these: `agent.startSession({ tools: noteTools, skills: [] })` gets the host's tools and no skill set (see [`yami/agent`](#yamiagent)).
+
+### Turning a part off, and extending it
+
+A plugin can turn off each part that it replaces with its own, and extend a part without a copy of its code:
+
+| Part | Turn it off | Extend it |
 | --- | --- | --- |
-| `conversations` | `new-conversation-<agent name>`, `end-conversation`, `stop`, `focus-composer`, `revert` | New conversation with claude, End this conversation, … |
-| `sessions` | `run-session-<agent name>`, `resume-session`, `stop-session`, `kill-session` | Run this session with Claude, Resume this session, … |
-| `wiki` | `wiki-search`, `wiki-related`, `wiki-compare`, `wiki-match`, `wiki-lint-note`, `wiki-lint-vault`, `wiki-snapshot`, `wiki-versions`, `wiki-restore`, `wiki-refresh`, `wiki-ingest-file`, `wiki-ingest-folder` | Wiki: search, … |
-| `modules` | `new-module` | New module |
-| always | `<module id>-new-<flow name>` | `<module name>: new <flow name>`, with each dash of the flow's name as a space, for each flow that offers a command |
-| always | `<module id>-<action id>` | `<module name>: <action name>`, for each action |
+| The conversation commands and the ribbon icon | `commands: { conversations: false }` | `setAgents` gives an agent its New conversation command. `yami.conversations.start` starts a conversation from a host's own command. |
+| The session commands | `commands: { sessions: false }` | `session.acts()` gives a host's own commands or buttons what the library's do. |
+| The wiki commands | `commands: { wiki: false }` | The modals of [The wiki in Obsidian](#the-wiki-in-obsidian-obsidianwiki). |
+| New module | `commands: { modules: false }` | `yami.createModule(name)`. |
+| The commands of the modules' flows and actions | No: they belong to the modules. A flow with `command: false` has none. | |
+| The status bar item | `statusBar: false` | `yami.addWork(work)` shows a host's own agent work in it. |
+| `yami-stop` | With the conversation commands. | `yami.addWork({ name, path, stop })`: the command calls `stop` in that note. |
+| The folder colors | `folderColors: false` | `folderColorRules(yami)` gives the CSS; a host adds rules of its own to its stylesheet. |
+| The wiki module: its files, its tools, and its skill sets | No: the wiki is built in, one for the vault, and every module uses it. | A session's own `tools` and `skills` leave them out of that session. |
+
+**Command ids.** Every command id of the library starts with `yami-`, `COMMAND_PREFIX`, so a host's own command never has the id of one of the library's: a host gives its own commands ids that do not start with `yami-`. Obsidian adds the plugin's id before each, as `<plugin id>:yami-new-module`, so a test runs one with `app.commands.executeCommandById`. Each command of the library:
+
+| Group | Id | Name | In the palette when | What it does |
+| --- | --- | --- | --- | --- |
+| `conversations` | `yami-new-conversation-<agent name>` | New conversation with `<agent name>` | always, one for each agent | Creates a conversation note with the agent in the conversation folder, opens it, and puts the cursor in the message box. The ribbon icon New conversation does the same with the first agent. |
+| `conversations` | `yami-end-conversation` | End this conversation | the active note is a conversation that has not ended | Interrupts its turn, closes its agent session, and records `status: ended`. The note stays as a record, and Continue it in the note resumes it. |
+| `conversations` | `yami-stop` | Stop the agent in this note | in the active note, a conversation's agent works, or a work of `addWork` has a `stop` | Interrupts the conversation's turn, also one whose agent still starts, and drops its queued messages. Calls the `stop` of each work in the note, such as a turn of `noteSessions`. It does not stop a session's run: `yami-stop-session` does. |
+| `conversations` | `yami-focus-composer` | Focus the message box | the active view shows a conversation note | Puts the cursor in the message box. |
+| `conversations` | `yami-revert` | Undo the agent's last changes in this note | the active note is shared, and holds agent edits to undo | Undoes the last step of agent edits in the note. A step begins when an agent starts a turn in the note, so one call undoes one turn, and the next call the turn before. It covers the edits of every agent that writes through an `AgentPeer` of the hub (a conversation, a run, or a host's own peer that calls `beginTurn` at each turn), and the writes of an agent's own file tools that the hub merges as its edits. It does not undo text that an agent writes as its own output, such as a reply in a conversation note, nor the person's typing. |
+| `sessions` | `yami-run-session-<agent name>` | Run this session with `<Agent name>` | the active note is a session document with no live run | Starts a run with the agent, and says so in a notice. |
+| `sessions` | `yami-resume-session` | Resume this session | the active session has a conversation and no live run | Resumes it. |
+| `sessions` | `yami-stop-session` | Stop this session | the active session's run is live | Interrupts the run's turn; the run ends `stopped`. |
+| `sessions` | `yami-kill-session` | Kill this session's agent | the active session's run is live | Closes the run's harness session at once; the run ends `stopped`. |
+| `wiki` | `yami-wiki-search`, `yami-wiki-related`, `yami-wiki-compare`, `yami-wiki-match`, `yami-wiki-lint-note`, `yami-wiki-lint-vault`, `yami-wiki-snapshot`, `yami-wiki-versions`, `yami-wiki-restore`, `yami-wiki-refresh`, `yami-wiki-ingest-file`, `yami-wiki-ingest-folder` | Wiki: search, … | always, or with a note or a selection for the commands that need one | The views of [The wiki in Obsidian](#the-wiki-in-obsidian-obsidianwiki), versions, and ingest. |
+| `modules` | `yami-new-module` | New module | always | Asks for a name, and creates a starter vault module. |
+| always | `yami-<module id>-new-<flow name>` | `<module name>: new <flow name>`, with each dash of the flow's name as a space | always, for each flow that offers a command | Creates a session of the flow and opens it. |
+| always | `yami-<module id>-<action id>` | `<module name>: <action name>` | for an action on a session, when its `when` holds on the session open in the editor; otherwise always | Does the action. |
+
+**The status bar item** has the class `yami-status`, and `is-working` while an agent works. Its text is `claude working in Ideas` when one agent works, in a conversation or a work of `addWork` (`claude working` for a work with no `path`), `2 agents working` for several, and otherwise `Checking Weekly` or `Checking 2 sessions` while runs check or review, and empty when nothing works. A click opens the note where the agent works; with several, a menu lists them.
+
+### Agent work and the sessions of a note
+
+A host can run agent sessions of its own, outside conversation notes and session runs, and still show them as Yami shows its own:
+
+- `yami.addWork({ name, path?, stop? })` shows the work in the status bar until the function that it returns ends it. With a `path` and a `stop`, `yami-stop` in that note calls `stop`. `path` is read at each use, so a getter can follow a rename. `yami.works` lists the work that has not ended.
+- `yami.noteSessions({ ids?, save?, idleMinutes? })` gives the harness sessions of notes, one for each note and agent, for agents that work in a note that is not a conversation note, such as an agent that answers in the margin. `notes.session(path, agent?, options?)` gives `{ session, continued }`: the open session of the note and the agent, or a new one that continues the session the host stored for them, or a session that starts new when the harness lost it (`resumeOrStart`). The call that starts a session gives its options, and a session that is open keeps them. `continued` is false only for a session that starts new, with none of the note's earlier exchange, so the host then sends the whole context. `agent` is the name of an agent of the Yami; default: the first. A session closes after the idle minutes with no turn, follows `setAgents`, and closes when the plugin unloads. While it is in a turn, it is a work of `addWork`, so the status bar shows it and `yami-stop` in the note interrupts it.
+- The host stores the ids, as `SessionIds`: for each note path, the session id of each agent by the agent's name. It gives the stored ones in `ids`, and `save` gets every id after each change: a session that starts, a renamed note or folder, a removed note, and `notes.forget(path)`, which closes the note's sessions and drops their ids. `notes.ids` gives them too.
+
+```ts
+const notes = this.yami.noteSessions({ ids: this.data.sessions, save: (ids) => this.saveData({ ...this.data, sessions: ids }) });
+const { session, continued } = await notes.session(file.path, "claude", { instructions, access: "read-only", tools: noteTools, skills: [] });
+const turn = await session.send(continued ? request : `${context}\n\n${request}`);
+await notes.forget(file.path);                                // the next session of the note starts new
+```
+
+A conversation note uses the same mechanism for its one agent session, with the id in the note's `session` property.
 
 `watchModules(app, component, yami)` is the discovery trigger, for a host that builds its own `Yami`: it discovers again 300 ms after the last of close changes (a module document, a file in a form's folder, or the base skill changed, or any file created, renamed, or removed), and stops when the component unloads.
 
@@ -807,7 +919,9 @@ The commands and their ids. Obsidian adds the plugin's id before each, as `<plug
 - `newSession(flow)`: creates a session, opens it, and says so. `runAction(action, session?)`: does a module's action, and first lets the person pick when it has choices. `runModuleAct(act)`: does an act of `module.acts()`.
 - `open(path, mode)`; `pick(items, label, placeholder)`, a list to pick one from; and `notify(work)`, which shows the message of a promise, opens the note it names, shows an error in a notice, and resolves when it has.
 - `moduleIcon(module)`, the name of the module's icon, or `MODULE_ICON` when Obsidian does not have it, for `setIcon`.
-- `agentName(agent)`, the name the agent is registered under; `hub` and `conversations`, the shared documents and the conversation notes, for other plugins.
+- `registered`, the agents with their names and colors, and `setAgents(entries)`, which changes them (see [Agents and options that change while the plugin runs](#agents-and-options-that-change-while-the-plugin-runs)); `agentName(agent)`, the name the agent is registered under, and `agentNamed(name)`, the agent of a name.
+- `addWork(work)`, `works`, and `noteSessions(options)`: see [Agent work and the sessions of a note](#agent-work-and-the-sessions-of-a-note).
+- `hub` and `conversations`, the shared documents and the conversation notes, for other plugins.
 
 The plugin must ship `yami/obsidian/styles.css` as the `styles.css` next to its `main.js`; `copyStyles` in `yami/esbuild` copies it.
 
@@ -839,7 +953,7 @@ uninstallCollab(hub);
 
 While an agent works with a note, the note is a shared document: a Yjs `Y.Doc` with one `Y.Text`. The user and each agent are peers of this document. They exchange Yjs updates in memory; there is no network, and the markdown file stays the only thing on disk.
 
-- `CollabHub` owns the shared notes. `acquire(file, holder)` shares a note until `release`. While an agent writes files with its own tools (`addWriter`), every note open in an editor is shared, so a change on disk merges with unsaved typing instead of replacing it. The hub patches `MarkdownView.setViewData` and `Vault.modify` while it is installed, so one Obsidian window has one hub: `installCollab` makes it, and a second plugin gets the same one.
+- `CollabHub` owns the shared notes. `acquire(file, holder)` shares a note until `release`. `observe({ shared, created, changed })` follows them, each member optional: `shared(note)` when a note becomes shared, with a function back for when it stops; `created(file, text, writer)` when an agent's own tools create a note; and `changed({ path, ops, agent })` at each change of a shared note's text, with the ops on the text before the change and the `agent` that made it, `{ name, color }`, or none for the person's typing and another program's write. An agent's change is an edit, a write of its tools that the hub merges, or its own output such as a reply. So a plugin that shows or audits agent text needs no Yjs: `yami.hub.observe({ changed: ({ path, ops, agent }) => agent && ledger.record(path, ops, agent.name) })`. While an agent writes files with its own tools (`addWriter`), every note open in an editor is shared, so a change on disk merges with unsaved typing instead of replacing it. The hub patches `MarkdownView.setViewData` and `Vault.modify` while it is installed, so one Obsidian window has one hub: `installCollab` makes it, and a second plugin gets the same one.
 - `SharedNote` remembers the document state that matches the file on disk. When another program changes the file, the note forks the document at that state, replays the change on the fork, and merges the fork. Text that the user typed after the last save stays, also inside a range that the agent rewrote.
 - `EditorBinding` keeps a CodeMirror editor and a shared note in sync. Changes from the note reach the editor with `addToHistory: false`, so Cmd+Z undoes only the user's own typing.
 - `AgentPeer` is one agent in one note. Its edits carry the peer as the Yjs origin, so editors highlight them and `agentUndo` can revert one turn. It publishes a cursor and a status through the Yjs awareness protocol, and types its edits when the note is visible.
@@ -915,16 +1029,16 @@ t.agent.queue(async (_prompt, worker) => {
 import esbuild from "esbuild";
 import { copyStyles, pluginBuild } from "yami/esbuild";
 
-const context = await esbuild.context({ ...pluginBuild({ production }), entryPoints: ["src/main.ts"], outfile: "main.js" });
-await copyStyles("styles.css");
+const context = await esbuild.context({ ...pluginBuild({ production, plugins: [install] }), entryPoints: ["src/main.ts"], outfile: "main.js" });
+await copyStyles(["styles.css", `${testVault}/.obsidian/plugins/my-plugin/styles.css`], ["src/styles.css"]);
 ```
 
-`pluginBuild` gives a CommonJS bundle with Obsidian, Electron, CodeMirror, and Node's modules left out, `.md` files loaded as text, and the four fixes the agent SDKs need in Obsidian's renderer (see the Claude harness). `copyStyles(to, own)` writes the Obsidian layer's stylesheet, then the plugin's own stylesheets in `own`, in order.
+`pluginBuild({ production, plugins })` gives a CommonJS bundle with Obsidian, Electron, CodeMirror, and Node's modules left out, `.md` files loaded as text, and the four fixes the agent SDKs need in Obsidian's renderer (see the Claude harness). Its `plugins` are Yami's, then the host's own `plugins`, after them. `copyStyles(to, own)` writes the Obsidian layer's stylesheet, then the plugin's own stylesheets in `own`, in order, to `to`: one path, or several.
 
 ## Build and tests
 
 - `npm run build` first type-checks every module except `yami/obsidian` with `tsconfig.core.json`. That check has no DOM types, and it maps `obsidian` and `@codemirror/*` to an empty module, so a core file that uses them, or imports a file of `yami/obsidian`, fails the build. Then `tsc` builds the whole library.
-- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules and their forms, the vault modules and their problems, the loop, the review, the agent tool, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, and in `test/unit/obsidian/` the shared documents, the conversation manager, the modules' commands, and the discovery trigger over a fake Obsidian app.
+- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules and their forms, the vault modules and their problems, the loop, the review, the agent tool, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, the agents and options that change while Yami runs, the text operations with no Obsidian, and in `test/unit/obsidian/` the shared documents and their change feed, the conversation manager with agents that change while a conversation runs, the sessions of a note, `createYami` with its commands, status bar, and agent work, the modules' commands, and the discovery trigger over a fake Obsidian app.
 - `npm run bench` runs the retrieval benchmark against the vault in `YAMI_BENCH_VAULT`; see [The benchmark](#the-benchmark).
 - `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, skills, the agent tool in a session, a read-only session's commands (tests in a repository outside the vault, writes that fail, and no network), and resume; for Claude Code also that a skill set's `agents/` gives no subagent.
 - The plugin's `npm run test:obsidian` drives the real Obsidian app with `yami/obsidian`.

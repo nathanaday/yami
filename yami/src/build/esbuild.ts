@@ -59,6 +59,8 @@ const mcpValidator: Plugin = {
 export interface PluginBuild {
   /** A minified bundle with no source map. Default: a development bundle with an inline source map. */
   production?: boolean;
+  /** The host's own esbuild plugins, which run after Yami's. */
+  plugins?: Plugin[];
 }
 
 /**
@@ -67,13 +69,13 @@ export interface PluginBuild {
  * so a module's skills and policies can be markdown files. Add the entry point and the output file:
  *
  * ```js
- * const context = await esbuild.context({ ...pluginBuild({ production }), entryPoints: ["src/main.ts"], outfile: "main.js" });
+ * const context = await esbuild.context({ ...pluginBuild({ production, plugins: [install] }), entryPoints: ["src/main.ts"], outfile: "main.js" });
  * ```
  */
-export function pluginBuild({ production = false }: PluginBuild = {}): BuildOptions {
+export function pluginBuild({ production = false, plugins = [] }: PluginBuild = {}): BuildOptions & { plugins: Plugin[] } {
   return {
     bundle: true,
-    plugins: [claudeSdkInRenderer, mcpValidator],
+    plugins: [claudeSdkInRenderer, mcpValidator, ...plugins],
     external: ["obsidian", "electron", "@codemirror/*", "@lezer/*", ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
     // The Agent SDK calls createRequire(import.meta.url) on load, and a CJS bundle has no import.meta.
     // Any file URL works for the built-in modules that the SDK requires.
@@ -89,10 +91,16 @@ export function pluginBuild({ production = false }: PluginBuild = {}): BuildOpti
 
 /**
  * Writes the stylesheet a plugin ships as the `styles.css` next to its `main.js`: the stylesheet of the
- * Obsidian layer, then the plugin's own stylesheets in order, so a plugin's rules come last.
+ * Obsidian layer, then the plugin's own stylesheets in order, so a plugin's rules come last. `to` is one
+ * path, or several, such as the build folder and a test vault's plugin folder.
+ *
+ * ```js
+ * await copyStyles(["styles.css", `${vault}/.obsidian/plugins/my-plugin/styles.css`], ["src/styles.css"]);
+ * ```
  */
-export async function copyStyles(to = "styles.css", own: string[] = []): Promise<void> {
+export async function copyStyles(to: string | string[] = "styles.css", own: string[] = []): Promise<void> {
   const parts = [await readFile(`${PACKAGE}src/obsidian/styles.css`, "utf8")];
   for (const file of own) parts.push(`/* ${file} */\n${await readFile(file, "utf8")}`);
-  await writeFile(to, parts.map((part) => part.replace(/\n*$/, "\n")).join("\n"));
+  const text = parts.map((part) => part.replace(/\n*$/, "\n")).join("\n");
+  for (const path of typeof to === "string" ? [to] : to) await writeFile(path, text);
 }

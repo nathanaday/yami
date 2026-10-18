@@ -1,10 +1,8 @@
-import { Notice, type Command } from "obsidian";
+import { Notice, type Command, type Plugin } from "obsidian";
 import { basename } from "../document/document.js";
-import type { Agent } from "../agent/agent.js";
 import type { YamiModule } from "../module/module.js";
 import type { SessionAct } from "../module/session.js";
 import { WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
-import type { ConversationAgent } from "./agents.js";
 import { moduleIcon } from "./icons.js";
 import { WikiCompareModal } from "./wiki/compare-modal.js";
 import { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
@@ -14,15 +12,48 @@ import type { ObsidianYami } from "./yami.js";
 
 const title = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 
-/** New conversation with each agent, and the commands of an open conversation. */
-export function addConversationCommands(yami: ObsidianYami): void {
+/** Every command id of the library starts with it, so a host's own command never has the id of one of the library's. */
+export const COMMAND_PREFIX = "yami-";
+
+/** Adds a command of the library, with its id in the library's prefix. */
+function addCommand(plugin: Plugin, command: Command): void {
+  plugin.addCommand({ ...command, id: `${COMMAND_PREFIX}${command.id}` });
+}
+
+/**
+ * A group of the library's commands that changes while the plugin runs. The function that it returns makes
+ * the group the commands given: it adds each new id, removes each id that is gone, and adds again a command
+ * whose key changed.
+ */
+function commandGroup(plugin: Plugin): (wanted: Map<string, { key?: unknown; command: Omit<Command, "id"> }>) => void {
+  const added = new Map<string, unknown>();
+  return (wanted) => {
+    for (const [id, key] of added) {
+      if (wanted.has(id) && wanted.get(id)!.key === key) continue;
+      plugin.removeCommand(`${COMMAND_PREFIX}${id}`);
+      added.delete(id);
+    }
+    for (const [id, { key, command }] of wanted) {
+      if (added.has(id)) continue;
+      addCommand(plugin, { ...command, id });
+      added.set(id, key);
+    }
+  };
+}
+
+/**
+ * New conversation with each agent, the ribbon icon, and the commands of an open conversation. Returns the
+ * function that brings the command of each agent up to date with `yami.registered`.
+ */
+export function addConversationCommands(yami: ObsidianYami): () => void {
   const { plugin, conversations } = yami;
-  const start = (agent: ConversationAgent) => void yami.notify(conversations.create(agent).then((file) => `Opened ${file.path}.`));
-  plugin.addRibbonIcon("message-square-plus", "New conversation", () => start(yami.registered[0]!));
-  for (const registered of yami.registered) {
-    plugin.addCommand({ id: `new-conversation-${registered.name}`, name: `New conversation with ${registered.name}`, callback: () => start(registered) });
-  }
-  plugin.addCommand({
+  const start = (name?: string) => {
+    const agent = name === undefined ? yami.registered[0] : yami.registered.find((candidate) => candidate.name === name);
+    if (!agent) return void new Notice(name === undefined ? "Yami has no agents." : `Yami has no agent named ${name}.`);
+    void yami.notify(conversations.create(agent).then((file) => `Opened ${file.path}.`));
+  };
+  plugin.addRibbonIcon("message-square-plus", "New conversation", () => start());
+  addCommand(plugin, {
     id: "end-conversation",
     name: "End this conversation",
     checkCallback: (checking) => {
@@ -33,18 +64,24 @@ export function addConversationCommands(yami: ObsidianYami): void {
       return true;
     },
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "stop",
-    name: "Stop the agent in this conversation",
+    name: "Stop the agent in this note",
     checkCallback: (checking) => {
       const file = yami.activeFile();
-      const controller = file && conversations.controller(file);
-      if (!controller?.working) return false;
-      if (!checking) void controller.interrupt();
+      if (!file) return false;
+      const controller = conversations.controller(file);
+      const conversation = controller?.working ? controller : undefined;
+      const works = yami.works.filter((work) => work.path === file.path && work.stop);
+      if (!conversation && !works.length) return false;
+      if (!checking) {
+        void conversation?.interrupt();
+        for (const work of works) void Promise.resolve(work.stop!()).catch((error) => console.error(error));
+      }
       return true;
     },
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "focus-composer",
     name: "Focus the message box",
     checkCallback: (checking) => {
@@ -54,7 +91,7 @@ export function addConversationCommands(yami: ObsidianYami): void {
       return true;
     },
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "revert",
     name: "Undo the agent's last changes in this note",
     checkCallback: (checking) => {
@@ -65,38 +102,65 @@ export function addConversationCommands(yami: ObsidianYami): void {
       return true;
     },
   });
+  const group = commandGroup(plugin);
+  const sync = () =>
+    group(
+      new Map(
+        yami.registered.map(({ name }) => [`new-conversation-${name}`, { command: { name: `New conversation with ${name}`, callback: () => start(name) } }]),
+      ),
+    );
+  sync();
+  return sync;
 }
 
-/** Run, resume, stop, and kill the session open in the editor. The session's acts decide when each command applies. */
-export function addSessionCommands(yami: ObsidianYami): void {
+/**
+ * Run, resume, stop, and kill the session open in the editor. The session's acts decide when each command
+ * applies. Returns the function that brings the command of each agent up to date with `yami.registered`.
+ */
+export function addSessionCommands(yami: ObsidianYami): () => void {
   /** The act of a kind on the session open in the editor, when it applies now. */
-  const act = (kind: SessionAct["kind"], agent?: Agent): SessionAct | undefined => {
+  const act = (kind: SessionAct["kind"], name?: string): SessionAct | undefined => {
     const session = yami.activeSession();
+    const agent = name === undefined ? undefined : yami.agentNamed(name);
+    if (name !== undefined && !agent) return undefined;
     return session?.acts(yami.properties(session.path)).find((a) => a.kind === kind && (!agent || a.agent === agent));
   };
-  const add = (id: string, name: string, kind: SessionAct["kind"], agent?: Agent, before?: () => void) =>
-    yami.plugin.addCommand({
-      id,
-      name,
-      checkCallback: (checking) => {
-        const found = act(kind, agent);
-        if (!found) return false;
-        if (!checking) {
-          before?.();
-          void yami.notify(found.run());
-        }
-        return true;
-      },
-    });
-  for (const registered of yami.registered) {
-    add(`run-session-${registered.name}`, `Run this session with ${title(registered.name)}`, "start", registered.agent, () => {
-      const session = yami.activeSession();
-      if (session) new Notice(`Running ${basename(session.path)} with ${registered.name}…`);
-    });
-  }
-  add("resume-session", "Resume this session", "resume");
-  add("stop-session", "Stop this session", "stop");
-  add("kill-session", "Kill this session's agent", "kill");
+  const command = (id: string, name: string, kind: SessionAct["kind"], agent?: string, before?: () => void): Command => ({
+    id,
+    name,
+    checkCallback: (checking) => {
+      const found = act(kind, agent);
+      if (!found) return false;
+      if (!checking) {
+        before?.();
+        void yami.notify(found.run());
+      }
+      return true;
+    },
+  });
+  addCommand(yami.plugin, command("resume-session", "Resume this session", "resume"));
+  addCommand(yami.plugin, command("stop-session", "Stop this session", "stop"));
+  addCommand(yami.plugin, command("kill-session", "Kill this session's agent", "kill"));
+  const group = commandGroup(yami.plugin);
+  const sync = () =>
+    group(
+      new Map(
+        yami.registered.map(({ name }) => {
+          const id = `run-session-${name}`;
+          return [
+            id,
+            {
+              command: command(id, `Run this session with ${title(name)}`, "start", name, () => {
+                const session = yami.activeSession();
+                if (session) new Notice(`Running ${basename(session.path)} with ${name}…`);
+              }),
+            },
+          ];
+        }),
+      ),
+    );
+  sync();
+  return sync;
 }
 
 /**
@@ -106,21 +170,21 @@ export function addSessionCommands(yami: ObsidianYami): void {
  * an action that is gone. `createYami` calls it when the modules change.
  */
 export function addModuleCommands(yami: ObsidianYami): () => void {
-  const added = new Map<string, YamiModule>();
+  const group = commandGroup(yami.plugin);
   const sync = () => {
-    const wanted = new Map<string, { module: YamiModule; command: Command }>();
+    const wanted = new Map<string, { key: YamiModule; command: Command }>();
     for (const module of yami.modules) {
       const icon = moduleIcon(module);
       for (const act of module.acts()) {
         const id = act.kind === "new" ? `${module.id}-new-${act.flow.name}` : `${module.id}-${act.action.id}`;
         const name = `${module.name}: ${act.kind === "new" ? `${act.label.charAt(0).toLowerCase()}${act.label.slice(1)}` : act.label}`;
-        wanted.set(id, { module, command: { id, name, icon, callback: () => void yami.runModuleAct(act) } });
+        wanted.set(id, { key: module, command: { id, name, icon, callback: () => void yami.runModuleAct(act) } });
       }
       for (const action of module.actions) {
         if (!("on" in action)) continue;
         const id = `${module.id}-${action.id}`;
         wanted.set(id, {
-          module,
+          key: module,
           command: {
             id,
             name: `${module.name}: ${action.name}`,
@@ -136,16 +200,7 @@ export function addModuleCommands(yami: ObsidianYami): () => void {
         });
       }
     }
-    for (const [id, module] of added) {
-      if (wanted.get(id)?.module === module) continue;
-      yami.plugin.removeCommand(id);
-      added.delete(id);
-    }
-    for (const [id, { module, command }] of wanted) {
-      if (added.has(id)) continue;
-      yami.plugin.addCommand(command);
-      added.set(id, module);
-    }
+    group(wanted);
   };
   sync();
   return sync;
@@ -153,7 +208,7 @@ export function addModuleCommands(yami: ObsidianYami): () => void {
 
 /** New module: asks for a name, and creates a vault module from the starter. */
 export function addNewModuleCommand(yami: ObsidianYami): void {
-  yami.plugin.addCommand({
+  addCommand(yami.plugin, {
     id: "new-module",
     name: "New module",
     icon: "package-plus",
@@ -181,8 +236,8 @@ export function addWikiCommands(yami: ObsidianYami): void {
     new NoteListModal(app, rows, placeholder).open();
     return "";
   };
-  plugin.addCommand({ id: "wiki-search", name: "Wiki: search", callback: () => new WikiSearchModal(app, wiki).open() });
-  plugin.addCommand({
+  addCommand(plugin, { id: "wiki-search", name: "Wiki: search", callback: () => new WikiSearchModal(app, wiki).open() });
+  addCommand(plugin, {
     id: "wiki-related",
     name: "Wiki: notes related to this note",
     checkCallback: (checking) => {
@@ -192,8 +247,8 @@ export function addWikiCommands(yami: ObsidianYami): void {
       return true;
     },
   });
-  plugin.addCommand({ id: "wiki-compare", name: "Wiki: compare the algorithms", callback: () => new WikiCompareModal(app, wiki, yami.activeSelection()).open() });
-  plugin.addCommand({
+  addCommand(plugin, { id: "wiki-compare", name: "Wiki: compare the algorithms", callback: () => new WikiCompareModal(app, wiki, yami.activeSelection()).open() });
+  addCommand(plugin, {
     id: "wiki-match",
     name: "Wiki: match the selection",
     checkCallback: (checking) => {
@@ -203,7 +258,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
       return true;
     },
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-lint-note",
     name: "Wiki: lint this note",
     checkCallback: (checking) => {
@@ -213,12 +268,12 @@ export function addWikiCommands(yami: ObsidianYami): void {
       return true;
     },
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-lint-vault",
     name: "Wiki: lint the vault",
     callback: () => yami.notify(wiki.lint().then((findings) => show(findingRows(wiki, findings), `${findings.length} findings; type to filter`))),
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-snapshot",
     name: "Wiki: take a snapshot",
     callback: () =>
@@ -230,7 +285,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
         }),
       ),
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-versions",
     name: "Wiki: versions",
     callback: () =>
@@ -249,7 +304,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
         ),
       ),
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-restore",
     name: "Wiki: restore a version",
     callback: () =>
@@ -262,7 +317,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
         }),
       ),
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-refresh",
     name: "Wiki: rebuild the index",
     callback: () =>
@@ -271,7 +326,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
       ),
   });
   const knowledge = (path: string) => [WIKI, WIKI_INTERNAL.split("/")[0]!, yami.conversationFolder].some((folder) => path === folder || path.startsWith(`${folder}/`));
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-ingest-file",
     name: "Wiki: ingest this file",
     checkCallback: (checking) => {
@@ -281,7 +336,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
       return true;
     },
   });
-  plugin.addCommand({
+  addCommand(plugin, {
     id: "wiki-ingest-folder",
     name: "Wiki: ingest a folder",
     callback: () =>

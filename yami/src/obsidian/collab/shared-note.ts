@@ -2,7 +2,7 @@ import type { TFile } from "obsidian";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { AgentPeer } from "./agent-peer.js";
-import { type TextOp, diffOps } from "./text-ops.js";
+import { type TextOp, diffOps } from "../../document/text-ops.js";
 
 /** Origin of changes that the host makes for the user, for example a message sent from the composer. */
 export const LOCAL_ORIGIN = Symbol("yami-local");

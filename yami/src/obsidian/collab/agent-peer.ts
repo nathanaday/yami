@@ -1,7 +1,7 @@
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness";
 import * as Y from "yjs";
 import type { PresenceState, SharedNote } from "./shared-note.js";
-import type { TextOp } from "./text-ops.js";
+import type { TextOp } from "../../document/text-ops.js";
 
 export interface AgentIdentity {
   name: string;

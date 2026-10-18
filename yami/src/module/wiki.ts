@@ -275,7 +275,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
         run: async ({ text, ...query }) => {
           await wiki.refresh();
           const hits = await wiki.search(text ?? "", query);
-          return JSON.stringify({ algorithm: query.algorithm ?? wiki.options.defaultAlgorithm, hits });
+          return JSON.stringify({ algorithm: query.algorithm ?? wiki.defaultAlgorithm, hits });
         },
       }),
       defineTool({

@@ -56,7 +56,7 @@ import { MarkdownView, TFile } from "obsidian";
 import { Agent, type AgentEvent, type AgentInfo, type AgentSession, type SessionOptions, type TurnResult } from "../../../src/agent/index.js";
 import type { ConversationAgent } from "../../../src/obsidian/agents.js";
 import type { TurnEnd } from "../../../src/obsidian/api.js";
-import { applyOps } from "../../../src/obsidian/collab/text-ops.js";
+import { applyOps } from "../../../src/document/text-ops.js";
 import { ConversationManager } from "../../../src/obsidian/conversation/manager.js";
 import { ObsidianConversations } from "../../../src/obsidian/conversation/obsidian-conversations.js";
 
@@ -71,23 +71,25 @@ beforeAll(() => {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 /** A harness session that the test drives with `emit`. */
-function fakeSession() {
-  let listener: (event: AgentEvent) => void = () => undefined;
+function fakeSession(id = "session-1") {
+  const listeners = new Set<(event: AgentEvent) => void>();
+  const emit = (event: AgentEvent) => listeners.forEach((listener) => listener(event));
   return {
-    id: "session-1",
+    id,
     closed: false,
     sent: [] as string[],
     on(next: (event: AgentEvent) => void) {
-      listener = next;
+      listeners.add(next);
+      return () => listeners.delete(next);
     },
     send(text: string) {
       this.sent.push(text);
       return new Promise<TurnResult>(() => undefined);
     },
-    emit: (event: AgentEvent) => listener(event),
+    emit,
     endTurn(status: TurnResult["status"] = "completed") {
-      listener({ type: "turn-start" } as AgentEvent);
-      listener({ type: "turn-end", result: { status, text: "Done." } });
+      emit({ type: "turn-start" } as AgentEvent);
+      emit({ type: "turn-end", result: { status, text: "Done." } });
     },
     models: async () => [],
     commands: async () => [],
@@ -469,6 +471,96 @@ describe("ConversationManager", () => {
         }),
       };
       expect(await controller.connect()).toBe(false);
+    });
+  });
+
+  describe("agents that change while a conversation runs", () => {
+    /** An agent whose every session is new, and closes as a harness's does. */
+    function closingAgent(harness: "claude" | "codex") {
+      const sessions: ReturnType<typeof fakeSession>[] = [];
+      const agent = new FakeAgent(harness, async () => {
+        const next = fakeSession(`${harness}-${sessions.length + 1}`);
+        next.close = async function () {
+          this.closed = true;
+          this.emit({ type: "closed" });
+        };
+        sessions.push(next);
+        return next as unknown as AgentSession;
+      });
+      return { agent, sessions };
+    }
+    const settle = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await flush();
+    };
+
+    it("starts a conversation with an agent that the host added, by its name", async () => {
+      const added = closingAgent("claude");
+      agents.push({ name: "work", color: "#000000", agent: added.agent });
+      const { file, text } = await start({ message: "Hello", agent: "work", open: false });
+      expect(added.sessions).toHaveLength(1);
+      expect(text()).toMatch(/\nagent: work\n/);
+      expect(manager.conversation(file).agentName).toBe("work");
+    });
+
+    it("keeps a replaced agent until its turn ends, then closes it, and the next message starts the new agent", async () => {
+      const old = closingAgent("claude");
+      agents[0] = { ...agents[0]!, agent: old.agent };
+      const { file } = await start({ message: "Hello", open: false });
+      const first = old.sessions[0]!;
+      first.emit({ type: "turn-start" } as AgentEvent);
+      const replaced = closingAgent("claude");
+      agents[0] = { name: "claude", color: "#123456", agent: replaced.agent };
+      manager.agentsChanged();
+      await settle();
+      expect(first.closed).toBe(false);
+      expect(manager.status(file.path)).toBe("working");
+      first.emit({ type: "turn-end", result: { status: "completed", text: "Done." } });
+      await settle();
+      expect(first.closed).toBe(true);
+      const controller = manager.conversation(file);
+      expect(controller.registered.color).toBe("#123456");
+      void controller.send("Again");
+      await settle();
+      expect(replaced.sessions).toHaveLength(1);
+      expect(replaced.agent.started[0]!.resume).toBe("claude-1");
+      expect(replaced.sessions[0]!.sent[0]).toMatch(/^Again/);
+    });
+
+    it("closes the idle session of an agent that the host removed, and the note goes on with the first agent", async () => {
+      const old = closingAgent("claude");
+      agents[0] = { ...agents[0]!, agent: old.agent };
+      const { file } = await start({ message: "Hello", open: false });
+      old.sessions[0]!.endTurn();
+      await settle();
+      const codex = closingAgent("codex");
+      agents.splice(0, agents.length, { name: "codex", color: "#4f8cf7", agent: codex.agent });
+      manager.agentsChanged();
+      await settle();
+      expect(old.sessions[0]!.closed).toBe(true);
+      const controller = manager.conversation(file);
+      expect(controller.agentName).toBe("codex");
+      void controller.send("Again");
+      await settle();
+      expect(codex.sessions).toHaveLength(1);
+    });
+
+    it("keeps the agent of a run's conversation that the host removes, until the run closes the conversation", async () => {
+      const old = closingAgent("claude");
+      const retired = { name: "claude", color: "#d97757", agent: old.agent };
+      agents[0] = retired;
+      const runs = new ObsidianConversations(fake.app as never, manager, () => [...agents, retired]);
+      const conversation = await runs.open({ agent: old.agent, name: "x", folder: "conversations" });
+      const codex = closingAgent("codex");
+      agents.splice(0, agents.length, { name: "codex", color: "#4f8cf7", agent: codex.agent });
+      manager.agentsChanged();
+      void conversation.send("Do the work.");
+      await settle();
+      expect(old.sessions).toHaveLength(1);
+      expect(codex.sessions).toHaveLength(0);
+      await conversation.close();
+      expect(old.sessions[0]!.closed).toBe(true);
+      expect(manager.conversation(fake.app.vault.getFileByPath(conversation.path)!).agentName).toBe("codex");
     });
   });
 });
