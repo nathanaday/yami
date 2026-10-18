@@ -1,18 +1,16 @@
 # Consumer notes · module-forms
 
-## Built (rounds 1-3, yami 0.8.0)
+## Built (rounds 1-4, yami 0.9.0)
 - All module docs are in folder forms. Threads agents `reviewer` and `validator` are `access: read-only`; each brief is its AGENT.md body. The skills call `yami_agent` with `threads:<name>`. The validator brief names no cache (ruling).
-- Thread idea = Request section. Librarian: no `request` property; `librarian_checkout` fills an empty Request section.
+- Thread idea = Request section. Librarian: no `request` property; `librarian_checkout` calls `checkSection` on Request and Notes before any copy (round 4, F3.1 closed, no workaround left).
 - Hello fixture: 5 forms, with a read-only agent `proofreader` in flow `greeting`.
 - Panel: `flow.title`, `reason ?? description`, `details.agentRuns`.
-- Round 3: F2.1-F2.3 closed. The README now says a suite that writes a cache runs. The librarian test expects `The text for the <Section> section holds the heading line` and asserts no copies after a refusal.
+- README: a read-only agent's command that writes a cache runs; a write to a repo or the vault fails; a command that needs the network fails.
 
-## Hurt
-- F3.1 (minor): `checkSection` is declared in dist d.ts but not exported. Workaround in librarian/index.ts, marked `library-loop: F3.1`: `replaceSection("", …)` before any write.
-- F3.2 (minor): Claude Code tells a read-only agent that `.` is writable; ask for a line in the read-only first message.
-- F3.3 (nit): `   ## X` passes replaceSection.
+## State
+- Round 4: no open items, verdict done. F3.1-F3.3 closed.
+- Residue (not filed): Claude Code, asked which folders it can write, still lists `.` and `/tmp/claude`, but it writes only `$TMPDIR`.
 
-## Check next round
-- F3.1: if `checkSection` is exported from `yami/document`, replace the workaround line; the librarian test must still pass (no copies).
-- F3.2: rerun the probe. Write the script inside obsidian_plugin (the guard blocks a Write in the scratchpad and a heredoc that names `yami/agent/...`), run `H=claude|codex node probe-ro.mjs`, then delete it. Make the Go module with `mktemp -d` and no git (the guard blocks `git init`). No `timeout` command on macOS.
-- The guard also blocks `ls node_modules/yami` and `git log` without `-- obsidian_plugin`. The round's `api/dist/*.d.ts` is readable.
+## How to probe
+- Write the probe script inside obsidian_plugin (the guard blocks a Write in the scratchpad), run `H=claude|codex REPO=… VAULT=… node probe-ro.mjs`, then delete it. Make the Go module with `mktemp -d` and no git. No `timeout` command on macOS.
+- The guard blocks `ls node_modules/yami` and `git log` without `-- obsidian_plugin`. The round's `api/dist/*.d.ts` is readable.

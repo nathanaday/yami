@@ -1,5 +1,5 @@
 import { defineTool, YamiModule, z, type AgentTool, type Check, type LedgerView, type Schema } from "yami";
-import { basename, link, LINK, linkTarget, readDocument, replaceSection, sectionText, timestamp, updateDocument, writeDocument } from "yami/document";
+import { basename, checkSection, link, LINK, linkTarget, readDocument, replaceSection, sectionText, timestamp, updateDocument, writeDocument } from "yami/document";
 import { bodyHash, inKnowledge, InvalidPlan, SOURCES, TOPICS, validatePlan, type Write } from "yami/wiki";
 import madePromise from "./promises/reading-list-made/PROMISE.md";
 import checkoutSkill from "./skills/checkout/SKILL.md";
@@ -116,8 +116,8 @@ export class Librarian extends YamiModule {
     if (!order.documents?.length) throw new Error("A checkout needs one document or more.");
     if (order.documents.length > MAX_DOCUMENTS) throw new Error(`A checkout holds at most ${MAX_DOCUMENTS} documents; ask the user to narrow the request.`);
     if (!order.session && !order.name?.trim()) throw new Error("Give the session of the checkout, or a name for a new one.");
-    // library-loop: F3.1
-    replaceSection("", "Request", order.request); replaceSection("", "Notes", order.notes ?? "");
+    checkSection("Request", order.request);
+    checkSection("Notes", order.notes ?? "");
     const originals: string[] = [];
     for (const { path, why } of order.documents) {
       const found = wiki.resolve(path);
