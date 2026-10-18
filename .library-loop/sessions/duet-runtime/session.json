@@ -1,0 +1,14 @@
+{
+  "slug": "duet-runtime",
+  "created": "2026-10-18T21:56:11.649Z",
+  "first": "consumer",
+  "max_rounds": 5,
+  "consumer_terms": [
+    "duet",
+    "mention",
+    "contribution",
+    "lens",
+    "atlas"
+  ],
+  "rounds": []
+}
