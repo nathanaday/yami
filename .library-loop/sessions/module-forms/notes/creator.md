@@ -27,7 +27,13 @@
 - Found: Claude Code 2.1.302 backgrounds a running Bash command on interrupt (`turnAbortBackgrounds`). The live interrupt test failed on 0.8.0 too. Fix: `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` default in env; a host sets "" to opt out ("0" is truthy there). Interrupt test now waits for the process, and uses sleep 45/46 by harness (the suites run in parallel).
 - Guard: Write is allowed only in yami/ and session files; Bash text "git log" is blocked (use Edit for README text).
 
+## Round 5 (0.9.1)
+- Ruling: an ended run stayed in `yami.running` while `conversation.close()` waited for the CLI to exit (since round 3's `close()` awaits the pump). Fix: `RunControl.end(state)` is called inside `record`'s update, just before the write, for any state other than `running`. The handle releases `#run` there and emits. `#ending` covers the moment before the write lands (the doc still says running). `#closing` = the last run's promise: a new run chains after it, and stop/kill/yami.close await it.
+- `freshRun` takes a required `closing(closed)` callback and no longer awaits the close. The review collects the closes, and runSession awaits them in `finally`. The agent tool writes its Progress end, then awaits the close.
+- Tests: `slowClose()` in run.test.ts spies on `ScriptedSession.prototype.close`. Release it in `finally`, or afterEach hangs. Agent tool test in agents.test.ts.
+- Guard: no `git stash` even in a chained command (I forgot).
+
 ## Watch next round
+- Policy proposal in round-05/response.md (the end of a run before the close).
 - Policy proposals 1–2 in round-04/response.md (background tasks, network/refuse facts).
-- Did the consumer's plugin use Claude background tasks? 0.9.0 turns them off.
 - Out of scope, to decline: ingest workers as agents, agents that call agents, checks on an agent's output.

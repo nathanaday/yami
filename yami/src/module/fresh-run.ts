@@ -35,11 +35,16 @@ export interface FreshRun {
   signal?: AbortSignal;
   /** Called when the conversation is open, before the turn. */
   opened?: (conversation: Conversation) => Promise<void> | void;
+  /**
+   * Takes the close of the conversation, which starts when the turn ends. The caller records the run's end,
+   * and then waits for it, because a harness can take seconds to exit.
+   */
+  closing: (closed: Promise<void>) => void;
 }
 
 /**
- * Runs one turn in a new conversation, records it as a conversation note, and closes the conversation.
- * Resolves with the note and the turn: its final message, or why it failed or was interrupted.
+ * Runs one turn in a new conversation, records it as a conversation note, and starts to close the
+ * conversation. Resolves with the note and the turn: its final message, or why it failed or was interrupted.
  */
 export async function freshRun(yami: Yami, run: FreshRun): Promise<{ note: string; result: ConversationTurn }> {
   const conversation = await yami.openConversation({
@@ -60,6 +65,6 @@ export async function freshRun(yami: Yami, run: FreshRun): Promise<{ note: strin
     return { note: conversation.path, result: await conversation.send(run.prompt) };
   } finally {
     unlisten();
-    await conversation.close();
+    run.closing(conversation.close());
   }
 }

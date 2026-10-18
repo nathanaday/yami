@@ -297,7 +297,7 @@ export class Yami {
     return found.sort((a, b) => created(b).localeCompare(created(a)) || b.path.localeCompare(a.path));
   }
 
-  /** The sessions whose run is live now. */
+  /** The sessions whose run is live now. A run leaves the list when its document records its end. */
   get running(): Session[] {
     return [...this.#sessions.values()].filter((session) => session.running);
   }
@@ -407,9 +407,9 @@ export class Yami {
     });
   }
 
-  /** Stops every live run, and closes every agent session. */
+  /** Kills every live run, waits for the harness sessions of every run to close, and closes every agent session. */
   async close(): Promise<void> {
-    await Promise.all(this.running.map((session) => session.kill()));
+    await Promise.all([...this.#sessions.values()].map((session) => session.kill()));
     await Promise.all(this.agents.map((agent) => agent.closeAll()));
   }
 }

@@ -136,6 +136,10 @@ interface LiveRun {
  */
 export class Session {
   #run: LiveRun | undefined;
+  /** The end that the last run is writing, while its document still says `running`. */
+  #ending: SessionStatus | undefined;
+  /** The last run, until its conversations close. A new run starts after it. */
+  #closing: Promise<unknown> = Promise.resolve();
   readonly #listeners = new Set<(status: SessionStatus) => void>();
 
   constructor(
@@ -157,7 +161,10 @@ export class Session {
     return sessionParts(this.yami, await this.read()).flow;
   }
 
-  /** Whether a run of this Yami is live on the session. */
+  /**
+   * Whether a run of this Yami is live on the session. A run is live until it writes its end to the
+   * document, and its harness sessions close after that.
+   */
   get running(): boolean {
     return this.#run !== undefined;
   }
@@ -173,7 +180,7 @@ export class Session {
   #statusFrom(properties: Properties): SessionStatus {
     if (this.#run) return this.#run.phase;
     const state = properties.state;
-    if (state === "running") return "stopped";
+    if (state === "running") return this.#ending ?? "stopped";
     return SESSION_STATES.includes(state as SessionState) ? (state as SessionStatus) : "open";
   }
 
@@ -307,7 +314,13 @@ export class Session {
     return () => this.#listeners.delete(listener);
   }
 
-  /** Runs the agent loop in a new conversation, with the session's full context. The iteration count continues. */
+  /**
+   * Runs the agent loop in a new conversation, with the session's full context. The iteration count
+   * continues. Resolves once the run's harness sessions close, after the document records its end. A start
+   * while the last run's harness sessions close waits for them.
+   * @example
+   * const result = await session.start({ agent: "claude" });
+   */
   start(options: RunOptions = {}): Promise<RunResult> {
     return this.run(false, options);
   }
@@ -326,20 +339,23 @@ export class Session {
     return this.run(true, named ? { ...options, agent: named } : options);
   }
 
-  /** Interrupts the agent's turn, or the reviewer's during a review, and ends the run as `stopped`. A later resume continues it. */
+  /**
+   * Interrupts the agent's turn, or the reviewer's during a review, and ends the run as `stopped`. A later
+   * resume continues it. Resolves once the last run's harness sessions close, also after the run ended.
+   */
   async stop(): Promise<void> {
-    const run = this.#run;
-    if (!run) return;
-    run.abort.abort();
-    await run.promise.catch(() => undefined);
+    this.#run?.abort.abort();
+    await this.#closing;
   }
 
-  /** Closes the harness session of the live turn at once, the worker's or the reviewer's, without waiting for the turn to stop, and ends the run as `stopped`. */
+  /**
+   * Closes the harness session of the live turn at once, the worker's or the reviewer's, without waiting for
+   * the turn to stop, and ends the run as `stopped`. Resolves once the last run's harness sessions close, also
+   * after the run ended.
+   */
   async kill(): Promise<void> {
-    const run = this.#run;
-    if (!run) return;
-    run.abort.abort(KILL);
-    await run.promise.catch(() => undefined);
+    this.#run?.abort.abort(KILL);
+    await this.#closing;
   }
 
   private run(resume: boolean, options: RunOptions): Promise<RunResult> {
@@ -351,26 +367,38 @@ export class Session {
       return Promise.reject(error);
     }
     const abort = new AbortController();
+    // The run ends when it writes its end, not when its harness exits, so the handle and the document agree.
+    const end = (state: SessionState) => {
+      if (this.#run === live) this.#run = undefined;
+      if (this.#run) return;
+      this.#ending = state === "running" ? "stopped" : state;
+      this.emit(this.#ending);
+    };
     const control: RunControl = {
       signal: abort.signal,
       phase: (phase) => {
-        if (!this.#run || this.#run.phase === phase) return;
-        this.#run.phase = phase;
+        if (this.#run !== live || live.phase === phase) return;
+        live.phase = phase;
         this.emit(phase);
       },
+      end,
     };
     const live: LiveRun = { control, abort, phase: resume ? "checking" : "working", promise: undefined as unknown as Promise<RunResult> };
     this.#run = live;
-    live.promise = runSession(this.yami, this.path, agent, control, { resume, maxIterations: options.maxIterations });
+    this.#ending = undefined;
+    live.promise = this.#closing.then(() => runSession(this.yami, this.path, agent, control, { resume, maxIterations: options.maxIterations }));
+    this.#closing = live.promise.catch(() => undefined);
     this.emit(live.phase);
     live.promise.then(
       (result) => {
-        this.#run = undefined;
-        this.emit(result.state === "running" ? "stopped" : result.state);
+        if (this.#run === live) end(result.state);
+        if (!this.#run) this.#ending = undefined;
       },
       () => {
-        this.#run = undefined;
-        // The run threw before it changed the document, so the document says what the session is.
+        if (this.#run === live) this.#run = undefined;
+        if (this.#run) return;
+        this.#ending = undefined;
+        // The run threw before its end reached the document, so the document says what the session is.
         void this.status().then((status) => !this.#run && this.emit(status), () => undefined);
       },
     );

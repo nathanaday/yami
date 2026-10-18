@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readDocument } from "../../src/document/index.js";
 import { YamiModule, type AgentReply } from "../../src/index.js";
-import { review, testYami, type ScriptedSession, type TestYami, type Turn } from "../../src/testing/index.js";
+import { review, ScriptedSession, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
 import { Hello } from "../fixtures/hello.js";
 
 let t: TestYami | undefined;
@@ -184,6 +184,40 @@ describe("the agent tool", () => {
     // A run that started and recorded no end, for example when the app quit, reads as stopped.
     await vault.write(session.path, (await vault.read(session.path)).replace(/\n- \d\d:\d\d agent team:reader failed: .*\n/, "\n"));
     expect((await session.details()).agentRuns).toEqual([{ ...first, status: "done" }, { ...second, status: "stopped" }]);
+  });
+
+  it("records a run's end before its harness exits, and returns once it has", async () => {
+    const { session, agent } = await fresh("slow");
+    const close = ScriptedSession.prototype.close;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let pending = 0;
+    vi.spyOn(ScriptedSession.prototype, "close").mockImplementation(async function (this: ScriptedSession) {
+      pending += 1;
+      await released;
+      return close.call(this);
+    });
+    let returned = false;
+    agent.queue(
+      async (_prompt, worker) => {
+        reply(await call(worker, "reader", "Report."));
+        returned = true;
+        await greet("slow");
+      },
+      () => ({ text: "Done." }),
+    );
+    const run = session.start({ maxIterations: 1 });
+    try {
+      await vi.waitFor(() => expect(pending).toBe(1));
+      const conversation = "conversations/team slow reader.md";
+      await vi.waitFor(async () => expect((await session.details()).agentRuns).toEqual([{ agent: "team:reader", conversation, status: "done" }]));
+      expect(returned).toBe(false);
+    } finally {
+      release();
+      vi.restoreAllMocks();
+    }
+    expect(await run).toMatchObject({ state: "done" });
+    expect(returned).toBe(true);
   });
 
   it("returns the agents the caller can name for a name that finds none", async () => {

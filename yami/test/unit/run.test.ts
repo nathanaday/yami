@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { FileConversations } from "../../src/conversation/index.js";
-import { link, readDocument } from "../../src/document/index.js";
-import { Yami, YamiModule, type SessionStatus } from "../../src/index.js";
-import { review, ScriptedAgent, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
+import { link, parseDocument, readDocument } from "../../src/document/index.js";
+import { Yami, YamiModule, type RunResult, type Session, type SessionStatus } from "../../src/index.js";
+import { review, ScriptedAgent, ScriptedSession, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
 import { Hello } from "../fixtures/hello.js";
 
 let t: TestYami | undefined;
@@ -317,6 +317,104 @@ describe("stop, kill, and resume", () => {
     await begun;
     await agent.last!.interrupt();
     expect((await run).state).toBe("stopped");
+  });
+});
+
+/** Holds every conversation's close until `release`, as a harness that is slow to exit does. */
+function slowClose() {
+  const close = ScriptedSession.prototype.close;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let pending = 0;
+  const spy = vi.spyOn(ScriptedSession.prototype, "close").mockImplementation(async function (this: ScriptedSession) {
+    pending += 1;
+    await released;
+    pending -= 1;
+    return close.call(this);
+  });
+  return { release: () => (release(), spy.mockRestore()), pending: () => pending };
+}
+
+describe("the end of a run", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is one step for a host: when the document records stopped, done, or failed, the run is not live, and the harness closes after", async () => {
+    const ends: Record<string, (session: Session, agent: ScriptedAgent) => Promise<void>> = {
+      stopped: async (session, agent) => {
+        const { turn, begun } = hold();
+        agent.queue(turn);
+        void session.start();
+        await begun;
+        void session.stop();
+      },
+      done: async (session, agent) => {
+        agent.queue(write("done"), review());
+        void session.start({ maxIterations: 1 });
+      },
+      failed: async (session, agent) => {
+        agent.queue(() => ({ status: "failed", error: "boom" }));
+        void session.start();
+      },
+    };
+    for (const [end, begin] of Object.entries(ends)) {
+      const { session, vault, path, yami, agent } = await fresh(end);
+      const closes = slowClose();
+      const seen: Record<string, unknown> = {};
+      let recorded!: () => void;
+      const ended = new Promise<void>((resolve) => (recorded = resolve));
+      const vaultWrite = vault.write.bind(vault);
+      vault.write = async (file, text) => {
+        const ending = file === path && text.includes(`state: ${end}`);
+        if (ending) seen.before = { running: yami.running.length, status: await session.status() };
+        await vaultWrite(file, text);
+        if (!ending) return;
+        seen.after = {
+          running: yami.running.length,
+          status: await session.status(),
+          acts: session.acts(parseDocument(vault, path, text).properties).map((act) => act.kind),
+        };
+        recorded();
+      };
+      try {
+        await begin(session, agent);
+        await ended;
+        expect(seen.before, end).toEqual({ running: 0, status: end });
+        expect(seen.after, end).toEqual({ running: 0, status: end, acts: ["start", "resume"] });
+        // The harness exits after the end: the run is not live while it closes.
+        await vi.waitFor(() => expect(closes.pending()).toBeGreaterThan(0));
+        expect(yami.running, end).toEqual([]);
+        expect(await session.status(), end).toBe(end);
+      } finally {
+        closes.release();
+      }
+      await t!.dispose();
+      t = undefined;
+    }
+  });
+
+  it("starts a new run, and resolves a kill, only once the last run's harness closed", async () => {
+    const { session, agent } = await fresh("next");
+    const closes = slowClose();
+    agent.queue(() => ({ status: "failed", error: "boom" }));
+    const first = session.start();
+    let second: Promise<RunResult>;
+    try {
+      await vi.waitFor(() => expect(closes.pending()).toBe(1));
+      expect(session.running).toBe(false);
+      let killed = false;
+      void session.kill().then(() => (killed = true));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(killed).toBe(false);
+      agent.queue(write("next"), review());
+      second = session.start();
+      expect(session.running).toBe(true);
+      expect(agent.started).toHaveLength(1);
+    } finally {
+      closes.release();
+    }
+    expect((await first).state).toBe("failed");
+    expect((await second).state).toBe("done");
+    expect(agent.started).toHaveLength(3);
   });
 });
 

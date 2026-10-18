@@ -367,14 +367,23 @@ const session = await review.flows[0]!.create({ name: "PR 12", request: "Review 
 | --- | --- |
 | `start({ agent?, maxIterations? })` | Runs the agent loop in a new conversation. `agent` is an agent or a harness name; the default is the Yami's first agent. Resolves with a `RunResult`, `{ path, state, iterations, conversation, review, reason }`: `review` is the conversation note of the run's last review, when it had one, and `reason` says why a run ended `failed` or `needs-attention`, as the last Progress line of the loop without its time (not a line of an agent run), such as `iteration 1: turn failed: boom`, `iteration 1: review failed: …`, `iteration 3: 0 met, 1 unmet`, `iteration 1: 0 met, 0 unmet, 1 for review: Approved — ask the user: the budget is used`, or `iteration 1: review: 0 followed, 0 broken; no verdict on Be kind`. A promise for review comes with its check's reason, so the reason says what the person must decide. A fault of Yami's own code gives the error's kind, its message, and where it was thrown: `failed: TypeError: … (at runSession (run.js:12:5))`. Other states have no `reason`. An act's message ends with it. |
 | `resume(options?)` | Checks the promises. When they are met, it reviews the session if the session has something to review, and ends `done` with no worker turn when the review passes. Otherwise it continues the session's conversation, with the agent that the conversation names, so the agent keeps what it did, and sends the feedback. When the harness no longer has that session, the agent starts a new one in the same note and gets the whole context with the feedback. A session with no conversation starts. A resume refuses another agent than the conversation's. |
-| `stop()` | Interrupts the turn, the worker's or the reviewer's. The run ends `stopped`. |
-| `kill()` | Closes the harness session of the live turn at once, without waiting for the turn to stop. The run ends `stopped`. |
+| `stop()` | Interrupts the turn, the worker's or the reviewer's. The run ends `stopped`. Resolves when the last run's harness sessions have closed, also when the run had ended already. |
+| `kill()` | Closes the harness session of the live turn at once, without waiting for the turn to stop. The run ends `stopped`. Resolves when the last run's harness sessions have closed, also when the run had ended already. |
 | `status()` | `working`, `checking`, or `reviewing` while a run is live in this Yami; otherwise the state the document records: `open`, `done`, `needs-attention`, `failed`, or `stopped`. A document that says `running` with no live run reads as `stopped`. |
 | `check()` | Runs the checks of the session's promises now, and records nothing: `{ checks, judged }`, where each check has the `promise` path, its `name`, its `status`, and the `detail`, and `judged` lists the promises with no check, for the review. The self-check tool returns the same. |
 | `on(listener)` | Calls the listener at each change of status. `yami.onSession(listener)` does the same for every session. |
 | `read()`, `module()`, `flow()` | The document, its module, and its flow. |
 
 `yami.running` lists the sessions with a live run, and `yami.sessions(module or flow?)` the session documents of the vault.
+
+**The end of a run is one step.** A run is live until it writes its end to the document. From the moment the document records `done`, `needs-attention`, `failed`, or `stopped`, the session is not in `yami.running`, `status()` gives that state, `acts()` offers a start and a resume, and `on` has heard the state. Only then do the run's harness sessions close, which can take seconds for a CLI. `start()`, `resume()`, `stop()`, and `kill()` resolve after the close, so a host that awaits them leaves no process behind. A start while the last run's harness closes waits for the close, and then runs:
+
+```ts
+await session.stop();                          // the document says stopped, and the harness has exited
+session.on((status) => status === "stopped" && render(yami.running)); // the run is not in the list
+```
+
+An agent run of the agent tool ends the same way: its Progress line records `done`, `failed`, or `stopped` first, and the tool returns once its harness session has closed.
 
 ### What a view reads
 
@@ -441,7 +450,7 @@ The session ends `done` when every check is met and the review finds every polic
 - `yami.discover()`, `yami.problems`, `yami.onModulesChange(listener)`, and `yami.createModule(name)`: the vault modules. See [Vault modules](#vault-modules).
 - `yami.ingest({ files | folder, name?, policies? })` captures files as sources of the wiki and creates an ingest session that links them, with the policies on top of the wiki's own.
 - `conversations` decides how the conversation notes of runs are kept. The default writes them straight to the vault and denies every approval; `createYami` gives notes with the message box, so a person can watch a run and answer its approvals. A `Conversations` of a host's own must start the agent's sessions with `OpenConversation.tools` when the run gives them, in place of the agent's tools: the worker, the review, and the agents rely on it. It must also give two conversations that open at the same time two notes, as two agents of one session need.
-- `yami.close()` kills every live run and closes every agent session.
+- `yami.close()` kills every live run, waits for the harness sessions of every run to close, and closes every agent session.
 
 ### Agents
 

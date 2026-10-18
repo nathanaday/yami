@@ -62,6 +62,11 @@ export interface RunControl {
    */
   readonly signal: AbortSignal;
   phase(phase: "working" | "checking" | "reviewing"): void;
+  /**
+   * The run calls it as it writes its end to the document, just before the write, and then closes its
+   * conversations. From then on the run is not live.
+   */
+  end(state: SessionState): void;
 }
 
 type Linked = Record<LinkedKind, Document[]>;
@@ -145,10 +150,13 @@ export async function runSession(
   const kind = flow ? `a "${flow.name}" session of the module "${module.name}"` : `a session of the module "${module.name}"`;
   // The last Progress line, which says why a run that did not end done ended.
   let reason = "";
+  // Each write of a state other than `running` is the run's end.
   const write = (outcome: Outcome) => {
     reason = oneLine(outcome.line);
-    return record(vault, path, linked.promises, outcome);
+    return record(vault, path, linked.promises, outcome, () => outcome.state !== "running" && control.end(outcome.state));
   };
+  // The closes of the reviewers' conversations. The run waits for them after it records its end.
+  const closing: Promise<void>[] = [];
 
   let conversation: Conversation | undefined;
   let reviewNote: string | undefined;
@@ -249,7 +257,7 @@ export async function runSession(
       const review = new Review(items);
       const prompt = reviewPrompt({ path, kind, conversation: conversation?.path ?? earlier, session: doc, reply, policies: linked.policies, promises: judged });
       // A fault of Yami's own code in the review fails it as a harness failure does, with where it was thrown.
-      const { note, result } = await runReview(yami, agent, control, review, { path, name: `${module.id} ${basename(path)} review`, prompt }).catch(
+      const { note, result } = await runReview(yami, agent, control, review, { path, name: `${module.id} ${basename(path)} review`, prompt, closing }).catch(
         (error: unknown) => ({ note: undefined, result: { status: "failed", text: "", error: errorText(error) } as ConversationTurn }),
       );
       reviewNote = note ?? reviewNote;
@@ -287,7 +295,7 @@ export async function runSession(
     await write({ iteration, line: state === "stopped" ? "stopped" : `failed: ${errorText(error)}`, state });
   } finally {
     unlisten();
-    await conversation?.close();
+    await Promise.all([conversation?.close(), ...closing]);
   }
   return {
     path,
@@ -309,7 +317,7 @@ async function runReview(
   agent: Agent,
   control: RunControl,
   review: Review,
-  options: { path: string; name: string; prompt: string },
+  options: { path: string; name: string; prompt: string; closing: Promise<void>[] },
 ): Promise<{ note: string; result: ConversationTurn }> {
   const served = yami.tools();
   try {
@@ -322,6 +330,10 @@ async function runReview(
       tools: { ...served, tools: [...served.tools.filter((tool) => tool.readOnly), reviewTool(review)] },
       prompt: options.prompt,
       signal: control.signal,
+      closing: (closed) => {
+        options.closing.push(closed);
+        closed.catch(() => undefined);
+      },
       opened: async (reviewer) => {
         await updateDocument(yami.vault, options.path, (d) => {
           d.properties.state = "running";
@@ -373,9 +385,10 @@ interface Outcome {
 
 /**
  * Writes an outcome to the session document: the state, the deliverables, a line of progress, and the
- * verdicts of a review. A promise with no check is unmet until a review finds it met.
+ * verdicts of a review. A promise with no check is unmet until a review finds it met. `writing` runs just
+ * before the write.
  */
-async function record(vault: Vault, path: string, promises: Document[], outcome: Outcome) {
+async function record(vault: Vault, path: string, promises: Document[], outcome: Outcome, writing: () => void) {
   await updateDocument(vault, path, (doc) => {
     doc.properties.iteration = outcome.iteration;
     doc.properties.state = outcome.state;
@@ -411,6 +424,7 @@ async function record(vault: Vault, path: string, promises: Document[], outcome:
       doc.body = replaceSection(doc.body, "Review", verdicts.join("\n"));
     }
     addProgress(doc, outcome.line);
+    writing();
   });
 }
 

@@ -126,6 +126,7 @@ export async function runAgent(yami: Yami, caller: AgentCaller, name: string, ta
   const runs = live.get(yami) ?? new Set<string>();
   live.set(yami, runs);
   let opened: string | undefined;
+  let closed: Promise<void> | undefined;
   try {
     const { note, result } = await freshRun(yami, {
       agent,
@@ -141,6 +142,7 @@ export async function runAgent(yami: Yami, caller: AgentCaller, name: string, ta
         runs.add(opened);
         await progress("started", opened);
       },
+      closing: (close) => void (closed = close).catch(() => undefined),
     });
     if (result.status === "interrupted") {
       await progress("stopped", note);
@@ -156,7 +158,8 @@ export async function runAgent(yami: Yami, caller: AgentCaller, name: string, ta
     if (opened && !(error instanceof AgentError)) await progress("failed", opened, errorText(error));
     throw error;
   } finally {
-    // The run is live until its end is recorded, so a view never reads a run as stopped in between.
+    // The run is live until its end is recorded, so a view never reads a run as stopped in between. The harness closes after.
     if (opened) runs.delete(opened);
+    await closed;
   }
 }

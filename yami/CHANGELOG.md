@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.1 · library-loop module-forms round 5
+
+The end of a run is one step for a host. When the session document records `stopped`, `done`, `needs-attention`, or `failed`, the session is no longer in `yami.running`, and `status()` and `acts()` agree with the document. The harness sessions close after that step.
+
+### Fixed
+- **A run that had ended stayed in `yami.running` while its harness closed.** The loop recorded its end, and then waited for `conversation.close()`, which waits for the CLI to exit. The handle released the run only after that close. So a view showed Stop and no Resume for a session whose document said `stopped`. The status bar of `yami/obsidian` also showed the run as live. Now the run releases its handle just before it writes its end, and `on` and `yami.onSession` hear the end state at that moment. A review's conversation also closes after the run records its end: before, the run waited for the reviewer's harness to exit before it wrote `done`, `failed`, or `stopped`.
+
+### Changed
+- A `start()` or `resume()` while the last run's harness sessions close waits for them, and then runs. Before, it rejected with `<path> is running.`
+- `stop()` and `kill()` resolve when the last run's harness sessions have closed, also when the run had ended already. `yami.close()` waits for the harness sessions of every run, not only of the live runs.
+- The agent tool records `done`, `failed`, or `stopped` in the caller's Progress section before its harness session closes. The tool still returns after the close.
+
 ## 0.9.0 · library-loop module-forms round 4
 
 A read-only session's commands reach no network beyond what the user's own settings allow, on both harnesses, so a command that the session allows without a request has no effect outside the machine. A read-only Claude Code session does not start when a setting would let its commands write beside the scratch folder. Its instructions tell the agent where its commands write. An interrupt of a Claude Code session stops its running command again. `checkSection` is public.
