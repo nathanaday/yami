@@ -1,6 +1,6 @@
 ---
-type: promise
-module: hello
+name: greeting-note
+description: A note in greetings/ that greets the session by name.
 check: exists
 path: greetings/{{session}}.md
 ---

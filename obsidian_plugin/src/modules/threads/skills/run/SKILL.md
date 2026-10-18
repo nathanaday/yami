@@ -36,8 +36,8 @@ Read `next.step` from `threads_status`, or from the result of any threads tool, 
 
 ### Validate
 
-1. Send the `threads:validator` agent with the thread's path. It edits nothing. Without a subagent tool (Codex), never validate your own work: say in one line that the work waits for validation, and that the user starts it with `/threads:validate <thread>` in a new conversation. Stop.
-2. Call `threads_round` with its report as it returned it: `scope`, `results`, `findings`, and `notes`. Do not turn a `fail` into a `pass`, and do not drop or soften a finding. When `threads_round` refuses the report, change only the part the refusal names, and say so in `notes`.
+1. Call `yami_agent` with the agent `threads:validator` and a task that gives the thread's path. It runs in a fresh context, edits nothing, and returns the round as JSON. Never validate your own work.
+2. Call `threads_round` with the round as the validator returned it: `scope`, `results`, `findings`, and `notes`. Do not turn a `fail` into a `pass`, and do not drop or soften a finding. When `threads_round` refuses the report, change only the part the refusal names, and say so in `notes`.
 3. When the previous round has findings with no outcome, give each one in `resolved` of this call (see [Resolve](#resolve)).
 
 ### Resolve

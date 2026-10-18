@@ -12,7 +12,7 @@ const PRIORITIES = ["high", "normal", "low"];
 export type Phase = "stub" | "specified" | "planned" | "in progress" | "unvalidated" | "failed" | "validated" | "closed" | "dropped";
 
 /** The sections of a thread, in the order the document holds them. Other sections keep their place after these. */
-const ORDER = ["Deliverables", "Progress", "Idea", "Context", "Goal", "Requirements", "Rules", "Decisions", "Out of scope", "Knowledge", "Open questions", "Plan", "Validation", "Outcome"];
+const ORDER = ["Request", "Deliverables", "Progress", "Context", "Goal", "Requirements", "Rules", "Decisions", "Out of scope", "Knowledge", "Open questions", "Plan", "Validation", "Outcome"];
 
 export interface Requirement {
   id: string;

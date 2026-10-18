@@ -1,7 +1,7 @@
 import { YamiModule } from "yami";
 import { linksOf, timestamp } from "yami/document";
 import { hashBytes, readSources, sourceOf } from "yami/wiki";
-import journalPolicy from "./policies/Journal sources.md";
+import journalPolicy from "./policies/journal-sources/POLICY.md";
 
 /** The folder of the volumes: each folder directly under it is one volume of the user's writing. */
 export const JOURNALS = "journals";
@@ -31,7 +31,7 @@ export class Journals extends YamiModule {
   readonly description = `The user's own writing, one volume per folder of ${JOURNALS}/. Publishing a volume captures its new and changed notes as sources and starts a wiki ingest session, an edition.`;
   readonly sessionsIn = "none";
 
-  readonly journalSources = this.policy("Journal sources", journalPolicy);
+  readonly journalSources = this.policy(journalPolicy);
 
   readonly publishVolume = this.action({
     id: "publish",

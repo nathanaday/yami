@@ -52,7 +52,8 @@ describe("checkout", () => {
     const made = await checkout(order);
     expect(made).toEqual({ session: SESSION, copies: [COPY, `${FOLDER}/Q-learning (checkout).md`] });
     const session = await readDocument(vault, SESSION);
-    expect(session.properties).toMatchObject({ type: "session", module: "librarian", request: "the material on reinforcement learning", status: "out", state: "done" });
+    expect(session.properties).toMatchObject({ type: "session", module: "librarian", flow: "checkout", status: "out", state: "done" });
+    expect(sectionText(session.body, "Request")).toBe("the material on reinforcement learning");
     expect(sectionText(session.body, "Reading list")).toBe(
       `1. [[${FOLDER}/Reinforcement learning (checkout)|Reinforcement learning (checkout)]] · the overview\n2. [[${FOLDER}/Q-learning (checkout)|Q-learning (checkout)]] · the first method`,
     );
@@ -187,8 +188,8 @@ describe("the checkout tool", () => {
 
 describe("a checkout as a session", () => {
   it("makes the reading list in the session a run is on, and the run ends done", async () => {
-    const session = await librarian.checkout.create({ name: "RL" });
-    expect(await vault.read(session.path)).toContain("## Request\n\nWhat you want to read about, in your words.\n\n## Deliverables\n- [ ] [[internal/librarian/promises/Reading list made|Reading list made]]");
+    const session = await librarian.checkout.create({ name: "RL", request: "Reinforcement learning, from the basics." });
+    expect(await vault.read(session.path)).toContain("## Request\nReinforcement learning, from the basics.\n\n## Deliverables\n- [ ] [[internal/librarian/promises/reading-list-made/PROMISE|reading-list-made]]");
     t.agent.queue(async (prompt) => {
       expect(prompt).toMatch(/^\/yami:run This is the Yami session "RL"/);
       expect(prompt).toContain("`librarian:checkout`");
@@ -197,7 +198,9 @@ describe("a checkout as a session", () => {
     });
     expect(await session.start()).toMatchObject({ state: "done", iterations: 1 });
     const doc = await readDocument(vault, session.path);
-    expect(doc.properties).toMatchObject({ request: order.request, status: "out", state: "done", template: "checkout" });
+    expect(doc.properties).toMatchObject({ status: "out", state: "done", flow: "checkout" });
+    // The person's words in the Request section stay; the tool's request does not replace them.
+    expect(sectionText(doc.body, "Request")).toBe("Reinforcement learning, from the basics.");
     expect(sectionText(doc.body, "Reading list")).toContain("1. [[librarian/RL/Reinforcement learning (checkout)|Reinforcement learning (checkout)]] · the overview");
     expect(await vault.exists("librarian/RL/Q-learning (checkout).md")).toBe(true);
   });
@@ -205,6 +208,8 @@ describe("a checkout as a session", () => {
   it("refuses a second checkout into one session, and a session of another module", async () => {
     const session = await librarian.checkout.create({ name: "RL" });
     await checkout({ ...order, session: session.path });
+    // The person left the Request section empty, so the checkout's request fills it.
+    expect(sectionText((await readDocument(vault, session.path)).body, "Request")).toBe(order.request);
     await expect(checkout({ ...order, session: session.path })).rejects.toThrow("RL holds a checkout already.");
     await vault.write("notes/Fake.md", "---\ntype: session\nmodule: threads\n---\n");
     await expect(checkout({ ...order, session: "notes/Fake.md" })).rejects.toThrow("is not a session of the librarian module");

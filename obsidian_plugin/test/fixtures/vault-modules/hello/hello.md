@@ -7,6 +7,6 @@ icon: hand
 ---
 # Hello world
 
-The smallest module, defined in the vault with no code: one template, one policy, one promise, and one skill.
+The smallest module, defined in the vault with no code: one flow, one skill, one agent, one policy, and one promise.
 
 Sessions: [[internal/hello/sessions.base|Hello world sessions]]

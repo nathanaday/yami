@@ -14,6 +14,7 @@ const KIND_LOOK: Record<LinkedKind, { title: string; icon: string }> = {
   promises: { title: "Promises", icon: "target" },
   policies: { title: "Policies", icon: "shield" },
   skills: { title: "Skills", icon: "sparkles" },
+  agents: { title: "Agents", icon: "bot" },
   articles: { title: "Articles", icon: "file-text" },
 };
 
@@ -167,7 +168,7 @@ export class YamiPanel extends ItemView {
     this.problems(page, this.yami.problems);
   }
 
-  /** What a person must fix or know: a vault module or a template that stays out, or an edited base skill, with the file to open. */
+  /** What a person must fix or know: a vault module or a flow that stays out, or an edited base skill, with the file to open. */
   private problems(page: HTMLElement, problems: readonly ModuleProblem[]): void {
     if (!problems.length) return;
     const group = ui.section(page, "Problems", `${problems.length}`);
@@ -195,7 +196,7 @@ export class YamiPanel extends ItemView {
     const bar = page.createDiv({ cls: "yami-actions" });
     const acts = module.acts();
     for (const act of acts) {
-      const key = act.kind === "new" ? `new:${act.template.id}` : `action:${act.action.id}`;
+      const key = act.kind === "new" ? `new:${act.flow.name}` : `action:${act.action.id}`;
       this.button(bar, key, act.label, act.kind === "new" ? "plus" : undefined, act.kind === "new", () => this.yami.runModuleAct(act));
     }
     if (!bar.childElementCount) bar.remove();
@@ -211,10 +212,10 @@ export class YamiPanel extends ItemView {
       list.createDiv({ cls: "yami-panel-empty", text: news.length ? `No sessions yet. ${news.map((act) => act.label).join(" or ")} starts one.` : "No sessions yet." });
       return;
     }
-    for (const summary of summaries) this.sessionRow(list, summary, module.templates.length > 1);
+    for (const summary of summaries) this.sessionRow(list, summary, module.flows.length > 1);
   }
 
-  private sessionRow(list: HTMLElement, summary: SessionSummary, showTemplate: boolean): void {
+  private sessionRow(list: HTMLElement, summary: SessionSummary, showFlow: boolean): void {
     // The row and its quick button sit side by side: a button never holds another.
     const item = list.createDiv({ cls: "yami-session-item", attr: { "data-status": summary.status } });
     item.toggleClass("is-live", summary.session.running);
@@ -226,7 +227,7 @@ export class YamiPanel extends ItemView {
     text.createDiv({ cls: "yami-row-name", text: summary.name, attr: { title: summary.name } });
     const meta = text.createDiv({ cls: "yami-row-meta" });
     meta.createSpan({ text: STATUS_LABELS[summary.status] });
-    if (showTemplate && summary.template) meta.createSpan({ text: summary.template.name });
+    if (showFlow && summary.flow) meta.createSpan({ text: summary.flow.name });
     if (summary.created) meta.createSpan({ text: when(summary.created) });
     if (summary.iteration) meta.createSpan({ text: iterations(summary.iteration) });
 
@@ -248,7 +249,7 @@ export class YamiPanel extends ItemView {
     mark(state, details.status);
     state.createSpan({ cls: "yami-state-label", text: STATUS_LABELS[details.status] });
     const meta = state.createDiv({ cls: "yami-row-meta" });
-    if (details.template) meta.createSpan({ text: details.template.name });
+    if (details.flow) meta.createSpan({ text: details.flow.name });
     if (details.created) meta.createSpan({ text: when(details.created) });
     if (details.iteration) meta.createSpan({ text: iterations(details.iteration) });
     if (details.harness) meta.createSpan({ text: capitalize(details.harness) });

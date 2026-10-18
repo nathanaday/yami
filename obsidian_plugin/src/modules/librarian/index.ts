@@ -1,7 +1,7 @@
 import { defineTool, YamiModule, z, type AgentTool, type Check, type LedgerView, type Schema } from "yami";
-import { basename, link, LINK, linkTarget, readDocument, replaceSection, timestamp, updateDocument, writeDocument } from "yami/document";
+import { basename, link, LINK, linkTarget, readDocument, replaceSection, sectionText, timestamp, updateDocument, writeDocument } from "yami/document";
 import { bodyHash, inKnowledge, InvalidPlan, SOURCES, TOPICS, validatePlan, type Write } from "yami/wiki";
-import madePromise from "./promises/Reading list made.md";
+import madePromise from "./promises/reading-list-made/PROMISE.md";
 import checkoutSkill from "./skills/checkout/SKILL.md";
 
 /** The most documents one checkout holds. */
@@ -55,8 +55,6 @@ export class Librarian extends YamiModule {
   readonly color = "#a0522d";
   readonly icon = "library";
   readonly schema: Schema = {
-    /** The user's request, in their words. */
-    request: { type: "text" },
     status: { type: "text", values: ["out", "returned"] },
     returned: { type: "date" },
     /** The change of a return, when a copy held edits. */
@@ -67,20 +65,19 @@ export class Librarian extends YamiModule {
       type: "table",
       name: "Checkouts",
       filters: { and: ['type == "session"'] },
-      order: ["file.name", "status", "request", "created", "returned"],
+      order: ["file.name", "status", "created", "returned"],
       sort: [{ property: "created", direction: "DESC" }],
     },
   ];
   readonly checks = { "checked-out": checkedOut };
 
   readonly checkoutSkill = this.skill(checkoutSkill);
-  readonly made = this.promise("Reading list made", madePromise);
+  readonly made = this.promise(madePromise);
 
-  /** A checkout as a session: the person writes the request in the document, and a run makes the reading list. */
-  readonly checkout = this.template({
-    id: "checkout",
-    name: "Checkout",
-    body: "## Request\n\nWhat you want to read about, in your words.",
+  /** A checkout as a session: the person writes the request in its Request section, and a run makes the reading list. */
+  readonly checkout = this.flow({
+    name: "checkout",
+    description: "A reading list of the wiki's material on a subject, with a copy of each document to mark up.",
     skills: [this.checkoutSkill],
     promises: [this.made],
     maxIterations: 2,
@@ -133,7 +130,7 @@ export class Librarian extends YamiModule {
       if ((await readDocument(vault, session)).properties.status) throw new Error(`${basename(session)} holds a checkout already.`);
     } else {
       // The date keeps the reading list's name apart from a topic of the same subject, so a link by name still finds the topic.
-      session = (await this.checkout.create({ name: `${timestamp().slice(0, 10)} ${order.name!.trim()}` })).path;
+      session = (await this.checkout.create({ name: `${timestamp().slice(0, 10)} ${order.name!.trim()}`, request: order.request.trim() })).path;
     }
     const folder = session.slice(0, -3);
     const copies: string[] = [];
@@ -146,7 +143,8 @@ export class Librarian extends YamiModule {
     }
     const list = order.documents.map(({ why }, i) => `${i + 1}. ${link(copies[i]!)} · ${why.trim()}`).join("\n");
     await updateDocument(vault, session, (doc) => {
-      doc.properties.request = order.request.trim();
+      // The person's own words in the Request section stay; an empty one takes the request of the order.
+      if (!sectionText(doc.body, "Request").trim()) doc.body = replaceSection(doc.body, "Request", order.request.trim());
       doc.properties.status = "out";
       // A run of the session records its own state; a checkout from a conversation is done when it is made.
       if (!order.session) doc.properties.state = "done";

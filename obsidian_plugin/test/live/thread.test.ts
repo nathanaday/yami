@@ -1,6 +1,6 @@
 /**
  * One thread, from stub to closed, with a real Claude Code: the threads skills, tools, reviewer and
- * validator agents, and the loop, on a scratch repository outside the vault. It takes some minutes and
+ * validator agents through `yami_agent`, and the loop, on a scratch repository outside the vault. It takes some minutes and
  * costs a real run, so it runs only on request:
  *
  *   YAMI_LIVE_THREAD=1 npm run test:live
@@ -53,7 +53,6 @@ describe.runIf(process.env.YAMI_LIVE_THREAD)("a thread with a real agent", () =>
     await yami.close();
 
     const t = parse(await readDocument(vault, "threads/Divide.md"));
-    const record = await vault.read(result.conversation!);
     console.log(`state ${result.state} after ${result.iterations} iteration(s); phase ${phase(t)}; ${t.requirements.length} requirements, ${t.plan.length} tasks, ${t.rounds.length} rounds`);
     expect(result.state).toBe("done");
     expect(phase(t)).toBe("closed");
@@ -62,7 +61,10 @@ describe.runIf(process.env.YAMI_LIVE_THREAD)("a thread with a real agent", () =>
     expect(t.rounds.at(-1)!.verdict).toBe("pass");
     expect(git("log", "--oneline").split("\n").length).toBeGreaterThan(2);
     expect(execFileSync("npm", ["test"], { cwd: repo, encoding: "utf8" })).toContain("pass");
-    // The work was validated by the read-only agent of the module, not by the agent that did it.
-    expect(record).toContain("threads:validator");
+    // The work was validated by the read-only agent of the module, through the agent tool, in a conversation of its own.
+    const notes = await vault.list("conversations");
+    const validations = notes.filter((note) => path.basename(note).startsWith("threads validator"));
+    expect(validations.length).toBeGreaterThan(0);
+    for (const note of validations) expect((await readDocument(vault, note)).properties).toMatchObject({ type: "conversation", module: "[[threads/Divide|Divide]]" });
   });
 });

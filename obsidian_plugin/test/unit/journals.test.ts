@@ -29,11 +29,11 @@ const today = () => "2026-10-06";
 
 describe("the journals module", () => {
   it("installs its policy, and has no sessions and no ledger", async () => {
-    expect(await vault.exists("internal/journals/policies/Journal sources.md")).toBe(true);
+    expect(await vault.exists("internal/journals/policies/journal-sources/POLICY.md")).toBe(true);
     expect(await vault.exists("internal/journals/sessions.base")).toBe(false);
     expect(await vault.exists("journals/sessions.base")).toBe(false);
     expect((await vault.read("internal/journals/journals.md"))).not.toContain("sessions.base");
-    expect(journals.templates).toEqual([]);
+    expect(journals.flows).toEqual([]);
     expect(journals.actions.map((a) => a.id)).toEqual(["publish"]);
   });
 
@@ -60,10 +60,10 @@ describe("volumes and publish", () => {
     expect(session.properties.module).toBe("wiki");
     expect(session.properties.sources).toHaveLength(2);
     expect(session.properties.policies).toEqual([
-      "[[internal/wiki/policies/Cite every claim|Cite every claim]]",
-      "[[internal/wiki/policies/Change the wiki through one plan|Change the wiki through one plan]]",
-      "[[internal/wiki/policies/One subject, one topic|One subject, one topic]]",
-      "[[internal/journals/policies/Journal sources|Journal sources]]",
+      "[[internal/wiki/policies/cite-every-claim/POLICY|cite-every-claim]]",
+      "[[internal/wiki/policies/one-plan/POLICY|one-plan]]",
+      "[[internal/wiki/policies/one-topic/POLICY|one-topic]]",
+      "[[internal/journals/policies/journal-sources/POLICY|journal-sources]]",
     ]);
     expect((await readDocument(vault, "wiki/sources/Lab 1 (source).md")).properties.from).toBe("[[journals/cs566-notes/labs/Lab 1|Lab 1]]");
     expect((await volumes())[0]).toMatchObject({ unpublished: 0 });

@@ -1,14 +1,12 @@
 import { defineTool, YamiModule, z, type AgentTool, type Check, type LedgerView, type Schema } from "yami";
 import { readDocument } from "yami/document";
-import reviewerAgent from "./agents/reviewer.md";
-import validatorAgent from "./agents/validator.md";
-import changePolicy from "./policies/Change a thread through its tools.md";
-import closedPromise from "./promises/Thread closed.md";
+import reviewerAgent from "./agents/reviewer/AGENT.md";
+import validatorAgent from "./agents/validator/AGENT.md";
+import changePolicy from "./policies/change-through-tools/POLICY.md";
+import closedPromise from "./promises/thread-closed/PROMISE.md";
 import runSkill from "./skills/run/SKILL.md";
-import reviewerBrief from "./skills/spec/reviewer.md";
 import specSkill from "./skills/spec/SKILL.md";
 import stubSkill from "./skills/stub/SKILL.md";
-import validateSkill from "./skills/validate/SKILL.md";
 import { close, closeShape, plan, planShape, round, roundShape, spec, specShape, status, stub, stubShape } from "./ops.js";
 import { next, parse, phase, waiting } from "./thread.js";
 
@@ -62,12 +60,11 @@ export class Threads extends YamiModule {
   ];
   readonly checks = { thread };
 
-  readonly changeThroughTools = this.policy("Change a thread through its tools", changePolicy);
-  readonly closed = this.promise("Thread closed", closedPromise);
+  readonly changeThroughTools = this.policy(changePolicy);
+  readonly closed = this.promise(closedPromise);
   readonly stubSkill = this.skill(stubSkill);
-  readonly specSkill = this.skill(specSkill, { "reviewer.md": reviewerBrief });
+  readonly specSkill = this.skill(specSkill);
   readonly runSkill = this.skill(runSkill);
-  readonly validateSkill = this.skill(validateSkill);
   readonly reviewer = this.agent(reviewerAgent);
   readonly validator = this.agent(validatorAgent);
 
@@ -75,18 +72,19 @@ export class Threads extends YamiModule {
    * A thread: `/threads:stub` or the stub tool plants one, and a run takes it to closed. A thread document
    * holds structured sections that only the tools write, so the module offers no command for a blank one.
    */
-  readonly thread = this.template({
-    id: "thread",
-    name: "Thread",
+  readonly thread = this.flow({
+    name: "thread",
+    description: "One piece of validated work on repositories, from the stub to closed.",
     command: false,
     skills: [this.runSkill],
+    agents: [this.reviewer, this.validator],
     policies: [this.changeThroughTools],
     promises: [this.closed],
   });
 
   tools(): AgentTool[] {
     const vault = this.vault;
-    const template = this.thread;
+    const flow = this.thread;
     const json = (value: unknown) => JSON.stringify(value);
     return [
       defineTool({
@@ -96,7 +94,7 @@ export class Threads extends YamiModule {
         title: ({ threads: list }) => `Plant ${list.map((t) => t.title).join(", ").slice(0, 60)}`,
         run: async ({ threads: list }) => {
           const planted = [];
-          for (const input of list) planted.push(await stub(vault, template, input));
+          for (const input of list) planted.push(await stub(vault, flow, input));
           return json({ planted });
         },
       }),

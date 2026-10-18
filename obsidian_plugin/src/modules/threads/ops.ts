@@ -1,4 +1,4 @@
-import { z, type SessionTemplate, type Vault } from "yami";
+import { z, type Flow, type Vault } from "yami";
 import { link, readDocument, sectionText, timestamp } from "yami/document";
 import { hash } from "yami/wiki";
 import {
@@ -108,7 +108,7 @@ export const closeShape = {
 };
 
 /** Plants a thread: its session document, with the idea in the user's words and the research's context. */
-export async function stub(vault: Vault, template: SessionTemplate, input: In<typeof stubShape>["threads"][number]) {
+export async function stub(vault: Vault, flow: Flow, input: In<typeof stubShape>["threads"][number]) {
   const idea = noHeadings("idea", input.idea);
   if (!idea) throw new Error("idea is empty: give the user's words.");
   const description = oneLine("description", input.description);
@@ -116,12 +116,13 @@ export async function stub(vault: Vault, template: SessionTemplate, input: In<ty
   const after = [];
   for (const other of input.after ?? []) after.push(link((await find(vault, other)).path));
   const similarTo = await similar(vault, input.title, description);
-  const { path } = await template.create({
+  const { path } = await flow.create({
     name: input.title,
     exact: true,
+    request: idea,
     fields: { description, repositories: input.repositories ?? [], tags: input.tags ?? [], after, ...(input.priority && { priority: input.priority }) },
   });
-  const t = await save(vault, parse(await readDocument(vault, path)), { Idea: idea, Context: context });
+  const t = await save(vault, parse(await readDocument(vault, path)), { Context: context });
   return { ...(await view(vault, t)), ...(similarTo.length && { similar: similarTo.map(({ title, path, phase }) => ({ title, path, phase })) }) };
 }
 

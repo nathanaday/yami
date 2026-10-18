@@ -80,10 +80,12 @@ describe("threads_stub", () => {
     expect(result.planted[0]).toMatchObject({ title: "Divide", path: PATH, phase: "stub", next: { step: "spec" } });
     const d = await doc();
     expect(d.properties).toMatchObject({ type: "session", module: "threads", description: "Add Divide to calc.", repositories: ["~/code/calc"], priority: "high", phase: "stub", tags: ["calc"] });
-    expect(sectionText(d.body, "Idea")).toBe("calc needs a Divide that returns an error on division by zero.");
+    expect(sectionText(d.body, "Request")).toBe("calc needs a Divide that returns an error on division by zero.");
     expect(sectionText(d.body, "Context")).toBe("### Where\n\ncalc.go holds Add.");
-    expect(d.body.indexOf("## Deliverables")).toBeLessThan(d.body.indexOf("## Idea"));
-    expect(d.properties.promises).toEqual(["[[internal/threads/promises/Thread closed|Thread closed]]"]);
+    expect(d.body.indexOf("## Request")).toBeLessThan(d.body.indexOf("## Deliverables"));
+    expect(d.body.indexOf("## Progress")).toBeLessThan(d.body.indexOf("## Context"));
+    expect(d.properties.promises).toEqual(["[[internal/threads/promises/thread-closed/PROMISE|thread-closed]]"]);
+    expect(d.properties.agents).toEqual(["[[internal/threads/agents/reviewer/AGENT|reviewer]]", "[[internal/threads/agents/validator/AGENT|validator]]"]);
   });
 
   it("links the threads it comes after, and names an open thread that may hold the same idea", async () => {
@@ -107,7 +109,7 @@ describe("threads_spec", () => {
     expect(result).toMatchObject({ phase: "specified", next: { step: "plan" }, requirements: 2 });
     const body = (await doc()).body;
     expect(sectionText(body, "Requirements")).toBe("- **R1** Divide(6, 3) is 2, shown by TestDivide.\n- **R2** Divide(1, 0) returns ErrZero, shown by TestDivide.");
-    const order = ["## Idea", "## Context", "## Goal", "## Requirements", "## Rules", "## Decisions", "## Out of scope"].map((h) => body.indexOf(h));
+    const order = ["## Request", "## Context", "## Goal", "## Requirements", "## Rules", "## Decisions", "## Out of scope"].map((h) => body.indexOf(h));
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
@@ -324,9 +326,9 @@ describe("threads_status and the thread check", () => {
   });
 
   it("keeps a section the user added, in its place, when a tool writes the thread", () => {
-    const body = "# T\n\n## Deliverables\n- x\n\n## Idea\n\nidea\n\n## My notes\n\nmine\n\n## Goal\n\ng\n";
+    const body = "# T\n\n## Request\n\nidea\n\n## Deliverables\n- x\n\n## My notes\n\nmine\n\n## Goal\n\ng\n";
     const out = assemble(body, { Requirements: "- **R1** a", Goal: "new goal", Rules: "" });
-    expect(out).toBe("# T\n\n## Deliverables\n\n- x\n\n## Idea\n\nidea\n\n## Goal\n\nnew goal\n\n## Requirements\n\n- **R1** a\n\n## My notes\n\nmine\n");
+    expect(out).toBe("# T\n\n## Request\n\nidea\n\n## Deliverables\n\n- x\n\n## Goal\n\nnew goal\n\n## Requirements\n\n- **R1** a\n\n## My notes\n\nmine\n");
   });
 });
 
@@ -349,7 +351,53 @@ describe("a thread session in the loop", () => {
     );
     const result = await t.yami.session(PATH).start();
     expect(result).toMatchObject({ state: "done", iterations: 1 });
-    expect((await doc()).body).toContain("- [x] [[internal/threads/promises/Thread closed|Thread closed]] — the thread is closed");
+    expect((await doc()).body).toContain("- [x] [[internal/threads/promises/thread-closed/PROMISE|thread-closed]] — the thread is closed");
+  });
+
+  it("validates through the validator agent, in a fresh read-only context with a note of its own", async () => {
+    await executed();
+    const round = {
+      scope: "heads: calc@b2c3d4e. Read both commits.",
+      results: [
+        { requirement: "R1", result: "pass", evidence: "TestDivide/six ok" },
+        { requirement: "R2", result: "pass", evidence: "TestDivide/zero ok" },
+      ],
+      findings: [],
+      notes: "",
+    };
+    let reply: any;
+    t.agent.queue(
+      async (_prompt, worker) => {
+        const result = await worker.tool("yami_agent", { agent: "validator", task: `Validate the thread ${PATH}.` });
+        expect(result.isError).toBeFalsy();
+        reply = JSON.parse(result.text);
+        await worker.tool("threads_round", { thread: "Divide", ...JSON.parse(reply.message) });
+        await worker.tool("threads_close", { thread: "Divide", outcome: "closed", summary: "calc divides safely." });
+      },
+      // The validator: a new session of the agent, which reads the thread and returns the round.
+      async (prompt, validator) => {
+        expect(prompt).toContain("You check a thread's work before the thread is validated.");
+        expect(prompt).toContain(`Validate the thread ${PATH}.`);
+        expect(JSON.parse((await validator.tool("threads_status", { thread: "Divide" })).text)).toMatchObject({ phase: "unvalidated", next: { step: "validate" } });
+        await expect(validator.tool("threads_round", { thread: "Divide", ...round })).rejects.toThrow();
+        return { text: JSON.stringify(round) };
+      },
+      review(),
+    );
+    expect(await t.yami.session(PATH).start()).toMatchObject({ state: "done", iterations: 1 });
+
+    expect(reply).toEqual({ agent: "threads:validator", conversation: "conversations/threads validator.md", message: JSON.stringify(round) });
+    const [worker, validator] = t.agent.started;
+    expect(validator).not.toBe(worker);
+    expect(validator!.options).toMatchObject({ access: "read-only" });
+    const names = validator!.options.tools!.tools.map((tool) => tool.name);
+    expect(names).toContain("threads_status");
+    for (const name of ["yami_agent", "threads_round", "threads_plan", "threads_close", "wiki_change"]) expect(names).not.toContain(name);
+
+    const note = await readDocument(vault, reply.conversation);
+    expect(note.properties).toMatchObject({ type: "conversation", module: "[[threads/Divide|Divide]]" });
+    expect(note.body).toContain(`Validate the thread ${PATH}.`);
+    expect(parse(await doc()).rounds).toHaveLength(1);
   });
 
   it("stops for the user when the thread used its budget, instead of pushing on", async () => {
@@ -357,7 +405,7 @@ describe("a thread session in the loop", () => {
     await specify({ budget: 1, user_asked: "one round only" });
     t.agent.queue(async () => void (await fail()));
     const result = await t.yami.session(PATH).start();
-    expect(result).toMatchObject({ state: "needs-attention", iterations: 1, reason: expect.stringContaining("iteration 1: 0 met, 0 unmet, 1 for review: Thread closed — ask the user: the thread used its 1 rounds") });
+    expect(result).toMatchObject({ state: "needs-attention", iterations: 1, reason: expect.stringContaining("iteration 1: 0 met, 0 unmet, 1 for review: thread-closed — ask the user: the thread used its 1 rounds") });
   });
 });
 
@@ -516,12 +564,13 @@ describe("what review found: the board, waiting, and the plan's details", () => 
     expect(sectionText((await doc()).body, "Outcome")).toContain("- Plan: 2 tasks done, 1 dropped.");
   });
 
-  it("installs its reviewer and validator with no tool that can edit", async () => {
+  it("installs its reviewer and validator as read-only agents", async () => {
     for (const name of ["reviewer", "validator"]) {
-      const tools = String((await readDocument(vault, `internal/threads/agents/${name}.md`)).properties.tools);
-      expect(tools, name).toContain("Read");
-      for (const edit of ["Edit", "Write", "NotebookEdit", "MultiEdit"]) expect(tools.split(", "), `${name} ${edit}`).not.toContain(edit);
+      const { properties } = await readDocument(vault, `internal/threads/agents/${name}/AGENT.md`);
+      expect(properties, name).toMatchObject({ name, access: "read-only", description: expect.stringContaining("It edits nothing.") });
+      expect(properties.tools, name).toBeUndefined();
     }
+    expect(await vault.exists("internal/threads/skills/validate/SKILL.md")).toBe(false);
   });
 });
 
