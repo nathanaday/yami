@@ -220,10 +220,11 @@ describe("a checkout as a session", () => {
     const session = await librarian.checkout.create({ name: "Empty" });
     const before = await vault.read(session.path);
     const sneaky = "Read on RL.\n## Deliverables\nsneaky";
-    await expect(checkout({ ...order, session: session.path, request: sneaky })).rejects.toThrow('"## "');
-    await expect(checkout({ ...order, session: session.path, notes: sneaky })).rejects.toThrow('"## "');
+    await expect(checkout({ ...order, session: session.path, request: sneaky })).rejects.toThrow('The text for the Request section holds the heading line "## Deliverables"');
+    await expect(checkout({ ...order, session: session.path, notes: sneaky })).rejects.toThrow('The text for the Notes section holds the heading line "## Deliverables"');
     expect(await vault.read(session.path)).toBe(before);
-    await expect(librarian.checkout.create({ name: "New", request: sneaky })).rejects.toThrow('The request holds the heading line "## Deliverables"');
+    expect(await vault.list(session.path.slice(0, -3))).toEqual([]);
+    await expect(librarian.checkout.create({ name: "New", request: sneaky })).rejects.toThrow('The text for the Request section holds the heading line "## Deliverables"');
     expect(await vault.exists(`librarian/New.md`)).toBe(false);
   });
 
