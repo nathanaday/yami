@@ -15,7 +15,7 @@ import { checkModuleIcons } from "./icons.js";
 import { addConversationCommands, addModuleCommands, addNewModuleCommand, addSessionCommands, addWikiCommands } from "./commands.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
-import { NoteSessions, type AgentWork, type NoteSessionsOptions } from "./note-sessions.js";
+import { NoteSessions, type AgentWork, type NoteEvents, type NoteSessionsOptions } from "./note-sessions.js";
 import { PermissionPrompts } from "./prompts/permission-modal.js";
 import { ObsidianVault } from "./vault.js";
 import { ignoredPaths, openNote, pickOne, watchWiki, type OpenMode } from "./wiki/open.js";
@@ -102,8 +102,10 @@ export class ObsidianYami extends Yami {
   /** The agents that `setAgents` removed, so that a run that is live keeps its agent's name and color. */
   #retired: ConversationAgent[] = [];
   readonly #idleMinutes: number | (() => number);
+  readonly #animate: boolean | (() => boolean);
   readonly #works = new Set<AgentWork>();
-  readonly #noteSessions = new Set<NoteSessions>();
+  readonly #noteSessions = new Set<NoteSessions<unknown>>();
+  readonly #noteEvents = new Set<NoteEvents>();
   /** The functions that bring the commands of each agent up to date. */
   readonly #agentCommands: (() => void)[] = [];
   #status: HTMLElement | undefined;
@@ -127,12 +129,12 @@ export class ObsidianYami extends Yami {
     });
     this.#registered = registered;
     this.#idleMinutes = options.idleMinutes ?? IDLE_MINUTES;
-    const animate = options.animate ?? true;
+    this.#animate = options.animate ?? true;
     const hub = installCollab(app, plugin);
     const conversations = new ConversationManager(app, hub, new PermissionPrompts(app), {
       agents: () => this.#registered,
       folder: () => this.conversationFolder,
-      animate: () => read(animate) && !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+      animate: this.animate,
       idleMinutes: () => read(this.#idleMinutes),
       onActivity: () => this.updateStatus(),
     });
@@ -201,6 +203,14 @@ export class ObsidianYami extends Yami {
     }
   }
 
+  /**
+   * Whether an agent's edits play as typing now: the `animate` option, and no request of the system for
+   * reduced motion. A function, so a host's own `Presence` or `AgentPeer` follows the same rule.
+   * @example
+   * const presence = new Presence({ name: "claude", color: "#d97757" }, yami.animate);
+   */
+  readonly animate = (): boolean => read(this.#animate) && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
   /** The agents with their names and colors, as conversations and commands show them. `setAgents` changes them. */
   get registered(): readonly ConversationAgent[] {
     return this.#registered;
@@ -226,7 +236,7 @@ export class ObsidianYami extends Yami {
     this.#registered = registered;
     for (const sync of this.#agentCommands) sync();
     this.conversations.agentsChanged();
-    for (const notes of this.#noteSessions) notes.agentsChanged();
+    for (const events of this.#noteEvents) events.agentsChanged();
     this.updateStatus();
     this.#sessionsFeed.changed();
   }
@@ -255,20 +265,35 @@ export class ObsidianYami extends Yami {
   /**
    * Harness sessions of notes: one for each note and agent, for agents that work in a note that is not a
    * conversation note, such as an agent that answers in the margin. A session starts when the host asks for
-   * it. It continues the session that the host stored for the note and agent, or starts a new one when the
-   * harness lost it. It closes after the idle minutes with no turn, follows a renamed note, is forgotten with
-   * a removed note, follows `setAgents`, and closes when the plugin unloads. The host stores the ids: it
-   * gives the stored ones in `ids`, and `save` gets every id after each change.
+   * it, with the options and the host's own state that `setup` makes for it. It continues the session that
+   * the host stored for the note and agent, or starts a new one when the harness lost it. It closes after the
+   * idle minutes with no turn, follows `setAgents`, and closes when the plugin unloads. It follows a renamed
+   * note or folder, and a removed note forgets it: Yami hears the vault's events itself. The host stores the
+   * ids: it gives the stored ones in `ids`, and `save` gets a new object with every id after each change.
    * @example
-   * const notes = this.yami.noteSessions({ ids: data.sessions, save: (ids) => this.saveData({ ...data, sessions: ids }) });
-   * const { session } = await notes.session(file.path, "claude", { instructions, access: "read-only", tools, skills: [] });
+   * const notes = this.yami.noteSessions({
+   *   ids: data.sessions,
+   *   save: (ids) => this.saveData({ ...data, sessions: ids }),
+   *   setup: ({ path }) => { const reply = new Reply(path); return { options: { instructions, access: "read-only", tools: reply.tools, skills: [] }, state: reply }; },
+   * });
+   * const { session, state: reply } = await notes.session(file.path, "claude");
    * await notes.forget(file.path);
    */
-  noteSessions(options: NoteSessionsOptions = {}): NoteSessions {
-    const notes = new NoteSessions({ agents: () => this.#registered, idleMinutes: () => read(this.#idleMinutes), addWork: (work) => this.addWork(work) }, options);
+  noteSessions<State = undefined>(options: NoteSessionsOptions<State> = {}): NoteSessions<State> {
+    const notes = new NoteSessions<State>(
+      {
+        agents: () => this.#registered,
+        idleMinutes: () => read(this.#idleMinutes),
+        addWork: (work) => this.addWork(work),
+        follow: (events) => {
+          this.#noteEvents.add(events);
+          this.plugin.registerEvent(this.app.vault.on("rename", (file, old) => events.renamed(old, file.path)));
+          this.plugin.registerEvent(this.app.vault.on("delete", (file) => events.removed(file.path)));
+        },
+      },
+      options,
+    );
     this.#noteSessions.add(notes);
-    this.plugin.registerEvent(this.app.vault.on("rename", (file, old) => notes.renamed(old, file.path)));
-    this.plugin.registerEvent(this.app.vault.on("delete", (file) => notes.removed(file.path)));
     return notes;
   }
 

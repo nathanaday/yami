@@ -15,7 +15,7 @@ export { type PermissionContext, PermissionPrompts } from "./prompts/permission-
 export { type QuestionForm, renderQuestions } from "./prompts/question-form.js";
 export { folderColorRules, showFolderColors } from "./colors.js";
 export { COMMAND_PREFIX } from "./commands.js";
-export type { AgentWork, NoteSessions, NoteSessionsOptions, SessionIds } from "./note-sessions.js";
+export type { AgentWork, NoteAgent, NoteSession, NoteSessions, NoteSessionSetup, NoteSessionsOptions, SessionIds } from "./note-sessions.js";
 export { checkModuleIcons, moduleIcon } from "./icons.js";
 export { watchModules } from "./discovery.js";
 export { ObsidianVault } from "./vault.js";

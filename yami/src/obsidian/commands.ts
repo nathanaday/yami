@@ -49,7 +49,7 @@ export function addConversationCommands(yami: ObsidianYami): () => void {
   const { plugin, conversations } = yami;
   const start = (name?: string) => {
     const agent = name === undefined ? yami.registered[0] : yami.registered.find((candidate) => candidate.name === name);
-    if (!agent) return void new Notice(name === undefined ? "Yami has no agents." : `Yami has no agent named ${name}.`);
+    if (!agent) return void new Notice(name === undefined ? `${plugin.manifest.name} has no agents. Add one in its settings.` : `${plugin.manifest.name} has no agent named ${name}.`);
     void yami.notify(conversations.create(agent).then((file) => `Opened ${file.path}.`));
   };
   plugin.addRibbonIcon("message-square-plus", "New conversation", () => start());

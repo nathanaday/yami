@@ -1,6 +1,27 @@
 # Changelog
 
-## 0.10.0 · library-loop duet-runtime round 1
+## 0.11.0 · library-loop runtime agents and options round 2
+
+A session of `noteSessions` holds the host's own state, which `setup` makes once for each harness session. Each change of `hub.observe` gives the note and the text before the change, and an observer hears a note's `shared`, its changes, and its stop in that order. `yami.animate()` gives the library's rule of motion to a host's own presence. The ribbon says which plugin has no agents, and what to do.
+
+### Breaking
+- **`notes.session(path, agent?)` takes no options.** `setup` in the options of `yami.noteSessions` makes them, once for each harness session. Before, each call gave options, and only the call that started a session used them, so a host built its tools at every call. Migrate: `notes.session(path, name, { instructions, tools, skills: [] })` → `yami.noteSessions({ ...options, setup: () => ({ options: { instructions, tools, skills: [] } }) })` and `notes.session(path, name)`. Options that depend on the note read `setup(({ path, agent }) => …)`.
+- **`NoteSessions` has no public `renamed`, `removed`, or `agentsChanged`.** `yami.noteSessions` hears the vault's renames and removals and the changes of `setAgents` itself, as before; the methods were for that wiring only. Migrate: delete a call of them; a host that called them on a rename moved the ids twice.
+- **The ribbon icon and the New conversation of a plugin with no agents say `<plugin name> has no agents. Add one in its settings.`** Before, they said `Yami has no agents.`, which names the library and not the way to fix it. Migrate: a test that matched `Yami has no agents.` in a notice matches the new text. The errors of the API, such as `notes.session` and `conversations.start` with no agents, keep `Yami has no agents.`
+
+### Added
+- `setup(note)` in `NoteSessionsOptions`: for each harness session that starts, the `options`, the host's own `state`, and `started(session)`, which hears the session before `notes.session` gives it. `notes.session` gives `{ session, continued, state }` (`NoteSession<State>`); `state` is typed by what `setup` gives. `note` is a `NoteAgent`, `{ path, agent }`, whose `path` follows a rename. A setup or a `started` that throws makes `notes.session` reject, and leaves no session open. Types `NoteAgent`, `NoteSession`, and `NoteSessionSetup`. Migrate a workaround: a `WeakMap<TFile, Map<string, State>>` beside `noteSessions`, and an `if (state.session !== session)` check to subscribe once → `setup: (note) => ({ options, state, started: (session) => session.on(state.hear) })` and `const { state } = await notes.session(path, name)`.
+- `NoteChange.note`, the `SharedNote`, and `NoteChange.before`, the text that `ops` apply to. `note.content` is the text after the change. Migrate a workaround: `const note = hub.get(path)` and a copy of the text that `applyOps` moves at each change → `changed: ({ note, before, ops }) => …`.
+- `yami.animate()`: whether an agent's edits play as typing now, by the `animate` option and the system's reduced motion. Migrate a workaround: `new Presence(identity, () => settings.animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)` → `new Presence(identity, yami.animate)`.
+
+### Changed
+- `hub.observe` calls `shared` at once for each note that is shared when the observer starts, and its stop function runs the function that `shared` gave for each note shared then. So for each note, an observer hears `shared`, then `changed` for each change, then the stop, in that order. No observer hears a change of a note after it stopped being shared. An error in `shared` or in its stop goes to the console, as an error in `changed` did.
+- The README answers what `noteSessions` does with renames and removals, the idle wait, two calls at once, and the object that `save` gets.
+
+### Fixed
+- **A `notes.session()` call for an open session stopped its idle wait, and no new wait started.** So a session that a call gave, and that then had no turn, never closed. Now each call restarts the idle wait, and the session closes after the idle minutes with no turn.
+
+## 0.10.0 · library-loop runtime agents and options round 1
 
 A plugin gets the whole runtime from `createYami` and changes it while it runs. Its agents change with `setAgents`, and the options that a person sets take a function that Yami reads at each use. A host's own agent work shows in the status bar, and `yami-stop` stops it. `noteSessions` gives one harness session for each note and agent. The hub gives a feed of the changes to shared notes. The text operations import from `yami/document`, with no Obsidian. Every command id of the library starts with `yami-`.
 

@@ -75,9 +75,11 @@ async function fakePlugin() {
   const root = await mkdtemp(join(tmpdir(), "yami-obsidian-"));
   const { FileSystemAdapter } = (await import("obsidian")) as unknown as { FileSystemAdapter: new (root: string) => object };
   const on = () => ({});
+  const vaultEvents = new Map<string, ((...args: unknown[]) => void)[]>();
+  const onVault = (name: string, callback: (...args: unknown[]) => void) => (vaultEvents.set(name, [...(vaultEvents.get(name) ?? []), callback]), {});
   let active: { path: string; basename: string; extension: string } | null = null;
   const app = {
-    vault: { adapter: new FileSystemAdapter(root), on, offref: () => undefined, getConfig: () => undefined, getFileByPath: () => null },
+    vault: { adapter: new FileSystemAdapter(root), on: onVault, offref: () => undefined, getConfig: () => undefined, getFileByPath: () => null },
     metadataCache: { on, offref: () => undefined, getFileCache: () => null, getCache: () => null },
     workspace: { on, onLayoutReady: () => undefined, iterateAllLeaves: () => undefined, getActiveFile: () => active, getActiveViewOfType: () => null },
   };
@@ -99,7 +101,7 @@ async function fakePlugin() {
   let ribbon: (() => void) | undefined;
   const plugin = {
     app,
-    manifest: { id: "test" },
+    manifest: { id: "test", name: "Test Plugin" },
     addCommand: (command: Command) => (commands.set(command.id, command), command),
     removeCommand: (id: string) => commands.delete(id),
     addRibbonIcon: (_icon: string, _title: string, callback: () => void) => (ribbon = callback),
@@ -115,6 +117,10 @@ async function fakePlugin() {
     status,
     working: () => classes.has("is-working"),
     ribbon: () => ribbon!(),
+    /** Sends a vault event, as Obsidian does on a rename or a removal. */
+    vault: (name: string, ...args: unknown[]) => {
+      for (const callback of vaultEvents.get(name) ?? []) callback(...args);
+    },
     open: (path: string | null) => (active = path === null ? null : { path, basename: path.replace(/\.md$/, ""), extension: "md" }),
     run: (id: string, checking = false) => {
       const command = commands.get(id)!;
@@ -168,7 +174,7 @@ describe("createYami", () => {
     expect(yami.registered).toEqual([]);
     expect([...fake!.commands.keys()].filter((id) => id.startsWith("yami-new-conversation-") || id.startsWith("yami-run-session-"))).toEqual([]);
     fake!.ribbon();
-    expect(notices()).toEqual(["Yami has no agents."]);
+    expect(notices()).toEqual(["Test Plugin has no agents. Add one in its settings."]);
   });
 });
 
@@ -253,8 +259,9 @@ describe("noteSessions", () => {
   it("shows a session's turn as work in its note, and yami-stop interrupts the turn", async () => {
     const claude = new ScriptedAgent();
     const yami = await build({ agents: [claude] });
-    const notes = yami.noteSessions();
-    const { session } = await notes.session("Ideas.md", "claude", { skills: [] });
+    const notes = yami.noteSessions({ setup: () => ({ options: { skills: [] } }) });
+    const { session } = await notes.session("Ideas.md", "claude");
+    expect(claude.last!.options.skills).toEqual([]);
     claude.queue(() => new Promise(() => undefined));
     const turn = session.send("Answer the question in the note.");
     await vi.waitFor(() => expect(fake!.status.text).toBe("claude working in Ideas"));
@@ -262,6 +269,19 @@ describe("noteSessions", () => {
     fake!.run("yami-stop");
     expect(await turn).toMatchObject({ status: "interrupted" });
     expect(fake!.status.text).toBe("");
+  });
+
+  it("follows the vault's renames and removals with no call of the host", async () => {
+    const claude = new ScriptedAgent();
+    const yami = await build({ agents: [claude] });
+    const notes = yami.noteSessions();
+    const { session } = await notes.session("Projects/Ideas.md");
+    fake!.vault("rename", { path: "Work" }, "Projects");
+    expect(Object.keys(notes.ids)).toEqual(["Work/Ideas.md"]);
+    expect((await notes.session("Work/Ideas.md")).session).toBe(session);
+    fake!.vault("delete", { path: "Work/Ideas.md" });
+    await vi.waitFor(() => expect(session.closed).toBe(true));
+    expect(notes.ids).toEqual({});
   });
 });
 
@@ -280,5 +300,17 @@ describe("options that change while the plugin runs", () => {
     animate = true;
     reduceMotion = true;
     expect(options.animate()).toBe(false);
+  });
+
+  it("gives its rule of motion to a host's own presence as yami.animate", async () => {
+    let animate = true;
+    const yami = await build({ animate: () => animate });
+    const { animate: read } = yami;
+    expect(read()).toBe(true);
+    animate = false;
+    expect(read()).toBe(false);
+    animate = true;
+    reduceMotion = true;
+    expect(read()).toBe(false);
   });
 });

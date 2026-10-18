@@ -18,3 +18,17 @@ Watch next round:
 - Retired agents are never pruned (small leak). Fix it if anyone notices.
 - NoteSessions `renamed` / `removed` / `agentsChanged` are public on the type but internal in intent.
 - The design.md policy proposals wait for the user.
+
+## Round 2 (0.11.0)
+Decided (all five accepted, per the ruling):
+- F1.1: `setup(note) => { options?, state?, started? }` in `NoteSessionsOptions<State>`, once per harness session (SessionSlot reads `options()` inside `#start`). `session(path, agent?)` gives `{ session, continued, state }`, and the state is kept in a WeakMap by session. BREAK: no third `options` arg. Chose `setup` over the consumer's `start`, because it starts nothing.
+- F1.2: `NoteChange.note` and `.before` (the hub tracks the text, which costs one `toJSON` per change). The order contract: observe() replays `shared` for notes that are shared; unsubscribe runs their stops; no `changed` after dispose.
+- F1.3: `yami.animate` is a bound arrow field. No `presence()` factory.
+- F1.4: the README table. Bug fixed: the SessionSlot fast path cleared the idle timer and never re-armed it. `renamed`/`removed`/`agentsChanged` are private now, through `NoteSessionsHost.follow(events)` (BREAK).
+- F1.5: `<manifest.name> has no agents. Add one in its settings.` only in commands.ts. API errors keep "Yami has no agents."
+- Audit: the CHANGELOG headings say "runtime agents and options", not the slug.
+
+Watch next round:
+- Not verified: the composer's `render` reads `controller.registered`, which throws when no agents are left. An open conversation note after `setAgents([])` may break. Write a test with a real composer before you fix it.
+- The consumer may want `TFile` in `setup`. I gave a path on purpose.
+- Retired agents still never prune. The showcase has no use of noteSessions or animate (Policy item).

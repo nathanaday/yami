@@ -99,16 +99,44 @@ describe("the hub's feed of changes", () => {
     type(note, note.content.length, "!");
     note.applyOps([{ from: 0, to: 0, insert: "> " }], peer.writer);
     expect(changes).toEqual([
-      { path: "Note.md", ops: [{ from: 4, to: 9, insert: "slow" }], agent: { name: "claude", color: "#d97757" } },
-      { path: "Note.md", ops: [{ from: 12, to: 12, insert: "!" }] },
-      { path: "Note.md", ops: [{ from: 0, to: 0, insert: "> " }], agent: { name: "claude", color: "#d97757" } },
+      { note, path: "Note.md", ops: [{ from: 4, to: 9, insert: "slow" }], before: "The quick fox", agent: { name: "claude", color: "#d97757" } },
+      { note, path: "Note.md", ops: [{ from: 12, to: 12, insert: "!" }], before: "The slow fox" },
+      { note, path: "Note.md", ops: [{ from: 0, to: 0, insert: "> " }], before: "The slow fox!", agent: { name: "claude", color: "#d97757" } },
     ]);
+    for (const change of changes.slice(0, -1)) expect(applyOps(change.before, change.ops)).toBe(changes[changes.indexOf(change) + 1]!.before);
     expect(error).toHaveBeenCalledTimes(3);
     error.mockRestore();
     stop();
     type(note, 0, "x");
     expect(changes).toHaveLength(3);
     hub.destroy();
+  });
+
+  it("gives each observer shared, then the changes, then the stop, also an observer that starts while a note is shared", async () => {
+    vi.useFakeTimers();
+    const hub = new CollabHub({ vault: { adapter: { read: async () => "a" }, modify: async () => undefined } } as never);
+    const heard: string[] = [];
+    const observer = (name: string) => ({
+      shared: (note: SharedNote) => {
+        heard.push(`${name} shared ${note.path}`);
+        return () => heard.push(`${name} stop ${note.path}`);
+      },
+      changed: ({ before }: NoteChange) => void heard.push(`${name} changed ${before}`),
+    });
+    hub.observe(observer("first"));
+    const holder = {};
+    const note = await hub.acquire(file, holder);
+    type(note, 1, "b");
+    const stopLate = hub.observe(observer("late"));
+    type(note, 2, "c");
+    stopLate();
+    type(note, 3, "d");
+    hub.release(note, holder);
+    vi.runAllTimers();
+    type(note, 4, "e");
+    expect(heard).toEqual(["first shared Note.md", "first changed a", "late shared Note.md", "first changed ab", "late changed ab", "late stop Note.md", "first changed abc", "first stop Note.md"]);
+    hub.destroy();
+    vi.useRealTimers();
   });
 });
 

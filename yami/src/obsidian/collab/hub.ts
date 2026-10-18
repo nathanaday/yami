@@ -24,21 +24,31 @@ export interface DiskWriter {
 
 /** One change to the text of a shared note. */
 export interface NoteChange {
+  /** The note, as `shared` got it. Its `content` is the text after the change. */
+  note: SharedNote;
   /** The path of the note now. */
   path: string;
-  /** The changes, in ascending order, on the text before the change. */
+  /** The changes, in ascending order, on `before`. */
   ops: TextOp[];
+  /** The text of the note before the change. */
+  before: string;
   /** The agent that made the change: an edit, a write of its tools, or its own output such as a reply. None for the person's typing and for another program's write. */
   agent?: AgentIdentity;
 }
 
-/** Follows the hub's notes, for example to record what agents wrote. Each member is optional. */
+/**
+ * Follows the hub's notes, for example to record what agents wrote. Each member is optional. For each note,
+ * an observer hears `shared` first, then `changed` for each change, then the function that `shared` gave.
+ */
 export interface HubObserver {
-  /** A note became shared. The returned function runs when the note stops being shared. */
+  /**
+   * A note became shared, or was shared when the observer started. The returned function runs when the note
+   * stops being shared, or when the observer stops.
+   */
   shared?(note: SharedNote): () => void;
   /** A writer created a note with its own tools. `text` is the note's text at creation. */
   created?(file: TFile, text: string, writer: DiskWriter): void;
-  /** The text of a shared note changed. */
+  /** The text of a shared note changed. It comes after `shared` of the note, and before the function that `shared` gave. */
   changed?(change: NoteChange): void;
 }
 
@@ -67,7 +77,8 @@ export class CollabHub implements BindingHost {
   private follows = 0;
   private readonly restore: (() => void)[] = [];
   private readonly observers = new Set<HubObserver>();
-  private readonly detach = new Map<SharedNote, (() => void)[]>();
+  /** For each shared note, the function that each observer's `shared` gave. */
+  private readonly detach = new Map<SharedNote, Map<HubObserver, () => void>>();
 
   constructor(private readonly app: App) {}
 
@@ -150,14 +161,42 @@ export class CollabHub implements BindingHost {
   }
 
   /**
-   * Follows the shared notes: each note that becomes shared, each note that a writer creates, and each change
-   * to the text of a shared note, with the agent that made it. Returns the function that stops it.
+   * Follows the shared notes: each note that is or becomes shared, each note that a writer creates, and each
+   * change to the text of a shared note, with the text before it and the agent that made it. Returns the
+   * function that stops it, which also runs the function that `shared` gave for each note that is shared then.
+   * An error in an observer goes to the console, and the other observers still hear the change.
    * @example
-   * hub.observe({ changed: ({ path, ops, agent }) => agent && record(path, ops, agent.name) });
+   * hub.observe({ changed: ({ note, ops, before, agent }) => agent && ledger.record(note, before, ops, agent.name) });
    */
   observe(observer: HubObserver): () => void {
     this.observers.add(observer);
-    return () => this.observers.delete(observer);
+    for (const note of this.detach.keys()) this.attach(note, observer);
+    return () => {
+      if (!this.observers.delete(observer)) return;
+      for (const stops of this.detach.values()) {
+        const stop = stops.get(observer);
+        stops.delete(observer);
+        this.run(() => stop?.());
+      }
+    };
+  }
+
+  /** Tells an observer that a note is shared, and keeps the function that it gives back. */
+  private attach(note: SharedNote, observer: HubObserver): void {
+    if (!observer.shared) return;
+    this.run(() => {
+      const stop = observer.shared!(note);
+      if (typeof stop === "function") this.detach.get(note)?.set(observer, stop);
+    });
+  }
+
+  /** Runs an observer's code, and sends its error to the console. */
+  private run(call: () => void): void {
+    try {
+      call();
+    } catch (error) {
+      console.error("Yami: a hub observer failed", error);
+    }
   }
 
   /** While a writer is registered, its disk changes play as its edits, and open notes are shared. */
@@ -207,29 +246,27 @@ export class CollabHub implements BindingHost {
       author: (target) => this.author(target),
     });
     this.notes.set(file.path, note);
-    this.detach.set(
-      note,
-      [...this.observers].flatMap((observer) => (observer.shared ? [observer.shared(note)] : [])),
-    );
+    this.detach.set(note, new Map());
+    for (const observer of [...this.observers]) this.attach(note, observer);
     note.doc.on("update", (_update: Uint8Array, origin: unknown) => {
       if (origin !== DISK_ORIGIN) this.scheduleSave(note);
     });
-    note.text.observe((event, transaction) => this.changed(note, deltaOps(event.delta), transaction.origin));
+    let text = note.content;
+    note.text.observe((event, transaction) => {
+      const before = text;
+      text = note.content;
+      this.changed(note, deltaOps(event.delta), before, transaction.origin);
+    });
     for (const binding of this.bindings) if (binding.file === file) binding.refresh();
     return note;
   }
 
-  private changed(note: SharedNote, ops: TextOp[], origin: unknown): void {
-    if (!ops.length) return;
+  private changed(note: SharedNote, ops: TextOp[], before: string, origin: unknown): void {
+    // A note that stopped being shared can still change while its last save runs; no observer hears it.
+    if (!ops.length || !this.detach.has(note)) return;
     const peer = AgentPeer.of(origin);
-    const change: NoteChange = { path: note.path, ops, ...(peer && { agent: { name: peer.identity.name, color: peer.identity.color } }) };
-    for (const observer of [...this.observers]) {
-      try {
-        observer.changed?.(change);
-      } catch (error) {
-        console.error("Yami: a hub observer failed", error);
-      }
-    }
+    const change: NoteChange = { note, path: note.path, ops, before, ...(peer && { agent: { name: peer.identity.name, color: peer.identity.color } }) };
+    for (const observer of [...this.observers]) this.run(() => observer.changed?.(change));
   }
 
   /** Shares a note that a writer created, so its later changes merge as the writer's edits. */
@@ -286,8 +323,9 @@ export class CollabHub implements BindingHost {
 
   private dispose(note: SharedNote): void {
     if (this.notes.get(note.path) === note) this.notes.delete(note.path);
-    for (const detach of this.detach.get(note) ?? []) detach();
+    const stops = this.detach.get(note);
     this.detach.delete(note);
+    for (const stop of stops?.values() ?? []) this.run(stop);
     window.clearTimeout(this.lingering.get(note));
     this.lingering.delete(note);
     this.holders.delete(note);

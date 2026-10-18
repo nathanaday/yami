@@ -212,7 +212,7 @@ The modules in `obsidian_plugin/src/modules/` are built on the public API, as an
 1. Every conversation with an agent is a conversation note in `conversations/`, whatever started it: a person, a module session, or another plugin. The note is the record.
 2. While an agent works in the vault, every note that it changes is a shared document. The agent's changes merge with the user's typing, show the agent's cursor, and can be undone as one step for each turn. No agent writes a note that is open in an editor behind the user's back.
 3. One Obsidian window has one hub. A plugin that bundles its own hub would double-bind every editor, so plugins share the hub through `installCollab`.
-4. A host's agent work outside conversation notes and runs shows the same: `addWork` puts it in the status bar and under the Stop command, and `noteSessions` gives one harness session for each note and agent. A conversation note uses the same session mechanism. `hub.observe` reports each change to a shared note, with the agent that made it.
+4. A host's agent work outside conversation notes and runs shows the same: `addWork` puts it in the status bar and under the Stop command, and `noteSessions` gives one harness session for each note and agent. A conversation note uses the same session mechanism. `hub.observe` reports each change to a shared note, with the note, the text before the change, and the agent that made it, between the note's `shared` and its stop.
 
 ## The loop
 
