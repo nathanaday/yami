@@ -168,6 +168,16 @@ describe("a run of the agent loop", () => {
     expect(await vault.read(path)).toContain("the module's own check");
   });
 
+  it("writes a check's detail on the one line of its deliverable, also a detail with a heading line", async () => {
+    class Own extends Hello {
+      readonly id = "own";
+      readonly checks = { exists: async () => ({ status: "met" as const, detail: "first\n## Progress\nlast" }) };
+    }
+    const { session, vault, path } = await fresh("own", new Own(), [() => {}, review()]);
+    expect((await session.start({ maxIterations: 1 })).state).toBe("done");
+    expect(await vault.read(path)).toContain("— first ## Progress last\n");
+  });
+
   it("refuses a document that is no session, of a module the Yami lacks, or naming a flow the module lacks", async () => {
     const { yami, vault } = await fresh("x");
     await vault.write("plain.md", "No properties.\n");

@@ -32,16 +32,25 @@ function turn(prompt) {
     assistant([{ type: 'text', text: process.argv.slice(2).join(' ') }]);
     return result(process.argv.slice(2).join(' '));
   }
+  // `env <names>`: the reply is those variables of the CLI's environment, as JSON.
+  if (prompt.startsWith('env ')) {
+    const text = JSON.stringify(Object.fromEntries(prompt.split(' ').slice(1).map((name) => [name, process.env[name]])));
+    assistant([{ type: 'text', text }]);
+    return result(text);
+  }
   // `permit <tool> <json input>`: Claude Code asks the SDK whether the tool may run, and the reply is the answer.
-  const permit = /^permit (\S+) (.*)$/s.exec(prompt);
+  // `permit-input` replies with the input that the answer lets the tool run with.
+  const permit = /^permit(-input)? (\S+) (.*)$/s.exec(prompt);
   if (permit) {
     const request_id = `p-${++request}`;
     waiting.set(request_id, (answer) => {
-      const text = `permission: ${answer.behavior}${answer.message ? `: ${answer.message}` : ''}`;
+      const text = permit[1]
+        ? `permission: ${answer.behavior} ${JSON.stringify(answer.updatedInput)}`
+        : `permission: ${answer.behavior}${answer.message ? `: ${answer.message}` : ''}`;
       assistant([{ type: 'text', text }]);
       result(text);
     });
-    return send({ type: 'control_request', request_id, request: { subtype: 'can_use_tool', tool_name: permit[1], input: JSON.parse(permit[2]), tool_use_id: `t-${request_id}` } });
+    return send({ type: 'control_request', request_id, request: { subtype: 'can_use_tool', tool_name: permit[2], input: JSON.parse(permit[3]), tool_use_id: `t-${request_id}` } });
   }
   // `bad-result`: a result with no usage, which the adapter cannot read.
   if (prompt === 'bad-result') return send({ type: 'result', subtype: 'success', is_error: false, result: '', session_id, uuid: 'r' });

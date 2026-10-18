@@ -144,7 +144,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
       return;
     case 'thread/start':
       instructions = params.developerInstructions;
-      Object.assign(setup, { sandbox: params.sandbox, approvalPolicy: params.approvalPolicy, dynamicTools: params.dynamicTools });
+      Object.assign(setup, { sandbox: params.sandbox, permissions: params.permissions, approvalPolicy: params.approvalPolicy, dynamicTools: params.dynamicTools, args: process.argv.slice(2) });
       return send({ id, result: { thread: { id: THREAD }, model: 'fake', cwd: params.cwd } });
     case 'thread/resume':
       if (params.threadId !== THREAD) {

@@ -129,6 +129,12 @@ function sectionLines(lines: string[], heading: string): [number, number] | unde
   return [start, end === -1 ? lines.length : end];
 }
 
+/** Throws when the content for a `## heading` section holds a line that starts with `## `. */
+export function checkSection(heading: string, content: string): void {
+  const line = /^## .*$/m.exec(content)?.[0];
+  if (line) throw new Error(`The text for the ${heading} section holds the heading line "${line.trim()}", which would start a section of its own. Write it as plain text, or as a ### heading.`);
+}
+
 /** The content of a `## heading` section, trimmed, without the heading. Empty when the body has none. */
 export function sectionText(body: string, heading: string): string {
   const lines = body.split("\n");
@@ -136,8 +142,12 @@ export function sectionText(body: string, heading: string): string {
   return span ? lines.slice(span[0] + 1, span[1]).join("\n").trim() : "";
 }
 
-/** Replaces the `## heading` section of a body, or appends it. The content has no heading. */
+/**
+ * Replaces the `## heading` section of a body, or appends it. The content has no heading. It throws on content
+ * with a line that starts with `## `, which would start a section of its own.
+ */
 export function replaceSection(body: string, heading: string, content: string): string {
+  checkSection(heading, content);
   const section = `## ${heading}\n${content.replace(/\n+$/, "")}\n`;
   const lines = body.split("\n");
   const span = sectionLines(lines, heading);

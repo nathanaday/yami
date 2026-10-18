@@ -26,6 +26,7 @@ import type {
 } from "./codex-protocol.js";
 import { findExecutables, harnessEnv, pathDisplay } from "./executable.js";
 import { RpcConnection, RpcError } from "./rpc.js";
+import { createScratch, removeScratch, scratchEnv } from "./scratch.js";
 import { type ActiveTurn, askPermission, BaseSession } from "./session.js";
 import { isSkillRead, setSkills, skillList, skillTurn, slashCommand } from "./skills.js";
 import {
@@ -46,7 +47,7 @@ export interface CodexSessionOptions extends SessionOptions {
   webSearch?: "disabled" | "cached" | "live";
   /** Lets shell commands use the network without asking. Defaults to the Codex configuration. */
   networkAccess?: boolean;
-  /** Raw `key=value` TOML entries, each sent to `codex app-server` as `--config`. */
+  /** Raw `key=value` TOML entries, each sent to `codex app-server` as `--config`. A read-only session sends its own after them. */
   config?: string[];
 }
 
@@ -72,6 +73,8 @@ const CLIENT_VERSION = "0.1.0";
 const STDERR_LIMIT = 4096;
 /** After stdin closes, the server gets this long to exit before SIGINT, and as long again before SIGKILL. */
 const STOP_GRACE_MS = 2000;
+/** The permissions profile of a read-only session: it reads everything and writes only its scratch folder. */
+const READ_ONLY_PROFILE = "yami-read-only";
 
 const DECISIONS: Record<PermissionDecision, ApprovalDecision> = {
   allow: "accept",
@@ -128,6 +131,23 @@ export class CodexAgent extends Agent<CodexPreferences> {
 
 function serverArgs(config: string[] = []): string[] {
   return ["app-server", "--stdio", ...config.flatMap((entry) => ["--config", entry])];
+}
+
+/**
+ * The server configuration of a read-only session: a permissions profile that reads everything and writes only the
+ * scratch folder, and the variables of `scratchEnv` for its commands. Codex's read-only sandbox writes nowhere, and
+ * its workspace sandbox always writes the working directory. Codex resolves a profile only from the server's
+ * configuration, not from a thread's, and a server with profiles needs `default_permissions`. It comes after the
+ * host's `config`, so the host cannot lift read-only.
+ */
+function readOnlyConfig(scratch: string | undefined): string[] {
+  if (!scratch) return [];
+  const toml = JSON.stringify;
+  return [
+    `default_permissions=${toml(READ_ONLY_PROFILE)}`,
+    `permissions.${READ_ONLY_PROFILE}.filesystem={${toml(":root")}=${toml("read")}, ${toml(scratch)}=${toml("write")}}`,
+    ...Object.entries(scratchEnv(scratch)).map(([key, value]) => `shell_environment_policy.set.${key}=${toml(value)}`),
+  ];
 }
 
 export async function startCodexSession(options: CodexSessionOptions): Promise<CodexSession> {
@@ -217,6 +237,8 @@ export class CodexSession extends BaseSession {
   private settings: SessionSettings = {};
   private skills: Promise<Skill[]> | undefined;
   private readonly showPath: (file: string) => string;
+  /** The one folder that a read-only session's commands write. It goes when the session closes. */
+  private readonly scratch: string | undefined;
 
   constructor(
     private readonly options: CodexSessionOptions,
@@ -226,6 +248,7 @@ export class CodexSession extends BaseSession {
     super();
     this.showPath = pathDisplay(options.cwd);
     for (const appTool of options.tools?.tools ?? []) this.appTools.set(appTool.name, appTool);
+    this.scratch = options.access === "read-only" ? createScratch() : undefined;
   }
 
   get id(): string {
@@ -239,7 +262,7 @@ export class CodexSession extends BaseSession {
 
   /** Starts a server and starts the thread, or resumes `resumeId`. */
   private async open(resumeId?: string): Promise<void> {
-    const server = new AppServer(this.executable, serverArgs(this.options.config), this.options.cwd, this.env, {
+    const server = new AppServer(this.executable, serverArgs([...(this.options.config ?? []), ...readOnlyConfig(this.scratch)]), this.options.cwd, this.env, {
       onNotification: (method, params) => {
         if (server === this.server) this.handleNotification(method, params);
       },
@@ -252,13 +275,13 @@ export class CodexSession extends BaseSession {
     });
     const name = this.options.clientName;
     const { tools } = this.options;
+    const readOnly = this.options.access === "read-only";
     await server.rpc.request("initialize", {
       clientInfo: { name, title: name, version: CLIENT_VERSION },
-      // Dynamic tools are part of the experimental API.
-      capabilities: tools ? { experimentalApi: true, requestAttestation: false } : null,
+      // Dynamic tools and permissions profiles are part of the experimental API.
+      capabilities: tools || readOnly ? { experimentalApi: true, requestAttestation: false } : null,
     });
     server.rpc.notify("initialized");
-    const readOnly = this.options.access === "read-only";
     const config: Record<string, unknown> = {
       // Writes to /tmp and $TMPDIR count as outside the working directory.
       "sandbox_workspace_write.exclude_slash_tmp": true,
@@ -272,7 +295,7 @@ export class CodexSession extends BaseSession {
       approvalPolicy: readOnly ? "never" : codexApprovalPolicy(this.options.approval ?? "ask"),
       // Approvals go to the user, not to an automatic reviewer that a user configuration can select.
       approvalsReviewer: "user",
-      sandbox: readOnly ? "read-only" : "workspace-write",
+      ...(readOnly ? { permissions: READ_ONLY_PROFILE } : { sandbox: "workspace-write" }),
       // Skill sets are listed here, not as Codex extra skill roots: from a root, Codex reads a skill it chose with a
       // command that asks for approval under `ask`, and sometimes from a wrong path. See isSkillRead.
       developerInstructions: [this.options.instructions, skillList(setSkills(this.options.skills ?? []))].filter(Boolean).join("\n\n") || null,
@@ -407,6 +430,7 @@ export class CodexSession extends BaseSession {
     this.server = undefined;
     this.markClosed();
     await server?.stop();
+    removeScratch(this.scratch);
   }
 
   private async requestInterrupt(): Promise<void> {
@@ -420,6 +444,7 @@ export class CodexSession extends BaseSession {
   private shutdown(error?: string): void {
     this.server?.rpc.close(new Error(error ?? "Session closed"));
     this.markClosed(error);
+    removeScratch(this.scratch);
   }
 
   private exitMessage(server: AppServer, code: number | null, signal: NodeJS.Signals | null): string | undefined {

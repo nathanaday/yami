@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -144,6 +144,14 @@ describe("codex adapter", () => {
     expect(results.map((result) => result.text)).toEqual(["echo: one", "echo: two", "echo: three"]);
   });
 
+  it("removes a read-only session's scratch folder when the process crashes", async () => {
+    session = await startCodexSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, access: "read-only" });
+    const { args } = JSON.parse((await session.send("setup")).text) as { args: string[] };
+    const scratch = /"(\/tmp\/yami-read-only-[^"]+)"="write"/.exec(args.join("\n"))![1]!;
+    expect((await session.send("crash")).status).toBe("failed");
+    expect(existsSync(scratch)).toBe(false);
+  });
+
   it("fails the turn and closes the session when the process crashes", async () => {
     const { session, events } = await start();
     const result = await session.send("crash");
@@ -248,16 +256,41 @@ describe("codex adapter", () => {
     expect(JSON.parse((await session.send("tool")).text)).toEqual({ contentItems: [{ type: "inputText", text: "no note" }], success: false });
   });
 
-  it("runs read-only without approvals", async () => {
-    session = await startCodexSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, access: "read-only" });
+  it("runs read-only without approvals, in a profile that writes only its scratch folder, which goes when the session closes", async () => {
+    // The host's config comes first, so a later entry of the adapter wins over it.
+    const config = ['default_permissions=":workspace"'];
+    session = await startCodexSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, access: "read-only", config });
     const setup = JSON.parse((await session.send("setup")).text);
-    expect(setup).toMatchObject({ sandbox: "read-only", approvalPolicy: "never", capabilities: null });
+    expect(setup).toMatchObject({ permissions: "yami-read-only", approvalPolicy: "never", capabilities: { experimentalApi: true } });
+    expect(setup.sandbox).toBeUndefined();
+    const entries = (setup.args as string[]).filter((_, index, args) => args[index - 1] === "--config");
+    const scratch = /"(\/tmp\/yami-read-only-[^"]+)"="write"/.exec(entries.join("\n"))?.[1];
+    expect(scratch).toBeDefined();
+    expect(existsSync(scratch!)).toBe(true);
+    expect(entries).toEqual([
+      'default_permissions=":workspace"',
+      'default_permissions="yami-read-only"',
+      `permissions.yami-read-only.filesystem={":root"="read", "${scratch}"="write"}`,
+      `shell_environment_policy.set.TMPDIR="${scratch}"`,
+      `shell_environment_policy.set.TMP="${scratch}"`,
+      `shell_environment_policy.set.TEMP="${scratch}"`,
+      `shell_environment_policy.set.XDG_CACHE_HOME="${scratch}/cache"`,
+      `shell_environment_policy.set.GOCACHE="${scratch}/go-build"`,
+      `shell_environment_policy.set.GOTMPDIR="${scratch}"`,
+      `shell_environment_policy.set.npm_config_cache="${scratch}/npm"`,
+      `shell_environment_policy.set.PYTHONPYCACHEPREFIX="${scratch}/pycache"`,
+      `shell_environment_policy.set.CARGO_TARGET_DIR="${scratch}/cargo-target"`,
+    ]);
+    await session.close();
+    expect(existsSync(scratch!)).toBe(false);
   });
 
   it("sends approvals to the user and asks before every command by default", async () => {
     session = await startCodexSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE });
     const setup = JSON.parse((await session.send("setup")).text);
     expect(setup).toMatchObject({ sandbox: "workspace-write", approvalPolicy: "untrusted" });
+    expect(setup.permissions).toBeUndefined();
+    expect(setup.args).toEqual(["app-server", "--stdio"]);
   });
 
   it("streams reasoning summaries as thinking", async () => {

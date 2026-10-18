@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { clearTimeout, setTimeout } from "node:timers";
@@ -26,6 +26,7 @@ import { claudePermissionMode } from "./approval.js";
 import { AsyncQueue } from "./async-queue.js";
 import { lineDiff } from "./diff.js";
 import { findExecutables, harnessEnv, pathDisplay } from "./executable.js";
+import { createScratch, removeScratch, scratchEnv } from "./scratch.js";
 import { askPermission, BaseSession } from "./session.js";
 import { setAgents } from "./skills.js";
 import {
@@ -78,11 +79,12 @@ export interface ClaudeAgentOptions {
 
 const STDERR_LIMIT = 4096;
 /**
- * A read-only session's tools. Bash runs in the sandbox of `readOnlySandbox`, which writes only in `/tmp`.
+ * A read-only session's tools. Bash runs in the sandbox of `readOnlySandbox`, which writes only in the session's scratch folder.
  * A subagent inherits its parent's tools and sandbox, so its workers are read-only too.
  */
 const READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "Bash", "WebSearch", "WebFetch", "Agent"];
-const READ_ONLY_DENIAL = "This session is read-only, so it asks for nothing. Run only commands that read or check, one at a time, such as git log or the tests.";
+const READ_ONLY_DENIAL = "This session is read-only, so it asks for nothing. Run only commands that read or check, such as git log or the tests.";
+const UNSANDBOXED_DENIAL = "The user's settings run this command outside the sandbox, so a read-only session does not run it.";
 const FILE_TOOLS = new Set(["Read", "Edit", "Write", "NotebookEdit"]);
 /** Built-in tools that change a file, matched by a PreToolUse hook. */
 const FILE_CHANGE_TOOLS = "Edit|MultiEdit|Write|NotebookEdit";
@@ -173,6 +175,12 @@ export class ClaudeSession extends BaseSession {
   private readonly answers = new Map<string, string>();
   private stallTimer: ReturnType<typeof setTimeout> | undefined;
   private stalled = false;
+  /** The one folder that a read-only session's commands write. It goes when the CLI exits. */
+  private readonly scratch: string | undefined;
+  /** Settles when the CLI's messages end, so when it has exited. */
+  private pumped: Promise<void> = Promise.resolve();
+  /** The commands that the user's settings run outside the sandbox, as Bash rule patterns. A read-only session denies them. */
+  private readonly unsandboxed: string[];
 
   constructor(
     private readonly options: ClaudeSessionOptions,
@@ -186,13 +194,16 @@ export class ClaudeSession extends BaseSession {
     for (const appTool of tools?.tools ?? []) this.appTools.set(`mcp__${tools!.name}__${appTool.name}`, appTool);
     const readOnly = options.access === "read-only";
     const settingSources = options.settingSources ?? ["user", "project", "local"];
-    const unsandboxed = readOnly && settingSources.includes("user") ? unsandboxedCommands(env) : [];
-    const hidden = [...setAgents(options.skills ?? []).map((name) => `Agent(${name})`), ...unsandboxed.map((pattern) => `Bash(${pattern})`)];
+    this.unsandboxed = readOnly && settingSources.includes("user") ? unsandboxedCommands(env) : [];
+    const hidden = [...setAgents(options.skills ?? []).map((name) => `Agent(${name})`), ...this.unsandboxed.map((pattern) => `Bash(${pattern})`)];
+    this.scratch = readOnly ? createScratch() : undefined;
     this.query = query({
       prompt: this.input,
       options: {
         cwd: options.cwd,
-        env,
+        // Claude Code keeps its own temporary folder in CLAUDE_CODE_TMPDIR, and gives sandboxed commands a TMPDIR in it. It
+        // does so only for a path spelled under /tmp: for /private/tmp, the commands get /tmp/claude-<uid>, which the sandbox denies.
+        env: this.scratch ? { ...env, ...scratchEnv(this.scratch), CLAUDE_CODE_TMPDIR: this.scratch } : env,
         pathToClaudeCodeExecutable: executable,
         model: options.model,
         ...(options.effort && { effort: options.effort as EffortLevel }),
@@ -213,7 +224,7 @@ export class ClaudeSession extends BaseSession {
         ...(options.resume ? { resume: options.resume } : { sessionId: this.id }),
         ...options.sdkOptions,
         // Read-only is a limit, so it comes after the host's options. The Skill tool is not a built-in tool of the list; the skills option turns it on.
-        ...(readOnly && { tools: READ_ONLY_TOOLS, skills: "all" as const, sandbox: readOnlySandbox(options.cwd ?? process.cwd()) }),
+        ...(readOnly && { tools: READ_ONLY_TOOLS, skills: "all" as const, sandbox: readOnlySandbox(this.scratch!, options.cwd ?? process.cwd()) }),
         ...(tools &&
           options.sdkOptions?.mcpServers && {
             mcpServers: { ...options.sdkOptions.mcpServers, [tools.name]: this.toolServer(tools) },
@@ -268,10 +279,10 @@ export class ClaudeSession extends BaseSession {
   }
 
   async start(): Promise<void> {
-    const pump = this.pump();
+    this.pumped = this.pump();
     this.info = await Promise.race([
       this.query.initializationResult(),
-      pump.then(() => {
+      this.pumped.then(() => {
         throw new Error(this.closeMessage("Claude Code exited during startup"));
       }),
     ]);
@@ -298,6 +309,7 @@ export class ClaudeSession extends BaseSession {
     this.markClosed();
     this.input.end();
     this.query.close();
+    await this.pumped;
   }
 
   async models(): Promise<ModelOption[]> {
@@ -346,6 +358,7 @@ export class ClaudeSession extends BaseSession {
     }
     clearTimeout(this.stallTimer);
     this.markClosed(error ?? (this.closed ? undefined : this.closeMessage("Claude Code exited")));
+    removeScratch(this.scratch);
   }
 
   private closeMessage(reason: string): string {
@@ -448,8 +461,14 @@ export class ClaudeSession extends BaseSession {
 
   private readonly canUseTool: CanUseTool = async (toolName, input, { signal, suggestions, toolUseID }) => {
     if (this.appTools.has(toolName)) return { behavior: "allow", updatedInput: input };
-    // Claude Code asks before some commands in its sandbox too, such as a loop, and before a command that its settings run outside it.
-    if (this.options.access === "read-only") return { behavior: "deny", message: READ_ONLY_DENIAL };
+    if (this.options.access === "read-only") {
+      // Claude Code asks before some commands that run in its sandbox, such as `VAR=x cmd`, and the sandbox is the limit of
+      // such a command. It also asks before a command that the user's settings run outside the sandbox.
+      if (toolName !== "Bash") return { behavior: "deny", message: READ_ONLY_DENIAL };
+      if (this.leavesSandbox(input.command)) return { behavior: "deny", message: UNSANDBOXED_DENIAL };
+      const { dangerouslyDisableSandbox: _, ...command } = input;
+      return { behavior: "allow", updatedInput: command };
+    }
     if (toolName === "AskUserQuestion") return this.askQuestions(input, signal, toolUseID);
     // A new approval mode can approve this request. Claude Code decides again when the agent retries it.
     const retry = new AbortController();
@@ -479,6 +498,12 @@ export class ClaudeSession extends BaseSession {
           };
     return result;
   };
+
+  /** Whether a command names a command that the user's settings run outside the sandbox. It errs toward yes. */
+  private leavesSandbox(command: unknown): boolean {
+    const words = new Set(String(command ?? "").split(/[^\w.+-]+/));
+    return this.unsandboxed.some((pattern) => words.has(pattern.split(/[\s:*(]/)[0]!));
+  }
 
   private async askQuestions(input: Record<string, unknown>, signal: AbortSignal, toolUseID: string): Promise<PermissionResult> {
     const { onQuestion } = this.options;
@@ -535,17 +560,57 @@ export class ClaudeSession extends BaseSession {
 }
 
 /**
- * Commands of a read-only session run in Claude Code's sandbox and may not leave it. A setting of the user
- * or the project, such as an `Edit(…)` allow rule or `sandbox.filesystem.allowWrite`, can let the sandbox
- * write a folder; a denial wins over it. So the sandbox denies every folder of the root but `/tmp` (where
- * Claude Code keeps its own temporary folder) and `/dev` (for `/dev/null`), and the working directory and
- * the home folder by name. Where Claude Code has no sandbox, the session does not start.
+ * Commands of a read-only session run in Claude Code's sandbox and may not leave it. They write only the
+ * session's scratch folder, which holds Claude Code's own temporary folder too. A setting of the user, such
+ * as an `Edit(…)` allow rule or `sandbox.filesystem.allowWrite`, can let the sandbox write a folder, and
+ * the sandbox writes the working directory and a few folders of its own by default; a denial wins over
+ * each. So the sandbox denies by name every folder beside the scratch folder's path from the root, and the
+ * defaults. Where Claude Code has no sandbox, the session does not start.
  */
-function readOnlySandbox(cwd: string): Options["sandbox"] {
-  const children = (folder: string) => (existsSync(folder) ? readdirSync(folder).map((name) => join(folder, name)) : []);
-  const open = new Set(["/tmp", "/dev", "/private", "/private/tmp"]);
-  const denyWrite = [cwd, homedir(), ...[...children("/"), ...children("/private")].filter((folder) => !open.has(folder))];
-  return { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false, filesystem: { denyWrite } };
+function readOnlySandbox(scratch: string, cwd: string): Options["sandbox"] {
+  const real = realPath(scratch);
+  const defaults = [cwd, homedir(), "/tmp/claude", "/private/tmp/claude"].filter((path) => !holds(realPath(path), real));
+  const denyWrite = [...new Set([...defaults, ...foldersBeside([real, "/dev"])])];
+  return { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false, filesystem: { allowWrite: [scratch], denyWrite } };
+}
+
+/** Each entry of each folder on the paths from the root to `open` that is not on those paths: what a deny list names to leave only `open`. */
+function foldersBeside(open: string[]): string[] {
+  const beside: string[] = [];
+  const seen = new Set<string>();
+  const walk = (folder: string) => {
+    if (seen.has(folder)) return;
+    seen.add(folder);
+    for (const name of entries(folder)) {
+      const path = join(folder, name);
+      const real = realPath(path);
+      if (open.includes(real)) continue;
+      if (open.some((target) => holds(real, target))) walk(real);
+      else beside.push(path);
+    }
+  };
+  walk("/");
+  return beside;
+}
+
+function holds(folder: string, path: string): boolean {
+  return path === folder || path.startsWith(folder.endsWith("/") ? folder : `${folder}/`);
+}
+
+function entries(folder: string): string[] {
+  try {
+    return readdirSync(folder);
+  } catch {
+    return [];
+  }
+}
+
+function realPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 /**

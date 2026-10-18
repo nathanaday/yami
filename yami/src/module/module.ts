@@ -140,7 +140,7 @@ export interface FlowOptions {
   fields?: Properties;
   /** Agent turns in one run. Default 3. */
   maxIterations?: number;
-  /** `read-only`: the agent changes no file except through the tools, and runs only commands that write nothing. Default `edit`. */
+  /** `read-only`: the agent changes no file except through the tools, and its commands write only a scratch folder of their own. Default `edit`. */
   access?: "edit" | "read-only";
   /** Text added to the first prompt of a run, after the module's own instructions. */
   instructions?: string;

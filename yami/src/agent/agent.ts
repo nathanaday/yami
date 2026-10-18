@@ -14,7 +14,7 @@ export interface AgentPreferences {
   instructions?: string;
   /** When the agent asks before it acts. Defaults to `ask`. */
   approval?: ApprovalSetting;
-  /** `read-only` stops the agent from changing files, also with a command; it still runs commands that only read or check. */
+  /** `read-only` stops the agent from changing files, also with a command; it still runs commands that only read or check. See `SessionOptions.access`. */
   access?: "edit" | "read-only";
 }
 

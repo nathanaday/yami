@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,8 +74,8 @@ describe("claude adapter", () => {
     expect(asked).toEqual(["Bash"]);
   });
 
-  it("runs a read-only session's commands in a sandbox that writes neither in the working directory nor in the home folder, and denies each request without asking", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "yami-read-only-"));
+  it("runs a read-only session's commands in a sandbox that writes only its scratch folder, and removes the folder when the session closes", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "yami-read-only-vault-"));
     try {
       const asked: string[] = [];
       session = await startClaudeSession({
@@ -93,20 +93,48 @@ describe("claude adapter", () => {
       const settings = JSON.parse(/--settings (\{.*\})(?= --|$)/.exec(text)?.[1] ?? "{}");
       const { filesystem, ...sandbox } = settings.sandbox;
       expect(sandbox).toEqual({ enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false });
-      // Every folder of the root is denied, so no setting of the user or the project lets a command write there: /tmp and /dev stay open.
-      const root = readdirSync("/").map((name) => `/${name}`);
-      expect(filesystem.denyWrite.slice(0, 2)).toEqual([cwd, homedir()]);
-      expect(filesystem.denyWrite).toEqual(expect.arrayContaining(root.filter((folder) => !["/tmp", "/dev", "/private"].includes(folder))));
-      expect(filesystem.denyWrite).not.toContain("/tmp");
-      expect(filesystem.denyWrite).not.toContain("/private/tmp");
-      expect(filesystem.denyWrite).not.toContain("/dev");
-      expect((await session.send(`permit Bash {"command":"for f in *; do wc -l $f; done"}`)).text).toBe(
-        "permission: deny: This session is read-only, so it asks for nothing. Run only commands that read or check, one at a time, such as git log or the tests.",
-      );
+      const [scratch] = filesystem.allowWrite;
+      expect(scratch).toMatch(/^\/tmp\/yami-read-only-/);
+      expect(existsSync(scratch)).toBe(true);
+      // Each folder beside the path from the root to the scratch folder is denied by name, so no setting lets a command write there.
+      const real = realpathSync(scratch);
+      const beside = (folder: string) => readdirSync(folder).map((name) => join(folder, name));
+      const tmp = realpathSync("/tmp");
+      const open = new Set(["/dev", "/tmp", tmp, real, ...(tmp === "/private/tmp" ? ["/private"] : [])]);
+      expect(filesystem.denyWrite).toEqual(expect.arrayContaining([cwd, homedir(), "/tmp/claude", "/private/tmp/claude"]));
+      expect(filesystem.denyWrite).toEqual(expect.arrayContaining([...beside("/"), ...beside(tmp)].filter((path) => !open.has(path))));
+      for (const path of open) expect(filesystem.denyWrite).not.toContain(path);
+      // Claude Code puts its own temporary folder, and the commands' TMPDIR, in the scratch folder.
+      expect(JSON.parse((await session.send("env CLAUDE_CODE_TMPDIR GOCACHE npm_config_cache")).text)).toEqual({
+        CLAUDE_CODE_TMPDIR: scratch,
+        GOCACHE: join(scratch, "go-build"),
+        npm_config_cache: join(scratch, "npm"),
+      });
+      await session.close();
+      expect(existsSync(scratch)).toBe(false);
       expect(asked).toEqual([]);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
+  });
+
+  it("runs each command that Claude Code asks about in a read-only session's sandbox, and denies every other request, without asking", async () => {
+    const asked: string[] = [];
+    session = await startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: [], access: "read-only", onPermission: async (r) => (asked.push(r.tool), "allow") });
+    expect((await session.send(`permit Bash {"command":"GOCACHE=x go test ./...; echo $?"}`)).text).toBe("permission: allow");
+    expect((await session.send(`permit-input Bash {"command":"for f in *; do wc -l $f; done","dangerouslyDisableSandbox":true}`)).text).toBe(
+      'permission: allow {"command":"for f in *; do wc -l $f; done"}',
+    );
+    expect((await session.send(`permit Read {"file_path":"/etc/hosts"}`)).text).toBe(
+      "permission: deny: This session is read-only, so it asks for nothing. Run only commands that read or check, such as git log or the tests.",
+    );
+    expect(asked).toEqual([]);
+  });
+
+  it("gives an edit session no scratch folder and no sandbox of its own", async () => {
+    session = await startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: [] });
+    expect((await session.send("args")).text).not.toContain('"sandbox"');
+    expect(JSON.parse((await session.send("env CLAUDE_CODE_TMPDIR GOCACHE")).text)).toEqual({ CLAUDE_CODE_TMPDIR: process.env.CLAUDE_CODE_TMPDIR, GOCACHE: process.env.GOCACHE });
   });
 
   it("denies a read-only session each command that the user's settings run outside the sandbox", async () => {
@@ -117,6 +145,12 @@ describe("claude adapter", () => {
         startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: ["user"], env: { CLAUDE_CONFIG_DIR: config }, access });
       session = await open("read-only");
       expect((await session.send("args")).text).toContain("--disallowedTools=Bash(docker *),Bash(make:*) ");
+      // A rule may miss a form of the command, such as one after an assignment, so the session denies a request that names it.
+      expect((await session.send(`permit Bash {"command":"FOO=1 docker ps"}`)).text).toBe(
+        "permission: deny: The user's settings run this command outside the sandbox, so a read-only session does not run it.",
+      );
+      expect((await session.send(`permit Bash {"command":"cd x && /usr/bin/make test; echo $?"}`)).text).toContain("permission: deny: The user's settings");
+      expect((await session.send(`permit Bash {"command":"FOO=1 makeup"}`)).text).toBe("permission: allow");
       await session.close();
       session = await open("edit");
       expect((await session.send("args")).text).not.toContain("--disallowedTools");

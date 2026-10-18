@@ -8,6 +8,14 @@ import { Yami, YamiModule } from "../../src/index.js";
 import { FsVault } from "../../src/testing/index.js";
 
 const TIMEOUT = 180_000;
+const hasGo = (() => {
+  try {
+    execSync("go version", { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 /**
  * Runs the same scenarios against a real harness. `writeRequest` must make the agent ask for approval.
@@ -189,25 +197,58 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
       expect(result.text).toContain("PINEAPPLE");
     });
 
-    it("runs a read-only session's commands that only read or check, and writes nothing with a command or an edit tool", { timeout: TIMEOUT }, async () => {
-      const cwd = mkdtempSync(path.join(tmpdir(), `yami-${harness}-read-only-`));
-      writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "probe", private: true, scripts: { test: "node --test" } }));
-      writeFileSync(path.join(cwd, "sum.test.mjs"), 'import test from "node:test";\nimport assert from "node:assert";\ntest("sums", () => assert.equal(1 + 1, 2));\n');
-      execSync('git init -q && git add . && git -c user.name=yami -c user.email=yami@example.com commit -qm "Add the sum test"', { cwd });
+    /** A vault, and a repository outside it with one commit, for a read-only session's commands. */
+    function readOnlyRepo(files: Record<string, string>) {
+      const vault = mkdtempSync(path.join(tmpdir(), `yami-${harness}-read-only-vault-`));
+      const repo = mkdtempSync(path.join(tmpdir(), `yami-${harness}-read-only-repo-`));
+      for (const [name, text] of Object.entries(files)) writeFileSync(path.join(repo, name), text);
+      execSync('git init -q && git add . && git -c user.name=yami -c user.email=yami@example.com commit -qm "Add the sum test"', { cwd: repo });
+      return { vault, repo };
+    }
+
+    async function runReadOnly(vault: string, steps: string) {
       const requests: PermissionRequest[] = [];
-      const session = await makeAgent(cwd).startSession({ access: "read-only", onPermission: async (request) => (requests.push(request), "allow") });
+      const session = await makeAgent(vault).startSession({ access: "read-only", onPermission: async (request) => (requests.push(request), "allow") });
       sessions.push(session);
       const outputs: string[] = [];
       session.on((event) => event.type === "tool-end" && outputs.push(event.output ?? ""));
-      const result = await session.send(
-        "Run these shell commands, one call each, exactly as written: `git log --oneline`, then `npm test`, then `printf x > written.txt`. Then create the file edited.txt with the text hello, with your file-editing tool. Report what each step gave.",
+      const result = await session.send(`Run these shell commands, one call each, exactly as written, even when one fails: ${steps} Report what each step gave.`);
+      return { result, output: outputs.join("\n"), requests };
+    }
+
+    it("runs a read-only session's tests in a repository outside the vault, a suite that writes a temporary file too, and writes neither the repository nor the vault", { timeout: TIMEOUT }, async () => {
+      const { vault, repo } = readOnlyRepo({
+        "package.json": JSON.stringify({ name: "probe", private: true, scripts: { test: "node --test" } }),
+        "sum.test.mjs":
+          'import test from "node:test";\nimport assert from "node:assert";\nimport { mkdtempSync, writeFileSync } from "node:fs";\nimport { tmpdir } from "node:os";\nimport { join } from "node:path";\n' +
+          'test("sums", () => {\n  writeFileSync(join(mkdtempSync(join(tmpdir(), "sum-")), "out.txt"), "2");\n  assert.equal(1 + 1, 2);\n});\n',
+      });
+      const { result, output, requests } = await runReadOnly(
+        vault,
+        `\`git -C ${repo} log --oneline\`, then \`cd ${repo} && CI=1 npm test; echo "exit=$?"\`, then \`printf x > ${repo}/written.txt\`, then \`printf x > written.txt\`. Then create the file edited.txt with the text hello, with your file-editing tool.`,
       );
       expect(result.status).toBe("completed");
-      expect(outputs.join("\n")).toContain("Add the sum test");
-      expect(outputs.join("\n")).toMatch(/pass 1/);
-      expect(existsSync(path.join(cwd, "written.txt"))).toBe(false);
-      expect(existsSync(path.join(cwd, "edited.txt"))).toBe(false);
-      expect(execSync("git status --porcelain", { cwd }).toString().trim()).toBe("");
+      expect(output).toContain("Add the sum test");
+      expect(output).toMatch(/pass 1/);
+      expect(output).toContain("exit=0");
+      expect(existsSync(path.join(repo, "written.txt"))).toBe(false);
+      expect(existsSync(path.join(vault, "written.txt"))).toBe(false);
+      expect(existsSync(path.join(vault, "edited.txt"))).toBe(false);
+      expect(execSync("git status --porcelain", { cwd: repo }).toString().trim()).toBe("");
+      expect(requests).toEqual([]);
+    });
+
+    it.runIf(hasGo)("runs a read-only session's go test and go vet, which write a build cache", { timeout: TIMEOUT }, async () => {
+      const { vault, repo } = readOnlyRepo({
+        "go.mod": "module example.com/sum\n\ngo 1.21\n",
+        "sum.go": "package sum\n\nfunc Add(a, b int) int { return a + b }\n",
+        "sum_test.go": 'package sum\n\nimport "testing"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal("1 + 2")\n\t}\n}\n',
+      });
+      const { result, output, requests } = await runReadOnly(vault, `\`go -C ${repo} test -count=1 ./...\`, then \`go -C ${repo} vet ./... && echo vet-ok\`.`);
+      expect(result.status).toBe("completed");
+      expect(output).toMatch(/ok\s+example\.com\/sum/);
+      expect(output).toContain("vet-ok");
+      expect(execSync("git status --porcelain", { cwd: repo }).toString().trim()).toBe("");
       expect(requests).toEqual([]);
     });
 

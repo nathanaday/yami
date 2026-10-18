@@ -1,7 +1,7 @@
 import type { Agent } from "../agent/agent.js";
 import type { Harness, ToolSet } from "../agent/types.js";
 import { CONVERSATION_FOLDER, FileConversations, type Conversation, type Conversations, type OpenConversation } from "../conversation/conversations.js";
-import { basename, link, readDocument, writeDocument, type Document } from "../document/document.js";
+import { basename, checkSection, link, readDocument, writeDocument, type Document } from "../document/document.js";
 import { SESSION, timestamp, validate, withDefaults } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import { captureSource, captureSources, readSources } from "../wiki/source.js";
@@ -334,8 +334,7 @@ export class Yami {
     if (module.yami !== this) throw new Error(`The ${module.id} module is not part of this Yami.`);
     if (module.sessionsIn === "none") throw new Error(`The ${module.id} module has no sessions.`);
     const folder = module.layout.sessions;
-    const heading = options.request && /^## .*$/m.exec(options.request)?.[0];
-    if (heading) throw new Error(`The request holds the heading line "${heading.trim()}", which would start a section of the session document. Write it as plain text, or as a ### heading.`);
+    checkSection("Request", options.request ?? "");
     let name: string;
     if (options.exact) {
       name = options.name ?? "";

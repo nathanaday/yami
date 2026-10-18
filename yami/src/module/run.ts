@@ -390,7 +390,7 @@ async function record(vault: Vault, path: string, promises: Document[], outcome:
         const ok = checked ? checked.status === "met" : verdict ? Review.passes(verdict.verdict) : false;
         const detail = checked ? checked.detail : verdict ? `review: ${verdict.reason}` : "the review judges it";
         (ok ? met : unmet).push(link(promise.path));
-        lines.push(`- [${ok ? "x" : " "}] ${link(promise.path)} — ${detail}`);
+        lines.push(`- [${ok ? "x" : " "}] ${link(promise.path)} — ${oneLine(detail)}`);
       }
       doc.properties.met = met;
       doc.properties.unmet = unmet;

@@ -179,7 +179,7 @@ describe("creating a session from a flow", () => {
     const hello = new Hello();
     const { vault } = await fresh(hello);
     await expect(hello.greet.create({ name: "sneaky", request: "Read on RL.\n## Deliverables\nsneaky" })).rejects.toThrow(
-      'The request holds the heading line "## Deliverables", which would start a section of the session document. Write it as plain text, or as a ### heading.',
+      'The text for the Request section holds the heading line "## Deliverables", which would start a section of its own. Write it as plain text, or as a ### heading.',
     );
     expect(await vault.exists("hello/sneaky.md")).toBe(false);
     const { path } = await hello.greet.create({ name: "fine", request: "Read on RL.\n### Notes\n#hashtag\n##no-space" });

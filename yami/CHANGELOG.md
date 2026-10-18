@@ -1,14 +1,34 @@
 # Changelog
 
+## 0.8.0 · library-loop module-forms round 3
+
+Each read-only session gets a scratch folder of its own, and its commands write only there, on both harnesses. The temporary folder and the usual caches point at it, so `go test`, `go vet`, `npm test`, and a suite that writes a temporary file run in a read-only agent, and a repository and the vault stay unchanged. `replaceSection` refuses a text that would start a section.
+
+### Breaking
+- **A read-only session's commands write only its scratch folder,** `/tmp/yami-read-only-<random>`, which the session makes when it starts and removes when it closes. On Claude Code they no longer write the rest of `/tmp`, also `/tmp/claude-<uid>` (Claude Code's temporary folder is now in the scratch folder, through `CLAUDE_CODE_TMPDIR`). On Codex they now write the scratch folder, where before they wrote nothing: the session runs in the adapter's permissions profile `yami-read-only`, not in Codex's `read-only` sandbox, so `thread/start` sends `permissions` and no `sandbox`. Migrate: a brief that moved a cache with `VAR=/tmp/... cmd` drops the assignment; the cache is in the scratch folder already. A command that must keep a file after the session ends needs `access: "edit"`.
+- **A read-only Codex session sets its server's configuration:** `default_permissions`, the profile `permissions.yami-read-only`, and `shell_environment_policy.set` for the variables below, after the host's `config`, so the host's `config` cannot lift read-only. Migrate: a host whose `config` set `default_permissions` or a profile for a read-only session gives the session `access: "edit"`.
+- **`replaceSection` throws on content with a line that starts with `## `,** which would start a section of its own, and `flow.create` gives the same message for a request: `The text for the Request section holds the heading line "## Deliverables", which would start a section of its own. Write it as plain text, or as a ### heading.` Migrate: a test that matched `The request holds the heading line` matches `The text for the Request section holds the heading line`; a tool that wrote a person's text into a section returns the error, or demotes such a line to `###`.
+- **A read-only Claude Code session allows each command that Claude Code asks about,** such as `VAR=x cmd`, `cmd; echo $?`, a loop, or `$(…)`, because the command runs in the sandbox and cannot leave it. It still denies a command that names a command of the user's `sandbox.excludedCommands`, and every request of another tool. Migrate: a brief that told the agent to run the parts of a command one at a time can drop that rule.
+
+### Added
+- The variables of a read-only session's commands: `TMPDIR`, `TMP`, and `TEMP` (on Claude Code, its own temporary folder in the scratch folder), `XDG_CACHE_HOME`, `GOCACHE`, `GOTMPDIR`, `npm_config_cache`, `PYTHONPYCACHEPREFIX`, and `CARGO_TARGET_DIR`, each in the scratch folder. The README lists them.
+- Live tests of a read-only session on both harnesses, in a repository outside the vault: `git log`, `npm test` with a suite that writes a temporary file, `go test` and `go vet` when Go is installed, and a write to the repository and to the vault, which fail.
+
+### Changed
+- `ClaudeSession.close()` waits until the CLI has exited.
+- The loop writes a check's detail on the one line of its deliverable, so a detail of several lines no longer breaks the Deliverables section.
+- The Claude Code read-only denial no longer says "one at a time".
+- The CHANGELOG of 0.7.0 uses generic names in its examples.
+
 ## 0.7.0 · library-loop module-forms round 2
 
-A read-only agent on Claude Code now runs commands that only read or check, as on Codex, so a validator can run `git log` and the tests. A session's details list the runs of its agents, and each run's note names the session.
+A read-only agent on Claude Code now runs commands that only read or check, as on Codex, so a checker agent can run `git log` and the tests. A session's details list the runs of its agents, and each run's note names the session.
 
 ### Breaking
 - **A read-only Claude Code session runs Bash in Claude Code's sandbox.** It runs commands that only read or check; a command writes only in `/tmp`, where Claude Code keeps its own temporary folder, and in no other folder, also when a setting of the user or the project would let the sandbox write there. Where the sandbox cannot start (Linux without `bubblewrap`, or a platform with no sandbox), a read-only session does not start. Migrate: on Linux, install `bubblewrap`. Remove any text in a brief that says a read-only agent cannot run commands.
 - **A read-only Claude Code session asks for nothing.** It denies each permission request itself, and no longer calls `onPermission`, as a Codex read-only session never asks. A command that the user's settings run outside the sandbox (`sandbox.excludedCommands` in `~/.claude/settings.json`) is denied. Migrate: a host that answered a read-only session's requests needs no handler for it.
 - **`sdkOptions` cannot lift read-only.** For a read-only session, the adapter's `tools` and `sandbox` now come after `sdkOptions`. Migrate: a host that widened a read-only session with `sdkOptions.tools` gives the session `access: "edit"`.
-- **An agent run's note names the session.** For a session, it is `<module> <session> <agent>`, not `<module> <agent>`; a second run gets ` 2`. For a conversation it stays `<module> <agent>`. Migrate: `conversations/threads validator.md` → `conversations/threads Divide validator.md`, or read `session.details().agentRuns`.
+- **An agent run's note names the session.** For a session, it is `<module> <session> <agent>`, not `<module> <agent>`; a second run gets ` 2`. For a conversation it stays `<module> <agent>`. Migrate: `conversations/notes checker.md` → `conversations/notes Weekly checker.md`, or read `session.details().agentRuns`.
 - **The Progress section records each agent run** with a line at its start and at its end: `agent notes:checker started: [[conversations/notes Weekly checker|notes Weekly checker]]`, then `done`, `failed: … — <reason>`, or `stopped`. Migrate: a test that compares every Progress line keeps the loop's lines: `progress.filter((p) => !p.text.startsWith("agent "))`.
 - **`flow.create` refuses a request with a line that starts with `## `,** which broke the session's sections: two `## Deliverables`, and the loop wrote into the wrong one. It throws `The request holds the heading line "## Deliverables", which would start a section of the session document. Write it as plain text, or as a ### heading.` Migrate: demote such a line to `###`, or let a tool return the error to the agent.
 
@@ -20,7 +40,7 @@ A read-only agent on Claude Code now runs commands that only read or check, as o
 ### Changed
 - `updateDocument` runs the updates of one document one after another, so two at the same time do not lose one. The loop, the review, and the agent runs write the session document through it.
 - The first message of a read-only agent, and the review's prompt, say that it can run commands that only read or check, such as `git log` or the tests.
-- The README's examples use a generic module, `notes`, in place of the librarian.
+- The README's examples use one generic module, `notes`.
 
 ## 0.6.0 · library-loop module-forms round 1
 

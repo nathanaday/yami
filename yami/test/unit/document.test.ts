@@ -2,13 +2,25 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readDocument, updateDocument, writeDocument } from "../../src/document/index.js";
+import { readDocument, replaceSection, sectionText, updateDocument, writeDocument } from "../../src/document/index.js";
 import { FsVault } from "../../src/testing/index.js";
 
 let root: string | undefined;
 afterEach(() => {
   if (root) rmSync(root, { recursive: true, force: true });
   root = undefined;
+});
+
+describe("replaceSection", () => {
+  it("refuses a text with a line that would start a section, and writes any other text", () => {
+    const body = "# H\n\n## Request\n\n## Deliverables\n- [ ] x\n";
+    expect(() => replaceSection(body, "Request", "Read on RL.\n## Deliverables\nsneaky")).toThrow(
+      'The text for the Request section holds the heading line "## Deliverables", which would start a section of its own. Write it as plain text, or as a ### heading.',
+    );
+    const written = replaceSection(body, "Request", "Read on RL.\n### Notes\n#hashtag\n##no-space");
+    expect(sectionText(written, "Request")).toBe("Read on RL.\n### Notes\n#hashtag\n##no-space");
+    expect(sectionText(written, "Deliverables")).toBe("- [ ] x");
+  });
 });
 
 describe("updateDocument", () => {
