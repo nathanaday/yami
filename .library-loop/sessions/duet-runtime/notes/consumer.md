@@ -19,9 +19,14 @@ Open workarounds:
 
 Docs guesses (F1.4): noteSessions wires rename/delete by itself; the idle wait; concurrent `session()`; `save` ids. F1.5 nit: "Yami has no agents." on the ribbon.
 
+## Round 2 (library 0.11.0)
+
+Removed the F1.1, F1.2, and F1.3 workarounds. `MentionAgents(app, yami, { ids, save, profile })` makes its own `noteSessions` with `setup` (it gives a LiveSession as state; `started` subscribes). The WeakMap, `bind`, and `NoteTools.reset` are deleted. The ledger takes `before`/`note` from `changed`, and has no `hub` parameter. `new Presence(..., yami.animate)`. `plugin/src` has 1,792 lines. Checks: typecheck, test (42), plugin:build pass. No workaround is left.
+
+The guard blocks reads of `.library-loop/sessions/...` through Bash. Use Read for the session files.
+
+Open: F2.1 bug minor (`state?` in setup, but `NoteSession.state: State`), F2.2 nit (setup gives a path, and the hub takes a TFile).
+
 Next round, check:
-- A `start`/state hook for noteSessions (F1.1). Then delete the WeakMap, `bind`, and `NoteTools.reset` when it is no longer used.
-- `NoteChange.note` and `before` (F1.2). Then delete `SharedEntry.text`.
-- `yami.animate` or a Presence default (F1.3).
-- Verify the F1.4 answers against the code in mentions.ts.
-- Whether the overseer's test:obsidian run passed.
+- F2.1/F2.2 answers. With a `file` in setup, drop `app` from MentionAgents.
+- Whether the overseer's test:obsidian run passed, and whether docs/design.md took the proposals.
