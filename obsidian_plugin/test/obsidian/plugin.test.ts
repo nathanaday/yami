@@ -534,7 +534,7 @@ describe("Yami in Obsidian", () => {
 
     const commandIcons = await page().evaluate(() => {
       const commands = (window as any).app.commands.commands;
-      return ["hello-new-greeting", "librarian-return", "journals-publish", "wiki-ingest-file"].map((id) => commands[`yami:${id}`]?.icon);
+      return ["hello-new-greeting", "librarian-return", "journals-publish", "wiki-ingest-file"].map((id) => commands[`yami:yami-${id}`]?.icon);
     });
     expect(commandIcons).toEqual(["hand", "library", "notebook-pen", undefined]);
   });
