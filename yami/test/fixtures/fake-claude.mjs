@@ -24,6 +24,11 @@ function turn(prompt) {
     assistant([{ type: 'tool_use', id: `t-${tool}`, name: call[1], input: JSON.parse(call[2]) }]);
     send({ type: 'user', session_id, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `t-${tool}`, content: 'InputValidationError', is_error: true }] } });
   }
+  // `args`: the reply is the CLI's arguments, so a test sees the options that the adapter gave.
+  if (prompt === 'args') {
+    assistant([{ type: 'text', text: process.argv.slice(2).join(' ') }]);
+    return result(process.argv.slice(2).join(' '));
+  }
   // `bad-result`: a result with no usage, which the adapter cannot read.
   if (prompt === 'bad-result') return send({ type: 'result', subtype: 'success', is_error: false, result: '', session_id, uuid: 'r' });
   assistant([{ type: 'text', text: `echo: ${prompt}` }]);

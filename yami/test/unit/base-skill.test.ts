@@ -10,8 +10,10 @@ afterEach(async () => {
   t = undefined;
 });
 
+/** The base skill that Yami 0.3.0 to 0.5.1 shipped. */
+const SHIPPED_0_3_0 = await readFile(new URL("../fixtures/base-skill/0.3.0.md", import.meta.url), "utf8");
 /** The base skill that Yami 0.2.0 shipped: its example of a skill command was hello's. */
-const SHIPPED_0_2_0 = BASE_SKILL_TEXT.replace("`/<module>:<skill>`", "such as `hello:greeting`");
+const SHIPPED_0_2_0 = SHIPPED_0_3_0.replace("`/<module>:<skill>`", "such as `hello:greeting`");
 
 describe("the base skill", () => {
   it("is written when the vault has no file at its path", async () => {
@@ -29,11 +31,18 @@ describe("the base skill", () => {
 
   it("is replaced when it holds a text that an earlier Yami shipped, since the person never edited it", async () => {
     t = await testYami();
-    expect(SHIPPED_0_2_0).not.toBe(BASE_SKILL_TEXT);
-    await t.vault.write(BASE_SKILL, SHIPPED_0_2_0);
-    await t.yami.discover();
-    expect(await t.vault.read(BASE_SKILL)).toBe(BASE_SKILL_TEXT);
-    expect(t.yami.problems).toEqual([]);
+    for (const earlier of [SHIPPED_0_2_0, SHIPPED_0_3_0]) {
+      expect(earlier).not.toBe(BASE_SKILL_TEXT);
+      await t.vault.write(BASE_SKILL, earlier);
+      await t.yami.discover();
+      expect(await t.vault.read(BASE_SKILL)).toBe(BASE_SKILL_TEXT);
+      expect(t.yami.problems).toEqual([]);
+    }
+  });
+
+  it("names the session's input and the agent tool", () => {
+    expect(BASE_SKILL_TEXT).toContain("The session's input is its Request section, which says what to do, its session properties, and its articles.");
+    expect(BASE_SKILL_TEXT).toContain("Call the tool `yami_agent` with the agent's name and a task that holds everything it needs.");
   });
 
   it("is kept when a person edited it, and the problems say how to get the new text", async () => {
@@ -63,6 +72,7 @@ describe("the base skill", () => {
   it("knows each text it shipped: when you change BASE_SKILL_TEXT, add its hash to SHIPPED", async () => {
     expect(SHIPPED).toContain(await hashText(BASE_SKILL_TEXT));
     expect(SHIPPED).toContain(await hashText(SHIPPED_0_2_0));
+    expect(SHIPPED).toContain(await hashText(SHIPPED_0_3_0));
   });
 });
 

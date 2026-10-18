@@ -4,8 +4,9 @@ import { basename, linksOf, linkTarget, readDocument, resolveLink, sectionText, 
 import { SESSION_STATES, type SessionState } from "../document/schema.js";
 import type { Properties } from "../document/vault.js";
 import { linkedDocuments, type LinkedDocument } from "./links.js";
-import type { ActionResult, DocumentRef, SessionAction, SessionTemplate, YamiModule } from "./module.js";
+import type { ActionResult, DocumentRef, Flow, SessionAction, YamiModule } from "./module.js";
 import { isJudged } from "./review.js";
+import { KILL } from "./fresh-run.js";
 import { checkSession, runSession, sessionParts, type RunControl, type RunResult, type SessionCheck } from "./run.js";
 import type { Yami } from "./yami.js";
 
@@ -35,7 +36,7 @@ export interface SessionSummary {
   /** The document's name. */
   name: string;
   module: YamiModule;
-  template: SessionTemplate | undefined;
+  flow: Flow | undefined;
   status: SessionStatus;
   /** When the session was created, as `YYYY-MM-DDTHH:MM:SS`. */
   created: string | undefined;
@@ -67,7 +68,7 @@ export interface SessionDocument extends LinkedDocument {
 
 /** All of a session: what a page about one session shows. */
 export interface SessionDetails extends SessionSummary {
-  /** The documents the session links: promises, policies, skills, then articles. */
+  /** The documents the session links: promises, policies, skills, agents, then articles. */
   documents: SessionDocument[];
   /** The conversation note that records the runs, when one exists. */
   conversation: string | undefined;
@@ -94,31 +95,34 @@ export interface SessionAct {
 export interface RunOptions {
   /** The agent that runs the session, or its harness. Default: the Yami's first agent. A resume takes the agent of the conversation it continues. */
   agent?: Agent | Harness;
-  /** Agent turns in this run. Default: the template's. */
+  /** Agent turns in this run. Default: the flow's. */
   maxIterations?: number;
 }
 
-/** What a new session document holds beyond its template. */
+/** What a new session document holds beyond its flow. */
 export interface NewSession {
-  /** The document name. Default: the template's name and the time. A name that a file cannot take is made safe, and a name in use gets a number. */
+  /** The document name. Default: the flow's name and the time. A name that a file cannot take is made safe, and a name in use gets a number. */
   name?: string;
   /** Refuse a name that is in use or that a file cannot take, instead of changing it. */
   exact?: boolean;
+  /** The text of the Request section: what the session must do. Without one the section stays empty, for a person to write. */
+  request?: string;
   /** The module's session fields. */
   fields?: Properties;
-  /** Documents linked on top of the template's, for example a policy of another module. */
+  /** Documents linked on top of the flow's, for example a policy or an agent of another module. */
   add?: DocumentRef[];
 }
 
 interface LiveRun {
   promise: Promise<RunResult>;
   control: RunControl;
+  abort: AbortController;
   phase: "working" | "checking" | "reviewing";
 }
 
 /**
  * One session document, and the runs of the agent loop on it. Get one with `yami.session(path)` or
- * `template.create()`. A Yami gives one handle for each path, so its listeners see every run.
+ * `flow.create()`. A Yami gives one handle for each path, so its listeners see every run.
  */
 export class Session {
   #run: LiveRun | undefined;
@@ -139,8 +143,8 @@ export class Session {
     return sessionParts(this.yami, await this.read()).module;
   }
 
-  async template(): Promise<SessionTemplate | undefined> {
-    return sessionParts(this.yami, await this.read()).template;
+  async flow(): Promise<Flow | undefined> {
+    return sessionParts(this.yami, await this.read()).flow;
   }
 
   /** Whether a run of this Yami is live on the session. */
@@ -165,13 +169,13 @@ export class Session {
 
   /**
    * The session at a glance, from its document as read; `yami.summaries` reads each document once and
-   * calls it. A template the module does not have reads as none, so a document in the middle of an edit
+   * calls it. A flow the module does not have reads as none, so a document in the middle of an edit
    * still shows.
    */
   summarize(doc: Document): SessionSummary {
     const module = this.yami.module(String(doc.properties.module ?? ""));
     if (doc.properties.type !== "session" || !module) throw new Error(`${doc.path} is not a session of a module of this Yami.`);
-    const template = module.templateOf(doc.properties.template);
+    const flow = module.flowOf(doc.properties.flow);
     const properties = doc.properties;
     const iteration = Number(properties.iteration);
     return {
@@ -179,7 +183,7 @@ export class Session {
       path: this.path,
       name: basename(this.path),
       module,
-      template,
+      flow,
       status: this.#statusFrom(properties),
       created: typeof properties.created === "string" ? properties.created : undefined,
       iteration: Number.isFinite(iteration) && iteration > 0 ? Math.trunc(iteration) : 0,
@@ -214,7 +218,7 @@ export class Session {
     const reviewed = await reasons("Review", /^- (?:followed|broken): (\[\[[^\]]+\]\]) — (.*)$/);
     const judged = (path: string) => readDocument(this.yami.vault, path).then(isJudged, () => undefined);
     const documents: SessionDocument[] = [];
-    for (const d of await linkedDocuments(this.yami.vault, summary.module.layout, doc.properties)) {
+    for (const d of await linkedDocuments(this.yami.vault, summary.module.id, doc.properties)) {
       if (d.path && d.kind === "promises") documents.push({ ...d, met: met(d.path), reason: checked.get(d.path), judged: await judged(d.path) });
       else if (d.path && d.kind === "policies") documents.push({ ...d, followed: followed(d.path), reason: reviewed.get(d.path) });
       else documents.push(d);
@@ -239,7 +243,7 @@ export class Session {
   /**
    * What a person can do with the session now, from its properties as read: start it with each agent and
    * resume its conversation while no run is live, stop or kill a live run, and the actions of its module
-   * that its template takes and whose `when` holds. A host shows these as commands or buttons.
+   * that its flow takes and whose `when` holds. A host shows these as commands or buttons.
    */
   acts(properties: Properties): SessionAct[] {
     const name = basename(this.path);
@@ -266,7 +270,7 @@ export class Session {
     }));
     if (linksOf(properties.conversation).length) acts.push({ kind: "resume", label: "Resume", run: () => this.resume().then(ended(" more")) });
     for (const action of parts.module.actions) {
-      if ("on" in action && action.on === parts.template && (!action.when || action.when(properties))) acts.push({ kind: "action", label: action.name, action, run: () => action.run(this) });
+      if ("on" in action && action.on === parts.flow && (!action.when || action.when(properties))) acts.push({ kind: "action", label: action.name, action, run: () => action.run(this) });
     }
     return acts;
   }
@@ -308,8 +312,7 @@ export class Session {
   async stop(): Promise<void> {
     const run = this.#run;
     if (!run) return;
-    run.control.stopping = true;
-    await run.control.conversation?.interrupt();
+    run.abort.abort();
     await run.promise.catch(() => undefined);
   }
 
@@ -317,8 +320,7 @@ export class Session {
   async kill(): Promise<void> {
     const run = this.#run;
     if (!run) return;
-    run.control.stopping = true;
-    await run.control.conversation?.close();
+    run.abort.abort(KILL);
     await run.promise.catch(() => undefined);
   }
 
@@ -330,15 +332,16 @@ export class Session {
     } catch (error) {
       return Promise.reject(error);
     }
+    const abort = new AbortController();
     const control: RunControl = {
-      stopping: false,
+      signal: abort.signal,
       phase: (phase) => {
         if (!this.#run || this.#run.phase === phase) return;
         this.#run.phase = phase;
         this.emit(phase);
       },
     };
-    const live: LiveRun = { control, phase: resume ? "checking" : "working", promise: undefined as unknown as Promise<RunResult> };
+    const live: LiveRun = { control, abort, phase: resume ? "checking" : "working", promise: undefined as unknown as Promise<RunResult> };
     this.#run = live;
     live.promise = runSession(this.yami, this.path, agent, control, { resume, maxIterations: options.maxIterations });
     this.emit(live.phase);

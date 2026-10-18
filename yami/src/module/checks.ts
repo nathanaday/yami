@@ -21,8 +21,8 @@ export interface CheckResult {
 export type Check = (promise: Document, context: CheckContext) => Promise<CheckResult>;
 
 /** Fills `{{session}}` and `{{property}}` in a promise value. */
-export function expand(template: string, context: CheckContext): string {
-  return template.replace(/\{\{\s*([\w-]+)\s*\}\}/g, (_match, name: string) =>
+export function expand(value: string, context: CheckContext): string {
+  return value.replace(/\{\{\s*([\w-]+)\s*\}\}/g, (_match, name: string) =>
     name === "session" ? basename(context.path) : String(context.properties[name] ?? ""),
   );
 }
@@ -58,13 +58,13 @@ async function linked(field: string, context: CheckContext): Promise<{ paths: st
 }
 
 /**
- * Met when every note linked in the session's `field` has the property `name` equal to `value`,
- * and the field links at least `atLeast` notes (default 0).
+ * Met when every note linked in the session's `field` has the property named by `property` equal to
+ * `value`, and the field links at least `atLeast` notes (default 0).
  */
 const property: Check = async (promise, context) => {
   const field = String(promise.properties.field ?? "");
-  const name = String(promise.properties.name ?? "");
-  if (!field || !name) return { status: "review", detail: "the promise needs field and name" };
+  const name = String(promise.properties.property ?? "");
+  if (!field || !name) return { status: "review", detail: "the promise needs field and property" };
   const value = promise.properties.value;
   const atLeast = Number(promise.properties.atLeast ?? 0);
   const { paths, missing } = await linked(field, context);

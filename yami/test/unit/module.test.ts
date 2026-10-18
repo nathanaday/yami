@@ -3,7 +3,7 @@ import { runTool, setSkills, slashCommand } from "../../src/agent/index.js";
 import { readDocument, sectionText } from "../../src/document/index.js";
 import { MODULE_ICON, skillCommand, Yami, YamiModule, type AgentTool, type Place } from "../../src/index.js";
 import { FsVault, ScriptedAgent, testYami, type TestYami } from "../../src/testing/index.js";
-import { GREETING_SKILL, Hello } from "../fixtures/hello.js";
+import { GREETING_SKILL, Hello, NOTE_PROMISE, POLITE_POLICY } from "../fixtures/hello.js";
 
 let t: TestYami | undefined;
 afterEach(async () => {
@@ -17,25 +17,25 @@ async function fresh(...modules: YamiModule[]) {
 }
 
 describe("a module's files", () => {
-  it("installs the ledgers, the module document, and its documents, with the ledger out of the sessions' way", async () => {
+  it("installs the ledgers, the module document, and each form in a folder of its name, with no type and no module", async () => {
     const { vault } = await fresh();
-    for (const file of ["Yami.base", "internal/hello/sessions.base", "internal/hello/hello.md", "internal/hello/policies/Always say hello.md", "internal/hello/skills/greeting/SKILL.md"]) {
+    for (const file of ["Yami.base", "internal/hello/sessions.base", "internal/hello/hello.md", "internal/hello/policies/always-say-hello/POLICY.md", "internal/hello/skills/greeting/SKILL.md"]) {
       expect(await vault.exists(file), file).toBe(true);
     }
     expect(await vault.exists("hello/sessions.base")).toBe(false);
+    expect(await vault.exists("internal/hello/flows")).toBe(false);
     expect(await vault.read("internal/hello/skills/greeting/SKILL.md")).toBe(GREETING_SKILL);
-    expect(await vault.read("internal/hello/promises/Greeting note.md")).toBe(
-      "---\ntype: promise\nmodule: hello\ncheck: exists\npath: greetings/{{session}}.md\n---\nCreate this note. Its content is one line: the greeting, addressed to the session by name.",
-    );
+    expect(await vault.read("internal/hello/policies/always-say-hello/POLICY.md")).toBe(POLITE_POLICY);
+    expect(await vault.read("internal/hello/promises/greeting-note/PROMISE.md")).toBe(NOTE_PROMISE);
     expect(await vault.read("internal/hello/hello.md")).toContain("[[internal/hello/sessions.base|Hello world sessions]]");
   });
 
   it("keeps edited documents and bases on a second enable", async () => {
     const { vault, yami } = await fresh();
-    await vault.write("internal/hello/policies/Always say hello.md", "---\ntype: policy\nmodule: hello\n---\nEdited by the user.\n");
+    await vault.write("internal/hello/policies/always-say-hello/POLICY.md", "---\nname: always-say-hello\ndescription: Edited.\n---\nEdited by the user.\n");
     await vault.write("internal/hello/sessions.base", "views:\n  - type: table\n    name: Mine\n");
     await yami.enable();
-    expect(await vault.read("internal/hello/policies/Always say hello.md")).toContain("Edited by the user.");
+    expect(await vault.read("internal/hello/policies/always-say-hello/POLICY.md")).toContain("Edited by the user.");
     expect(await vault.read("internal/hello/sessions.base")).toContain("Mine");
   });
 
@@ -63,55 +63,46 @@ describe("a module's files", () => {
     await expect(quiet.greet.create()).rejects.toThrow("has no sessions");
   });
 
-  it("installs a skill's files beside its SKILL.md, and keeps edited ones", async () => {
+  it("installs a form's files beside it, and keeps edited ones", async () => {
     class Files extends Hello {
       readonly id = "files";
       readonly toned = this.skill({ name: "toned", description: "Greets in a tone.", body: "Read tone.md first.", files: { "tone.md": "Warm and short." } });
+      readonly kind = this.policy({ name: "kind", description: "Be kind.", body: "See examples.md." }, { "examples.md": "Thank you." });
     }
     const { vault, yami } = await fresh(new Files());
     expect(await vault.read("internal/files/skills/toned/tone.md")).toBe("Warm and short.");
     expect(await vault.read("internal/files/skills/toned/SKILL.md")).toBe("---\nname: toned\ndescription: Greets in a tone.\n---\nRead tone.md first.");
+    expect(await vault.read("internal/files/policies/kind/examples.md")).toBe("Thank you.");
     await vault.write("internal/files/skills/toned/tone.md", "Edited.");
     await yami.enable();
     expect(await vault.read("internal/files/skills/toned/tone.md")).toBe("Edited.");
   });
 
-  it("installs an agent in its harness's own form, from its parts or from markdown", async () => {
-    class Agents extends Hello {
-      readonly id = "agents";
-      readonly checker = this.agent({ name: "checker", description: "Checks the greeting. Edits nothing.", tools: ["Read", "Grep"], body: "Read the greeting note." });
-      readonly reviewer = this.agent("---\nname: reviewer\ndescription: Reviews.\ntools: Read\n---\nReview it.\n");
+  it("installs an agent, a policy, and a promise from their parts, with every other property in the header", async () => {
+    class Parts extends Hello {
+      readonly id = "parts";
+      readonly checker = this.agent({ name: "checker", description: "Checks the greeting.", access: "read-only", body: "Read the greeting note." });
+      readonly fixer = this.agent("---\nname: fixer\ndescription: Fixes the greeting.\naccess: edit\n---\nFix it.\n");
+      readonly brief = this.policy({ name: "brief", description: "One line.", body: "Write one line." });
+      readonly made = this.promise({ name: "made", description: "The note exists.", check: "exists", path: "made/{{session}}.md", body: "Write the note." });
     }
-    const { vault } = await fresh(new Agents());
-    expect(await vault.read("internal/agents/agents/checker.md")).toBe("---\nname: checker\ndescription: Checks the greeting. Edits nothing.\ntools: Read, Grep\n---\nRead the greeting note.");
-    expect(await vault.read("internal/agents/agents/reviewer.md")).toBe("---\nname: reviewer\ndescription: Reviews.\ntools: Read\n---\nReview it.\n");
+    const parts = new Parts();
+    const { vault } = await fresh(parts);
+    expect(await vault.read("internal/parts/agents/checker/AGENT.md")).toBe("---\nname: checker\ndescription: Checks the greeting.\naccess: read-only\n---\nRead the greeting note.");
+    expect(await vault.read("internal/parts/agents/fixer/AGENT.md")).toBe("---\nname: fixer\ndescription: Fixes the greeting.\naccess: edit\n---\nFix it.\n");
+    expect(await vault.read("internal/parts/policies/brief/POLICY.md")).toBe("---\nname: brief\ndescription: One line.\n---\nWrite one line.");
+    expect(await vault.read("internal/parts/promises/made/PROMISE.md")).toBe("---\nname: made\ndescription: The note exists.\ncheck: exists\npath: made/{{session}}.md\n---\nWrite the note.");
+    expect(parts.checker).toMatchObject({ kind: "agent", name: "checker", path: "internal/parts/agents/checker/AGENT.md", link: "[[internal/parts/agents/checker/AGENT|checker]]" });
   });
 
-  it("refuses a skill with no name, a document or a template twice, and an id a folder cannot take", () => {
-    expect(
-      () =>
-        new (class extends Hello {
-          readonly nameless = this.skill("# No frontmatter\n");
-        })(),
-    ).toThrow("has no name in its frontmatter");
-    expect(
-      () =>
-        new (class extends Hello {
-          readonly again = this.policy("Always say hello", "x");
-        })(),
-    ).toThrow("The policy Always say hello is in the module twice.");
-    expect(
-      () =>
-        new (class extends Hello {
-          readonly again = this.template({ id: "greet", name: "Again" });
-        })(),
-    ).toThrow("The template greet is in the module twice.");
-    expect(
-      () =>
-        new (class extends Hello {
-          readonly bad = this.template({ id: "Not an id", name: "Bad" });
-        })(),
-    ).toThrow("cannot be a template id");
+  it("refuses a form with no name or no description, a name that cannot name a folder, a document or a flow twice, and an id a folder cannot take", () => {
+    const build = (make: (m: any) => unknown) => () => new (class extends Hello { readonly extra = make(this); })();
+    expect(build((m) => m.skill("# No frontmatter\n"))).toThrow("A skill of the hello module has no name in its frontmatter.");
+    expect(build((m) => m.policy("---\nname: brief\n---\nOne line.\n"))).toThrow("A policy of the hello module, brief, has no description in its frontmatter.");
+    expect(build((m) => m.policy({ name: "Be brief", description: "One line.", body: "x" }))).toThrow('is named "Be brief". A name is lower-case letters, digits, and dashes, and it names the document\'s folder.');
+    expect(build((m) => m.policy(POLITE_POLICY))).toThrow("The policy always-say-hello is in the module twice.");
+    expect(build((m) => m.flow({ name: "greet", description: "Again." }))).toThrow("The flow greet is in the module twice.");
+    expect(build((m) => m.flow({ name: "Not a name", description: "Bad." }))).toThrow('"Not a name" cannot name a flow');
     const vault = new FsVault("/tmp/none");
     expect(
       () =>
@@ -154,35 +145,58 @@ describe("a module's files", () => {
   });
 });
 
-describe("creating a session from a template", () => {
-  it("links the template's documents by full path, with the module's fields, the template, and a body to fill in", async () => {
+describe("creating a session from a flow", () => {
+  it("links the flow's documents by full path, with the module's fields, the flow's name, and an empty Request section", async () => {
     class Asked extends Hello {
       readonly id = "asked";
-      readonly ask = this.template({ id: "ask", name: "Question", fields: { greeting: "Hi" }, body: "## Question\n\nWrite it here.", promises: [this.note] });
+      readonly checker = this.agent({ name: "checker", description: "Checks.", body: "Check." });
+      readonly ask = this.flow({ name: "ask", description: "A question.", fields: { greeting: "Hi" }, agents: [this.checker], promises: [this.note] });
     }
     const asked = new Asked();
     const { vault } = await fresh(asked);
     const { path } = await asked.greet.create({ name: "x" });
     const created = await vault.read(path);
     expect(created).toContain('"[[internal/asked/skills/greeting/SKILL|greeting]]"');
-    expect(created).toContain('"[[internal/asked/policies/Always say hello|Always say hello]]"');
+    expect(created).toContain('"[[internal/asked/policies/always-say-hello/POLICY|always-say-hello]]"');
     expect(created).toContain("greeting: Hello");
-    expect(created).toContain("template: greet");
-    expect(created).toContain("# x\n\n## Deliverables\n- [ ] [[internal/asked/promises/Greeting note|Greeting note]]\n\n## Progress\n");
-    const asking = await vault.read((await asked.ask.create({ name: "y", fields: { greeting: "Hey" } })).path);
-    expect(asking).toContain("greeting: Hey");
-    expect(asking).toContain("template: ask");
-    expect(asking).toContain("# y\n\n## Question\n\nWrite it here.\n\n## Deliverables\n");
-    expect((await readDocument(vault, `asked/y.md`)).properties.skills).toEqual([]);
+    expect(created).toContain("flow: greet");
+    expect(created).not.toContain("template");
+    expect(created).toContain("# x\n\n## Request\n\n## Deliverables\n- [ ] [[internal/asked/promises/greeting-note/PROMISE|greeting-note]]\n\n## Progress\n");
+    const asking = await readDocument(vault, (await asked.ask.create({ name: "y", fields: { greeting: "Hey" } })).path);
+    expect(asking.properties).toMatchObject({ greeting: "Hey", flow: "ask", agents: ["[[internal/asked/agents/checker/AGENT|checker]]"], skills: [] });
   });
 
-  it("names a session after its template and the time, makes any name safe, and numbers a name in use", async () => {
+  it("writes the request into the Request section", async () => {
     const hello = new Hello();
-    await fresh(hello);
-    expect((await hello.greet.create()).path).toMatch(/^hello\/Greeting \d{4}-\d\d-\d\d \d\d-\d\d\.md$/);
+    const { vault } = await fresh(hello);
+    const { path } = await hello.greet.create({ name: "asked", request: "  Greet Ada.\n\nShe likes short lines.\n" });
+    const body = (await readDocument(vault, path)).body;
+    expect(body).toBe("# asked\n\n## Request\nGreet Ada.\n\nShe likes short lines.\n\n## Deliverables\n- [ ] [[internal/hello/promises/greeting-note/PROMISE|greeting-note]]\n\n## Progress\n");
+    expect(sectionText(body, "Request")).toBe("Greet Ada.\n\nShe likes short lines.");
+  });
+
+  it("names a session after its flow and the time, makes any name safe, and numbers a name in use", async () => {
+    class Long extends Hello {
+      readonly id = "long";
+      readonly review = this.flow({ name: "code-review", description: "Reviews code." });
+    }
+    const hello = new Hello();
+    const long = new Long();
+    await fresh(hello, long);
+    expect((await hello.greet.create()).path).toMatch(/^hello\/Greet \d{4}-\d\d-\d\d \d\d-\d\d\.md$/);
+    expect((await long.review.create()).path).toMatch(/^long\/Code review \d{4}-\d\d-\d\d \d\d-\d\d\.md$/);
     expect((await hello.greet.create({ name: "C# notes: week [1]" })).path).toBe("hello/C notes week 1.md");
     expect((await hello.greet.create({ name: "C# notes: week [1]" })).path).toBe("hello/C notes week 1 (2).md");
     expect((await hello.greet.create({ name: "..." })).path).toBe("hello/Session.md");
+  });
+
+  it("labels a flow's button and command New, with each dash of its name as a space", () => {
+    const long = new (class extends Hello {
+      readonly review = this.flow({ name: "code-review", description: "Reviews code." });
+    })();
+    expect(long.greet.label).toBe("New greet");
+    expect(long.review.label).toBe("New code review");
+    expect(long.acts().map((act) => act.label)).toEqual(["New greet", "New code review"]);
   });
 
   it("refuses an exact name that is in use or that cannot name one file", async () => {
@@ -196,16 +210,19 @@ describe("creating a session from a template", () => {
     expect((await hello.greet.create({ name: "Divide by zero, safely (v2)", exact: true })).path).toBe("hello/Divide by zero, safely (v2).md");
   });
 
-  it("links a document of another module on top of the template's, once", async () => {
+  it("links a document of another module on top of the flow's, once, an agent too", async () => {
     class Other extends Hello {
       readonly id = "other";
-      readonly extra = this.policy("Be brief", "One line.");
+      readonly extra = this.policy({ name: "be-brief", description: "One line.", body: "One line." });
+      readonly helper = this.agent({ name: "helper", description: "Helps.", body: "Help." });
     }
     const hello = new Hello();
     const other = new Other();
     const { vault } = await fresh(hello, other);
-    const { path } = await hello.greet.create({ name: "x", add: [other.extra, hello.polite] });
-    expect((await readDocument(vault, path)).properties.policies).toEqual(["[[internal/hello/policies/Always say hello|Always say hello]]", "[[internal/other/policies/Be brief|Be brief]]"]);
+    const { path } = await hello.greet.create({ name: "x", add: [other.extra, hello.polite, other.helper] });
+    const { properties } = await readDocument(vault, path);
+    expect(properties.policies).toEqual(["[[internal/hello/policies/always-say-hello/POLICY|always-say-hello]]", "[[internal/other/policies/be-brief/POLICY|be-brief]]"]);
+    expect(properties.agents).toEqual(["[[internal/other/agents/helper/AGENT|helper]]"]);
   });
 
   it("refuses fields that the module's schema does not take", async () => {
@@ -214,22 +231,22 @@ describe("creating a session from a template", () => {
     await expect(hello.greet.create({ fields: { greeting: 3 } })).rejects.toThrow("greeting must be text");
   });
 
-  it("finds a template by its id, the first for no id, and none for an id no template has", () => {
+  it("finds a flow by its name, the first for no name, and none for a name no flow has", () => {
     class Two extends Hello {
       readonly id = "two";
-      readonly other = this.template({ id: "other", name: "Other" });
+      readonly other = this.flow({ name: "other", description: "Other." });
     }
     const two = new Two();
-    expect(two.templateOf("other")).toBe(two.other);
-    expect(two.templateOf("greet")).toBe(two.greet);
-    for (const none of [undefined, null, ""]) expect(two.templateOf(none)).toBe(two.greet);
-    for (const unknown of ["missing", 3, ["other"]]) expect(two.templateOf(unknown)).toBeUndefined();
+    expect(two.flowOf("other")).toBe(two.other);
+    expect(two.flowOf("greet")).toBe(two.greet);
+    for (const none of [undefined, null, ""]) expect(two.flowOf(none)).toBe(two.greet);
+    for (const unknown of ["missing", 3, ["other"]]) expect(two.flowOf(unknown)).toBeUndefined();
   });
 
-  it("lists the session documents of the vault, of a module, or of a template", async () => {
+  it("lists the session documents of the vault, of a module, or of a flow", async () => {
     class Two extends Hello {
       readonly id = "two";
-      readonly other = this.template({ id: "other", name: "Other" });
+      readonly other = this.flow({ name: "other", description: "Other." });
     }
     const hello = new Hello();
     const two = new Two();
@@ -261,7 +278,7 @@ describe("the tools and skills of the modules", () => {
     const set = yami.tools();
     expect(set.name).toBe("yami");
     expect(set.description).toBe("Tools of Yami. Tools of the Yami modules in this vault: Wiki, Hello world, Two.");
-    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "hello_greet_user", "hello_two_greet_user"]);
+    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_agent", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "hello_greet_user", "hello_two_greet_user"]);
     expect(await runTool(set.tools.find((tool: AgentTool) => tool.name === "hello_greet_user")!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
     expect(agent.preferences.cwd).toBe(root);
     expect(agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(set.tools.map((tool) => tool.name));

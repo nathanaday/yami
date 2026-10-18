@@ -40,6 +40,8 @@ export class ConversationManager {
   private readonly controllers = new Map<TFile, ConversationController>();
   private readonly composers = new Map<MarkdownView, Composer>();
   private readonly turnListeners = new Map<TFile, Set<(turn: TurnEnd) => void>>();
+  /** The paths of notes that are being created. */
+  readonly #creating = new Set<string>();
   private destroyed = false;
 
   constructor(
@@ -80,20 +82,27 @@ export class ConversationManager {
   /** Creates a conversation note and opens it, with the cursor in the composer. */
   async create(agent: ConversationAgent, options: CreateOptions = {}): Promise<TFile> {
     const folder = await this.folder(normalizePath((options.folder ?? this.options.folder()) || "/"));
-    const path = availablePath(folder, options.name ?? unnamed(), (candidate) => Boolean(this.app.vault.getAbstractFileByPath(candidate)));
-    const file = await this.app.vault.create(
-      path,
-      newConversation({
-        agent: agent.name,
-        model: agent.agent.preferences.model || undefined,
-        effort: agent.agent.preferences.effort || undefined,
-        status: "active",
-        created: stamp(new Date(), "YYYY-MM-DD HH:mm"),
-        module: options.module ? `[[${options.module.replace(/\.md$/, "")}]]` : undefined,
-        approval: options.approval,
-        access: options.access,
-      }),
-    );
+    // Two notes that are created at the same time, such as two agents of one session, get two paths.
+    const path = availablePath(folder, options.name ?? unnamed(), (candidate) => this.#creating.has(candidate) || Boolean(this.app.vault.getAbstractFileByPath(candidate)));
+    this.#creating.add(path);
+    let file: TFile;
+    try {
+      file = await this.app.vault.create(
+        path,
+        newConversation({
+          agent: agent.name,
+          model: agent.agent.preferences.model || undefined,
+          effort: agent.agent.preferences.effort || undefined,
+          status: "active",
+          created: stamp(new Date(), "YYYY-MM-DD HH:mm"),
+          module: options.module ? `[[${options.module.replace(/\.md$/, "")}]]` : undefined,
+          approval: options.approval,
+          access: options.access,
+        }),
+      );
+    } finally {
+      this.#creating.delete(path);
+    }
     // A controller reads its agent from the note's properties.
     await this.indexed(file);
     const open = options.open ?? "current";

@@ -30,13 +30,14 @@ export class ScriptedSession extends BaseSession {
   }
 
   /**
-   * Calls a tool of the session's tool set by its full name, such as `wiki_search` or `yami_check`, as the
-   * harness would: the input is checked against the tool's schema. Throws when the session has no such tool.
+   * Calls a tool of the session's tool set by its full name, such as `wiki_search` or `yami_agent`, as the
+   * harness would: the input is checked against the tool's schema, and the tool's signal aborts when the
+   * turn is interrupted or the session closes. Throws when the session has no such tool.
    */
   async tool(name: string, input: unknown): Promise<{ text: string; isError: boolean }> {
     const tool = this.options.tools?.tools.find((t) => t.name === name);
     if (!tool) throw new Error(`The session has no tool ${name}.`);
-    return runTool(tool, input, new AbortController().signal);
+    return runTool(tool, input, this.currentTurn?.controller.signal ?? new AbortController().signal);
   }
 
   protected async interruptTurn(turn: ActiveTurn) {

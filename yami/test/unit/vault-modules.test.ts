@@ -19,33 +19,35 @@ async function write(path: string, properties: Properties, body = "") {
 }
 
 const MODULE = "internal/code-review/code-review.md";
-const TEMPLATE = "internal/code-review/templates/Review a change.md";
+const FLOW = "internal/code-review/flows/review-a-change/FLOW.md";
+const form = (folder: string, name: string, file: string) => `internal/code-review/${folder}/${name}/${file}.md`;
 
-/** A vault module with one template that links a skill, a policy, a promise with a check, a promise with none, and an article of the Hello module by its name. */
-async function codeReview(template: Properties = {}) {
+/**
+ * A vault module with one flow that names a skill, an agent, a policy, a policy of the Hello module, a
+ * promise with a check, a promise with none by its link, and links an article.
+ */
+async function codeReview(flow: Properties = {}) {
   await write(MODULE, { type: "module", module: "code-review", name: "Code review", description: "Reviews a change.", icon: "search", color: "#30A46C", instructions: "Module instructions." }, "For a person.\n");
-  await write(
-    TEMPLATE,
-    {
-      type: "template",
-      module: "code-review",
-      description: "One review of one change.",
-      skills: ["review"],
-      policies: ["[[Be kind]]"],
-      promises: ["[[Report written]]", "[[internal/code-review/promises/Report is useful|Report is useful]]"],
-      articles: ["[[Always say hello]]"],
-      maxIterations: 2,
-      access: "edit",
-      instructions: "Template instructions.",
-      fields: { change: "", rounds: 1 },
-      ...template,
-    },
-    "## Change\n\nName the change here.\n",
-  );
-  await t!.vault.write("internal/code-review/skills/review/SKILL.md", "---\nname: review\ndescription: How to review a change.\n---\n# Review\n\nRead the change.\n");
-  await write("internal/code-review/policies/Be kind.md", { type: "policy", module: "code-review" }, "Say what is good first.\n");
-  await write("internal/code-review/promises/Report written.md", { type: "promise", module: "code-review", check: "exists", path: "code-review/{{session}}/Report.md" }, "The report.\n");
-  await write("internal/code-review/promises/Report is useful.md", { type: "promise", module: "code-review" }, "The report names each problem with its line.\n");
+  await write(FLOW, {
+    name: "review-a-change",
+    description: "One review of one change.",
+    skills: ["review"],
+    agents: ["second-look"],
+    policies: ["be-kind", "hello:always-say-hello"],
+    promises: ["report-written", "[[internal/code-review/promises/report-is-useful/PROMISE|report-is-useful]]"],
+    articles: ["[[Style guide]]"],
+    maxIterations: 2,
+    access: "edit",
+    instructions: "Flow instructions.",
+    fields: { change: "", rounds: 1 },
+    ...flow,
+  });
+  await t!.vault.write(form("skills", "review", "SKILL"), "---\nname: review\ndescription: How to review a change.\n---\n# Review\n\nRead the change.\n");
+  await write(form("agents", "second-look", "AGENT"), { name: "second-look", description: "Reads the report again.", access: "read-only" }, "Read the report, and say what it misses.\n");
+  await write(form("policies", "be-kind", "POLICY"), { name: "be-kind", description: "Kind words first." }, "Say what is good first.\n");
+  await write(form("promises", "report-written", "PROMISE"), { name: "report-written", description: "The report exists.", check: "exists", path: "code-review/{{session}}/Report.md" }, "The report.\n");
+  await write(form("promises", "report-is-useful", "PROMISE"), { name: "report-is-useful", description: "The report helps." }, "The report names each problem with its line.\n");
+  await t!.vault.write("notes/Style guide.md", "Short sentences.\n");
 }
 
 async function fresh() {
@@ -71,25 +73,25 @@ describe("a vault module", () => {
     expect(module.schema).toEqual({ change: { type: "text", default: "" }, rounds: { type: "number", default: 1 } });
     expect(module.layout).toMatchObject({ sessions: "code-review", ledger: "internal/code-review/sessions.base" });
     expect(await vault.exists("internal/code-review/sessions.base")).toBe(true);
-    const [template] = module.templates;
-    expect(template).toMatchObject({
-      id: "review-a-change",
-      name: "Review a change",
+    const [flow] = module.flows;
+    expect(flow).toMatchObject({
+      name: "review-a-change",
       label: "New review a change",
       description: "One review of one change.",
       maxIterations: 2,
       access: "edit",
-      instructions: "Template instructions.",
+      instructions: "Flow instructions.",
       fields: { change: "", rounds: 1 },
-      body: "## Change\n\nName the change here.\n",
       command: true,
     });
-    expect(Object.values(template!.links()).flat().map((d) => `${d.kind} ${d.name} ${d.path}`)).toEqual([
+    expect(Object.values(flow!.links()).flat().map((d) => `${d.kind} ${d.name} ${d.path}`)).toEqual([
+      "agent second-look internal/code-review/agents/second-look/AGENT.md",
+      "article Style guide notes/Style guide.md",
+      "policy be-kind internal/code-review/policies/be-kind/POLICY.md",
+      "policy always-say-hello internal/hello/policies/always-say-hello/POLICY.md",
+      "promise report-written internal/code-review/promises/report-written/PROMISE.md",
+      "promise report-is-useful internal/code-review/promises/report-is-useful/PROMISE.md",
       "skill review internal/code-review/skills/review/SKILL.md",
-      "policy Be kind internal/code-review/policies/Be kind.md",
-      "promise Report written internal/code-review/promises/Report written.md",
-      "promise Report is useful internal/code-review/promises/Report is useful.md",
-      "article Always say hello internal/hello/policies/Always say hello.md",
     ]);
     expect(module.acts().map((a) => `${a.kind}:${a.label}`)).toEqual(["new:New review a change"]);
     expect(module.tools()).toEqual([]);
@@ -97,64 +99,72 @@ describe("a vault module", () => {
     expect(agent.preferences.skills).toContain(`${root}/internal/code-review`);
   });
 
-  it("runs its sessions in the same loop as any module's, with the base skill and the review", async () => {
+  it("runs its sessions in the same loop as any module's, with the base skill, the agents, and the review", async () => {
     const { yami, vault, agent } = await fresh();
     await codeReview();
     await yami.discover();
     const module = yami.module("code-review")!;
-    const session = await module.templates[0]!.create({ name: "PR 12", fields: { change: "PR 12" } });
+    const session = await module.flows[0]!.create({ name: "PR 12", request: "Review PR 12.", fields: { change: "PR 12" } });
     expect(session.path).toBe("code-review/PR 12.md");
     const doc = await readDocument(vault, session.path);
     expect(doc.properties).toMatchObject({
       module: "code-review",
-      template: "review-a-change",
+      flow: "review-a-change",
       change: "PR 12",
       rounds: 1,
-      policies: ["[[internal/code-review/policies/Be kind|Be kind]]"],
+      agents: ["[[internal/code-review/agents/second-look/AGENT|second-look]]"],
+      policies: ["[[internal/code-review/policies/be-kind/POLICY|be-kind]]", "[[internal/hello/policies/always-say-hello/POLICY|always-say-hello]]"],
       skills: ["[[internal/code-review/skills/review/SKILL|review]]"],
-      articles: ["[[internal/hello/policies/Always say hello|Always say hello]]"],
+      articles: ["[[notes/Style guide|Style guide]]"],
     });
-    expect(doc.body).toContain("# PR 12\n\n## Change\n\nName the change here.\n\n## Deliverables");
+    expect(doc.body).toContain("# PR 12\n\n## Request\nReview PR 12.\n\n## Deliverables");
 
     agent.queue(() => vault.write("code-review/PR 12/Report.md", "Fine.\n"), review());
     expect(await session.start()).toMatchObject({ state: "done", iterations: 1 });
     const [prompt] = agent.started[0]!.prompts;
-    expect(prompt).toMatch(/^\/yami:run This is the Yami session "PR 12", a "Review a change" session of the module "Code review"\./);
-    expect(prompt).toContain("Module instructions.\n\nTemplate instructions.");
+    expect(prompt).toMatch(/^\/yami:run This is the Yami session "PR 12", a "review-a-change" session of the module "Code review"\./);
+    expect(prompt).toContain("Module instructions.\n\nFlow instructions.");
     expect(prompt).toContain("- change: PR 12\n- rounds: 1");
+    expect(prompt).toContain("## Request\nReview PR 12.");
     expect(prompt).toContain("- `code-review:review`: How to review a change.");
-    expect(agent.started[1]!.prompts[0]).toContain("### Be kind");
-    expect(agent.started[1]!.prompts[0]).toContain("### Report is useful");
+    expect(prompt).toContain("- `second-look`: Reads the report again. It is read-only.");
+    expect(agent.started[1]!.prompts[0]).toContain("### be-kind");
+    expect(agent.started[1]!.prompts[0]).toContain("### always-say-hello");
+    expect(agent.started[1]!.prompts[0]).toContain("### report-is-useful");
 
     const [summary] = await yami.summaries(module);
-    expect(summary).toMatchObject({ name: "PR 12", status: "done", module, template: module.templates[0], met: 2, unmet: 0 });
+    expect(summary).toMatchObject({ name: "PR 12", status: "done", module, flow: module.flows[0], met: 2, unmet: 0 });
     const details = await session.details();
-    expect(details.documents.map((d) => [d.name, d.met ?? d.followed])).toEqual([
-      ["Report written", true],
-      ["Report is useful", true],
-      ["Be kind", true],
-      ["review", undefined],
-      ["Always say hello", undefined],
+    expect(details.documents.map((d) => [d.kind, d.name, d.met ?? d.followed])).toEqual([
+      ["promises", "report-written", true],
+      ["promises", "report-is-useful", true],
+      ["policies", "be-kind", true],
+      ["policies", "always-say-hello", true],
+      ["skills", "review", undefined],
+      ["agents", "second-look", undefined],
+      ["articles", "Style guide", undefined],
     ]);
     expect(session.acts(doc.properties).map((a) => a.kind)).toEqual(["start"]);
   });
 
-  it("takes defaults: the file's name as the template's name, the id as the module's name, and the default icon", async () => {
+  it("takes defaults: the id as the module's name, the default icon, and the defaults of a flow", async () => {
     const { yami } = await fresh();
     await write("internal/notes/notes.md", { type: "module" });
-    await write("internal/notes/templates/Daily note.md", { type: "template", command: false }, "");
+    await write("internal/notes/flows/daily/FLOW.md", { name: "daily", description: "A daily note.", command: false });
     await yami.discover();
+    expect(yami.problems).toEqual([]);
     const module = yami.module("notes")!;
     expect(module).toMatchObject({ name: "notes", icon: "box", description: undefined, schema: {} });
-    expect(module.templates[0]).toMatchObject({ id: "daily-note", name: "Daily note", maxIterations: 3, access: "edit", command: false });
+    expect(module.flows[0]).toMatchObject({ name: "daily", label: "New daily", maxIterations: 3, access: "edit", command: false, agents: [] });
     expect(module.acts()).toEqual([]);
     expect(module.hasSkills).toBe(false);
     expect(yami.skills().some((s) => s.endsWith("internal/notes"))).toBe(false);
   });
 
-  it("is no module without a template: a module document that a code module left behind, or a code module's own folder", async () => {
+  it("is no module without a flow: a module document that a code module left behind, a code module's own folder, or the old templates", async () => {
     const { yami } = await fresh();
     await write("internal/old/old.md", { type: "module", module: "old", name: "Old" });
+    await write("internal/old/templates/Task.md", { type: "template" });
     await yami.discover();
     expect(ids()).toEqual(["wiki", "hello"]);
     expect(yami.problems).toEqual([]);
@@ -162,57 +172,84 @@ describe("a vault module", () => {
 
   it("says which paths define a module", () => {
     expect(definesModule("internal/a/a.md")).toBe(true);
-    expect(definesModule("internal/a/templates/T.md")).toBe(true);
+    for (const folder of ["agents", "flows", "policies", "promises", "skills"]) {
+      expect(definesModule(`internal/a/${folder}/x/FORM.md`), folder).toBe(true);
+      expect(definesModule(`internal/a/${folder}/x.md`), folder).toBe(true);
+    }
     expect(definesModule("internal/a/b.md")).toBe(false);
-    expect(definesModule("internal/a/templates/x/y.md")).toBe(false);
+    expect(definesModule("internal/a/templates/T.md")).toBe(false);
+    expect(definesModule("internal/a/articles/x.md")).toBe(false);
     expect(definesModule("notes/a/a.md")).toBe(false);
   });
 });
 
 describe("the problems of vault modules", () => {
-  it("reports each problem with its module, its file, and how to fix it, and keeps every valid module and template", async () => {
+  it("reports each problem of a form with its module, its file, and how to fix it, and keeps every valid flow", async () => {
     const { yami } = await fresh();
     await codeReview();
-    // Templates of the same module that are not valid.
-    await t!.vault.write("internal/code-review/templates/Unparsed.md", "---\nname: a: b\n---\n");
-    await write("internal/code-review/templates/Bad access.md", { type: "template", access: "readonly" });
-    await write("internal/code-review/templates/Dead link.md", { type: "template", policies: ["[[No such policy]]"] });
-    await write("internal/code-review/templates/Core field.md", { type: "template", fields: { state: "done" } });
-    await write("internal/code-review/templates/No turns.md", { type: "template", maxIterations: 0 });
-    await write("internal/code-review/templates/Wrong type.md", { type: "policy" });
-    await write("internal/code-review/templates/Z other rounds.md", { type: "template", fields: { rounds: "two" } });
-    await write("internal/code-review/templates/review-a-change.md", { type: "template" });
-    await write("internal/code-review/templates/!!!.md", { type: "template" });
+    const flow = (name: string) => `internal/code-review/flows/${name}/FLOW.md`;
+    const base = (name: string) => ({ name, description: "A flow." });
+    // Forms in the wrong shape.
+    await write("internal/code-review/policies/Be brief.md", { name: "be-brief", description: "One line." }, "One line.\n");
+    await write("internal/code-review/flows/old.md", base("old"));
+    await write(form("policies", "misnamed", "POLICY"), { name: "Misnamed", description: "A policy." }, "Rule.\n");
+    await write(form("agents", "admin", "AGENT"), { name: "admin", description: "An agent.", access: "admin" }, "Brief.\n");
+    await write("internal/code-review/policies/Bad Folder/POLICY.md", { name: "Bad Folder", description: "A policy." }, "Rule.\n");
+    await write(form("skills", "nameless", "SKILL"), { description: "A skill." }, "Body.\n");
+    // Flows that are not valid.
+    await t!.vault.write(flow("unparsed"), "---\nname: a: b\n---\n");
+    await write(flow("bad-access"), { ...base("bad-access"), access: "readonly" });
+    await write(flow("with-body"), base("with-body"), "## Change\n\nName the change here.\n");
+    await write(flow("renamed"), base("other-name"));
+    await write(flow("no-description"), { name: "no-description" });
+    await write(flow("dead-name"), { ...base("dead-name"), policies: ["no-such-policy"], agents: ["other:helper"] });
+    await write(flow("old-link"), { ...base("old-link"), policies: ["[[Be kind]]"] });
+    await write(flow("dead-article"), { ...base("dead-article"), articles: ["[[No such note]]"] });
+    await write(flow("names-broken"), { ...base("names-broken"), policies: ["misnamed"] });
+    await write(flow("core-field"), { ...base("core-field"), fields: { state: "done" } });
+    await write(flow("no-turns"), { ...base("no-turns"), maxIterations: 0 });
+    await write(flow("z-other-rounds"), { ...base("z-other-rounds"), fields: { rounds: "two" } });
     // Folders that are no vault module.
     await t!.vault.write("internal/unparsed/unparsed.md", "---\nname: a: b\n---\n");
-    await write("internal/unparsed/templates/T.md", { type: "template" });
+    await write("internal/unparsed/flows/t/FLOW.md", base("t"));
     await write("internal/Bad Name/Bad Name.md", { type: "module" });
-    await write("internal/Bad Name/templates/T.md", { type: "template" });
-    await write("internal/hello/templates/T.md", { type: "template" });
-    await write("internal/yami/templates/T.md", { type: "template" });
-    await write("internal/headless/templates/T.md", { type: "template" });
+    await write("internal/Bad Name/flows/t/FLOW.md", base("t"));
+    await write("internal/hello/flows/t/FLOW.md", base("t"));
+    await write("internal/yami/flows/t/FLOW.md", base("t"));
+    await write("internal/headless/flows/t/FLOW.md", base("t"));
     await write("internal/typeless/typeless.md", { name: "Typeless" });
-    await write("internal/typeless/templates/T.md", { type: "template" });
+    await write("internal/typeless/flows/t/FLOW.md", base("t"));
     // A module whose bad color falls back to the default.
     await write("internal/teal/teal.md", { type: "module", color: "teal", icon: 3 });
-    await write("internal/teal/templates/T.md", { type: "template" });
+    await write("internal/teal/flows/t/FLOW.md", base("t"));
     await yami.discover();
 
     expect(ids()).toEqual(["wiki", "hello", "code-review", "teal"]);
-    expect(yami.module("code-review")!.templates.map((tp) => tp.id)).toEqual(["review-a-change"]);
+    expect(yami.module("code-review")!.flows.map((f) => f.name)).toEqual(["review-a-change"]);
     expect(yami.module("teal")).toMatchObject({ color: undefined, icon: "box" });
+    const cr = "code-review · internal/code-review";
     expect(messages()).toEqual([
-      "Bad Name · internal/Bad Name · \"Bad Name\" cannot be a module id. Rename the folder to bad-name: lower-case letters, digits, and dashes.",
-      "code-review · internal/code-review/templates/!!!.md · The file name gives no template id. Name the file with letters or digits.",
-      "code-review · internal/code-review/templates/Bad access.md · The property access must be one of edit, read-only.",
-      "code-review · internal/code-review/templates/Core field.md · The field state is a core session field, which Yami sets. Rename it.",
-      'code-review · internal/code-review/templates/Dead link.md · The template links the policy "No such policy", which is not in the vault. Create it, or fix the link in policies.',
-      "code-review · internal/code-review/templates/No turns.md · maxIterations must be a whole number of 1 or more, not 0.",
-      "code-review · internal/code-review/templates/Unparsed.md · The properties do not parse: Nested mappings are not allowed in compact mappings at line 1, column 7. Fix them in the document's source view.",
-      "code-review · internal/code-review/templates/Wrong type.md · Set the property type: template, or move the document out of templates/.",
-      "code-review · internal/code-review/templates/Z other rounds.md · The field rounds is text here and a number in another template. Give it one type.",
-      "code-review · internal/code-review/templates/review-a-change.md · The template id review-a-change is the id of internal/code-review/templates/Review a change.md too, as both file names give it. Rename one of the files.",
-      "headless · internal/headless · The folder has templates but no module document. Create internal/headless/headless.md with the property type: module.",
+      'Bad Name · internal/Bad Name · "Bad Name" cannot be a module id. Rename the folder to bad-name: lower-case letters, digits, and dashes.',
+      `${cr}/agents/admin/AGENT.md · The property access must be one of edit, read-only.`,
+      `${cr}/flows/bad-access/FLOW.md · The property access must be one of edit, read-only.`,
+      `${cr}/flows/core-field/FLOW.md · The field state is a core session field, which Yami sets. Rename it.`,
+      `${cr}/flows/dead-article/FLOW.md · The flow links the article "No such note", which is not in the vault. Create it, or fix the link in articles.`,
+      `${cr}/flows/dead-name/FLOW.md · The flow names the agent "other:helper", which is not in the vault. Create internal/other/agents/helper/AGENT.md, or fix the name in agents.`,
+      `${cr}/flows/dead-name/FLOW.md · The flow names the policy "no-such-policy", which is not in the vault. Create internal/code-review/policies/no-such-policy/POLICY.md, or fix the name in policies.`,
+      `${cr}/flows/names-broken/FLOW.md · The flow names the policy "misnamed", whose document has a problem. Fix internal/code-review/policies/misnamed/POLICY.md first.`,
+      `${cr}/flows/no-description/FLOW.md · The property description is missing.`,
+      `${cr}/flows/no-turns/FLOW.md · maxIterations must be a whole number of 1 or more, not 0.`,
+      `${cr}/flows/old-link/FLOW.md · The flow names the policy "Be kind", which is no name. Name a policy by its folder's name, or as <module>:<name>, in policies.`,
+      `${cr}/flows/old.md · A flow is a folder with a FLOW.md in it. Move this file to internal/code-review/flows/old/FLOW.md, and set name: old.`,
+      `${cr}/flows/renamed/FLOW.md · The name is "other-name", and the folder is renamed. A name is its folder's name: set name: renamed, or rename the folder.`,
+      `${cr}/flows/unparsed/FLOW.md · The properties do not parse: Nested mappings are not allowed in compact mappings at line 1, column 7. Fix them in the document's source view.`,
+      `${cr}/flows/with-body/FLOW.md · A flow has no body. Move the text into the property instructions, and leave the body empty.`,
+      `${cr}/flows/z-other-rounds/FLOW.md · The field rounds is text here and a number in another flow. Give it one type.`,
+      `${cr}/policies/Bad Folder/POLICY.md · "Bad Folder" cannot name a policy. Rename the folder to bad-folder, and set the same name: lower-case letters, digits, and dashes.`,
+      `${cr}/policies/Be brief.md · A policy is a folder with a POLICY.md in it. Move this file to internal/code-review/policies/be-brief/POLICY.md, and set name: be-brief.`,
+      `${cr}/policies/misnamed/POLICY.md · The name is "Misnamed", and the folder is misnamed. A name is its folder's name: set name: misnamed, or rename the folder.`,
+      `${cr}/skills/nameless/SKILL.md · The property name is missing. Set name: nameless.`,
+      "headless · internal/headless · The folder has flows but no module document. Create internal/headless/headless.md with the property type: module.",
       "hello · internal/hello · The plugin's code has a module with the id hello, and it wins. Rename the folder internal/hello/ to give the vault module an id of its own.",
       "teal · internal/teal/teal.md · The property icon must be text. Yami leaves it out until you fix it.",
       'teal · internal/teal/teal.md · The color "teal" is not a hex code such as #3e63dd. The module takes a basic color until you fix it.',
@@ -228,22 +265,22 @@ describe("the problems of vault modules", () => {
   it("keeps the other modules' sessions running", async () => {
     const { yami, agent, vault } = await fresh();
     await t!.vault.write("internal/broken/broken.md", "---\nname: a: b\n---\n");
-    await write("internal/broken/templates/T.md", { type: "template" });
+    await write("internal/broken/flows/t/FLOW.md", { name: "t", description: "A flow." });
     await yami.discover();
     const session = await (yami.module("hello") as Hello).greet.create({ name: "ok" });
     agent.queue(() => vault.write("greetings/ok.md", "Hello, ok"), review());
     expect(await session.start()).toMatchObject({ state: "done" });
   });
 
-  it("fails a session whose template is gone with a clear error", async () => {
+  it("fails a session whose flow is gone with a clear error", async () => {
     const { yami, vault } = await fresh();
     await codeReview();
     await yami.discover();
-    const session = await yami.module("code-review")!.templates[0]!.create({ name: "orphan" });
-    await vault.remove(TEMPLATE);
-    await write("internal/code-review/templates/Other.md", { type: "template" });
+    const session = await yami.module("code-review")!.flows[0]!.create({ name: "orphan" });
+    await vault.remove(FLOW);
+    await write("internal/code-review/flows/other/FLOW.md", { name: "other", description: "Another flow." });
     await yami.discover();
-    await expect(session.start()).rejects.toThrow('code-review/orphan.md names the template "review-a-change", which the code-review module does not have.');
+    await expect(session.start()).rejects.toThrow('code-review/orphan.md names the flow "review-a-change", which the code-review module does not have.');
   });
 });
 
@@ -257,7 +294,7 @@ describe("live changes", () => {
 
     await codeReview();
     await write("internal/notes/notes.md", { type: "module" });
-    await write("internal/notes/templates/Daily.md", { type: "template" });
+    await write("internal/notes/flows/daily/FLOW.md", { name: "daily", description: "A daily note." });
     await yami.discover();
     expect(heard).toBe(1);
     expect(ids()).toEqual(["wiki", "hello", "code-review", "notes"]);
@@ -268,26 +305,26 @@ describe("live changes", () => {
     await yami.discover();
     expect(heard).toBe(1);
 
-    await write(TEMPLATE, { type: "template", name: "Review", skills: ["review"] }, "");
+    await write(FLOW, { name: "review-a-change", description: "A shorter review.", skills: ["review"] });
     await yami.discover();
     expect(heard).toBe(2);
     expect(yami.module("code-review")).not.toBe(before);
-    expect(yami.module("code-review")!.templates[0]).toMatchObject({ id: "review-a-change", label: "New review" });
+    expect(yami.module("code-review")!.flows[0]).toMatchObject({ name: "review-a-change", description: "A shorter review." });
     expect(yami.module("notes")).toBe(notes);
 
-    await vault.write("internal/code-review/templates/Quick look.md", await vault.read(TEMPLATE));
-    await vault.remove(TEMPLATE);
+    await write("internal/code-review/flows/quick-look/FLOW.md", { name: "quick-look", description: "A quick look.", skills: ["review"] });
+    await vault.remove(FLOW);
     await yami.discover();
     expect(heard).toBe(3);
-    expect(yami.module("code-review")!.templates.map((tp) => tp.id)).toEqual(["quick-look"]);
+    expect(yami.module("code-review")!.flows.map((f) => f.name)).toEqual(["quick-look"]);
 
     await vault.remove("internal/code-review/skills/review/SKILL.md");
     await yami.discover();
     expect(heard).toBe(4);
     expect(ids()).toEqual(["wiki", "hello", "code-review", "notes"]);
-    expect(yami.module("code-review")!.templates).toEqual([]);
+    expect(yami.module("code-review")!.flows).toEqual([]);
     expect(messages()).toEqual([
-      'code-review · internal/code-review/templates/Quick look.md · The template links the skill "review", which is not in the vault. Create it, or fix the link in skills.',
+      'code-review · internal/code-review/flows/quick-look/FLOW.md · The flow names the skill "review", which is not in the vault. Create internal/code-review/skills/review/SKILL.md, or fix the name in skills.',
     ]);
     expect(agent.preferences.skills).not.toContain(`${root}/internal/code-review`);
 
@@ -296,17 +333,17 @@ describe("live changes", () => {
     expect(heard).toBe(5);
     expect(ids()).toEqual(["wiki", "hello", "notes"]);
     off();
-    await vault.remove("internal/notes/templates/Daily.md");
+    await vault.remove("internal/notes/flows/daily/FLOW.md");
     await yami.discover();
     expect(heard).toBe(5);
     expect(ids()).toEqual(["wiki", "hello"]);
   });
 
-  it("lets a live run keep the template it started with", async () => {
+  it("lets a live run keep the flow it started with", async () => {
     const { yami, vault, agent } = await fresh();
     await codeReview();
     await yami.discover();
-    const session = await yami.module("code-review")!.templates[0]!.create({ name: "kept" });
+    const session = await yami.module("code-review")!.flows[0]!.create({ name: "kept" });
     let release!: () => void;
     let begun!: () => void;
     const started = new Promise<void>((resolve) => (begun = resolve));
@@ -317,9 +354,9 @@ describe("live changes", () => {
     agent.queue(first, () => vault.write("code-review/kept/Report.md", "Fine.\n"), review());
     const run = session.start();
     await started;
-    await write(TEMPLATE, { type: "template", maxIterations: 1, policies: ["[[Be kind]]"] });
+    await write(FLOW, { name: "review-a-change", description: "One turn.", maxIterations: 1, policies: ["be-kind"] });
     await yami.discover();
-    expect(yami.module("code-review")!.templates[0]!.maxIterations).toBe(1);
+    expect(yami.module("code-review")!.flows[0]!.maxIterations).toBe(1);
     release();
     expect(await run).toMatchObject({ state: "done", iterations: 2 });
   });
@@ -329,13 +366,13 @@ describe("a test Yami with files", () => {
   it("copies files and folders into the vault before it enables the modules, so discovery finds them at start", async () => {
     const fixture = await mkdtemp(join(tmpdir(), "yami-fixture-"));
     try {
-      await mkdir(join(fixture, "notes/templates"), { recursive: true });
+      await mkdir(join(fixture, "notes/flows/daily"), { recursive: true });
       await writeFile(join(fixture, "notes/notes.md"), "---\ntype: module\nname: Notes\n---\n");
-      await writeFile(join(fixture, "notes/templates/Daily.md"), "---\ntype: template\n---\n");
+      await writeFile(join(fixture, "notes/flows/daily/FLOW.md"), "---\nname: daily\ndescription: A daily note.\n---\n");
       await writeFile(join(fixture, "Readme.md"), "Read me.\n");
       t = await testYami({ files: { "internal/notes": join(fixture, "notes"), "docs/Readme.md": join(fixture, "Readme.md") } });
       expect(t.yami.module("notes")).toBeInstanceOf(VaultModule);
-      expect(t.yami.module("notes")!.templates.map((tp) => tp.id)).toEqual(["daily"]);
+      expect(t.yami.module("notes")!.flows.map((f) => f.name)).toEqual(["daily"]);
       expect(await t.vault.read("docs/Readme.md")).toBe("Read me.\n");
       expect(await t.vault.exists("internal/notes/sessions.base")).toBe(true);
     } finally {
@@ -349,19 +386,28 @@ describe("a test Yami with files", () => {
 });
 
 describe("a new vault module from the starter", () => {
-  it("creates a module whose session runs to done", async () => {
+  it("creates a module in the five forms, whose session runs to done", async () => {
     const { yami, vault, agent } = await fresh();
     const module = await yami.createModule("Code review");
     expect(module).toBeInstanceOf(VaultModule);
     expect(module).toMatchObject({ id: "code-review", name: "Code review", document: MODULE });
     expect(yami.module("code-review")).toBe(module);
     expect(yami.problems).toEqual([]);
-    for (const file of ["internal/code-review/templates/Task.md", "internal/code-review/skills/task/SKILL.md", "internal/code-review/policies/Stay in scope.md", "internal/code-review/promises/Result note.md", "internal/code-review/sessions.base"]) {
+    for (const file of [
+      "internal/code-review/flows/task/FLOW.md",
+      "internal/code-review/skills/task/SKILL.md",
+      "internal/code-review/agents/checker/AGENT.md",
+      "internal/code-review/policies/stay-in-scope/POLICY.md",
+      "internal/code-review/promises/result-note/PROMISE.md",
+      "internal/code-review/sessions.base",
+    ]) {
       expect(await vault.exists(file), file).toBe(true);
     }
-    const [template] = module.templates;
-    expect(template).toMatchObject({ id: "task", label: "New task" });
-    const session = await template!.create({ name: "First" });
+    expect((await readDocument(vault, "internal/code-review/flows/task/FLOW.md")).body).toBe("");
+    const [flow] = module.flows;
+    expect(flow).toMatchObject({ name: "task", label: "New task" });
+    expect(flow!.agents.map((a) => a.name)).toEqual(["checker"]);
+    const session = await flow!.create({ name: "First", request: "Write a hello note." });
     agent.queue(() => vault.write("code-review/First/Result.md", "Done.\n"), review());
     expect(await session.start()).toMatchObject({ state: "done", iterations: 1 });
   });

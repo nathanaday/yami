@@ -1,12 +1,12 @@
 import { writeDocument } from "../document/document.js";
 import { timestamp } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
-import { MODULE_ICON, moduleLayout } from "./module.js";
+import { formPath, MODULE_ICON, moduleLayout } from "./module.js";
 
 /**
- * Writes a starter vault module: the module document, one template, one skill, one policy, and one
- * promise with a core check. A session from it runs to `done` when the agent writes the result note
- * and the review finds the policy followed. The caller checks that the id is free.
+ * Writes a starter vault module: the module document, one flow, one skill, one agent, one policy, and one
+ * promise with a core check. A session from it runs to `done` when the agent writes the result note and the
+ * review finds the policy followed. The caller checks that the id is free.
  */
 export async function writeStarter(vault: Vault, id: string, name: string): Promise<void> {
   const lay = moduleLayout(id);
@@ -26,50 +26,55 @@ export async function writeStarter(vault: Vault, id: string, name: string): Prom
 This module is defined in the vault, with no code. Change it here:
 
 - This document: the module's \`name\`, \`description\`, \`icon\`, \`color\`, and \`instructions\` for every run.
-- \`templates/\`: one document for each kind of session. Its properties link the session's skills, policies, and promises, and its body is the body of a new session.
-- \`skills/\`, \`policies/\`, and \`promises/\`: the documents that the templates link.
+- \`flows/<name>/FLOW.md\`: one for each kind of session. Its properties name the session's skills, agents, policies, and promises, and give its fields and its instructions. It has no body.
+- \`skills/<name>/SKILL.md\`, \`agents/<name>/AGENT.md\`, \`policies/<name>/POLICY.md\`, and \`promises/<name>/PROMISE.md\`: the documents that the flows name. Each starts with its \`name\`, the name of its folder, and a \`description\`.
 
 Sessions: [[${lay.ledger}|${name} sessions]]
 `,
   });
   await writeDocument(vault, {
-    path: `${lay.internal}/templates/Task.md`,
+    path: formPath(lay, "flow", "task"),
     properties: {
-      type: "template",
-      module: id,
-      name: "Task",
+      name: "task",
       description: "One task, which an agent does in the vault.",
       skills: ["task"],
-      policies: ["[[Stay in scope]]"],
-      promises: ["[[Result note]]"],
+      agents: ["checker"],
+      policies: ["stay-in-scope"],
+      promises: ["result-note"],
       maxIterations: 3,
       access: "edit",
-      instructions: "Do the task that the Request section of the session document gives.",
+      instructions: "",
       command: true,
     },
-    body: "## Request\n\nWrite the task here. Then run the session.\n",
+    body: "",
   });
   await vault.write(
-    `${lay.folders.skills}/task/SKILL.md`,
+    formPath(lay, "skill", "task"),
     `---
 name: task
 description: How to do the task of a ${name} session, and write its result note.
 ---
 # Task
 
-1. Read the Request section of the session document.
+1. Read the Request section of the session document. It says what to do.
 2. Do the task. Change only what the request needs.
-3. Write the result note at the path that the Result note promise gives: what you did, and a link to each file you changed.
+3. Write the result note at the path that the result-note promise gives: what you did, and a link to each file you changed.
+4. Ask the checker agent to compare the result note with the request. Fix what it finds.
 `,
   );
   await writeDocument(vault, {
-    path: `${lay.folders.policies}/Stay in scope.md`,
-    properties: { type: "policy", module: id },
+    path: formPath(lay, "agent", "checker"),
+    properties: { name: "checker", description: "Compares the work of a session with its request, and says what is missing. It changes nothing.", access: "read-only" },
+    body: "Read the session document that the task names: its Request section says what the work must do. Read the result note and each file that it links. Answer with a list of what the request asks for and the work does not do, or with `Nothing is missing.`\n",
+  });
+  await writeDocument(vault, {
+    path: formPath(lay, "policy", "stay-in-scope"),
+    properties: { name: "stay-in-scope", description: "Change only what the request needs." },
     body: "Change only the files that the request needs, and the result note. The result note names each file that the session changed.\n",
   });
   await writeDocument(vault, {
-    path: `${lay.folders.promises}/Result note.md`,
-    properties: { type: "promise", module: id, check: "exists", path: `${id}/{{session}}/Result.md` },
+    path: formPath(lay, "promise", "result-note"),
+    properties: { name: "result-note", description: "A note that says what the session did.", check: "exists", path: `${id}/{{session}}/Result.md` },
     body: "A note that says what the session did, and links each file that it changed.\n",
   });
 }

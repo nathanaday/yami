@@ -11,29 +11,29 @@ afterEach(async () => {
   t = undefined;
 });
 
-/** Hello, with a promise that no check decides and a template that links it, and a template with no policy. */
+/** Hello, with a promise that no check decides and a flow that links it, and a flow with no policy. */
 class Judged extends Hello {
   readonly id = "judged";
-  readonly kind = this.promise("Kind words", "The greeting is warm.");
-  readonly odd = this.promise("Odd check", "A check that Yami does not know.", { check: "nonesuch" });
-  readonly warm = this.template({ id: "warm", name: "Warm", policies: [this.polite], promises: [this.note, this.kind] });
-  readonly plain = this.template({ id: "plain", name: "Plain", promises: [this.note] });
-  readonly unknown = this.template({ id: "unknown", name: "Unknown", policies: [this.polite], promises: [this.odd] });
+  readonly kind = this.promise({ name: "kind-words", description: "The greeting is warm.", body: "The greeting is warm." });
+  readonly odd = this.promise({ name: "odd-check", description: "A check that Yami does not know.", check: "nonesuch", body: "A check that Yami does not know." });
+  readonly warm = this.flow({ name: "warm", description: "Warm.", policies: [this.polite], promises: [this.note, this.kind] });
+  readonly plain = this.flow({ name: "plain", description: "Plain.", promises: [this.note] });
+  readonly unknown = this.flow({ name: "unknown", description: "Unknown.", policies: [this.polite], promises: [this.odd] });
 
   tools(): AgentTool[] {
     return [...super.tools(), defineTool({ name: "count", description: "Counts the greetings.", input: {}, readOnly: true, run: async () => "0" })];
   }
 }
 
-async function fresh(name: string, template: (m: Judged) => Judged["greet"] = (m) => m.greet) {
+async function fresh(name: string, flow: (m: Judged) => Judged["greet"] = (m) => m.greet) {
   const module = new Judged();
   t = await testYami({ modules: [module] });
-  const session = await template(module).create({ name, exact: true });
+  const session = await flow(module).create({ name, exact: true });
   return { ...t, module, session, path: session.path };
 }
 
 const write = (name: string) => () => t!.vault.write(`greetings/${name}.md`, `Hello, ${name}`);
-const POLICY = "[[internal/judged/policies/Always say hello|Always say hello]]";
+const POLICY = "[[internal/judged/policies/always-say-hello/POLICY|always-say-hello]]";
 
 function hold(): { turn: Turn; begun: Promise<void> } {
   let begin!: () => void;
@@ -59,14 +59,14 @@ describe("the review step", () => {
     expect(reviewer.id).not.toBe(agent.started[0]!.id);
     expect(reviewer.options.access).toBe("read-only");
     const [prompt] = reviewer.prompts;
-    expect(prompt).toMatch(/^You review the Yami session "all", a "Greeting" session of the module "Hello world"\./);
+    expect(prompt).toMatch(/^You review the Yami session "all", a "greet" session of the module "Hello world"\./);
     expect(prompt).toContain("\nThe session document is judged/all.md. The conversation note conversations/judged all.md records the run");
-    expect(prompt).toContain("## Policies\n\n### Always say hello\n\nPath: internal/judged/policies/Always say hello.md");
+    expect(prompt).toContain("## Policies\n\n### always-say-hello\n\nPath: internal/judged/policies/always-say-hello/POLICY.md");
     expect(prompt).toContain("## The worker's last message\n\nI wrote greetings/all.md.");
     expect(prompt).not.toContain("## Promises");
-    expect(prompt).toContain("Judge each policy and each promise below, and only these: Always say hello. Yami's checks decided the other promises of the session.");
+    expect(prompt).toContain("Judge each policy and each promise below, and only these: always-say-hello. Yami's checks decided the other promises of the session.");
     // The reviewer sees the session as the verification left it.
-    expect(prompt).toContain("- [x] [[internal/judged/promises/Greeting note|Greeting note]] — found greetings/all.md");
+    expect(prompt).toContain("- [x] [[internal/judged/promises/greeting-note/PROMISE|greeting-note]] — found greetings/all.md");
     expect(prompt).toContain("iteration 1: 1 met, 0 unmet");
 
     const doc = await readDocument(vault, path);
@@ -76,19 +76,19 @@ describe("the review step", () => {
     expect(doc.body).toContain("iteration 1: review: 1 followed, 0 broken");
     const details = await session.details();
     expect(details.review).toBe("conversations/judged all review.md");
-    expect(details.documents.find((d) => d.kind === "policies")).toMatchObject({ name: "Always say hello", followed: true, reason: "The scripted reviewer finds it followed." });
-    expect(details.documents.find((d) => d.kind === "promises")).toMatchObject({ name: "Greeting note", met: true, judged: false, reason: "found greetings/all.md" });
+    expect(details.documents.find((d) => d.kind === "policies")).toMatchObject({ name: "always-say-hello", followed: true, reason: "The scripted reviewer finds it followed." });
+    expect(details.documents.find((d) => d.kind === "promises")).toMatchObject({ name: "greeting-note", met: true, judged: false, reason: "found greetings/all.md" });
     expect(await vault.read("conversations/judged all review.md")).toContain("access: read-only");
   });
 
   it("sends a broken policy back to the worker, who fixes it, and the next review passes", async () => {
     const { session, agent, vault, path } = await fresh("fixed");
-    agent.queue(write("fixed"), review({ "Always say hello": ["broken", "It began with Hi."] }), () => {}, review());
+    agent.queue(write("fixed"), review({ "always-say-hello": ["broken", "It began with Hi."] }), () => {}, review());
     const result = await session.start();
     expect(result).toMatchObject({ state: "done", iterations: 2, review: "conversations/judged fixed review 2.md" });
     const worker = agent.started[0]!;
     expect(worker.prompts).toHaveLength(2);
-    expect(worker.prompts[1]).toBe("A reviewer judged your work after your last turn.\n\n- Always say hello (policy): broken, It began with Hi.\n\nFix what is broken or unmet. Follow the policies.");
+    expect(worker.prompts[1]).toBe("A reviewer judged your work after your last turn.\n\n- always-say-hello (policy): broken, It began with Hi.\n\nFix what is broken or unmet. Follow the policies.");
     const doc = await vault.read(path);
     expect(doc).toContain("iteration 1: review: 0 followed, 1 broken");
     expect(doc).toContain("iteration 2: 1 met, 0 unmet");
@@ -99,9 +99,9 @@ describe("the review step", () => {
   it("needs attention when the reviewer gives no verdict, and says on what", async () => {
     const { session, agent, vault, path } = await fresh("silent");
     agent.queue(write("silent"), () => ({ text: "Looks fine." }));
-    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 1: review: 0 followed, 0 broken; no verdict on Always say hello" });
+    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 1: review: 0 followed, 0 broken; no verdict on always-say-hello" });
     const doc = await vault.read(path);
-    expect(doc).toContain("iteration 1: review: 0 followed, 0 broken; no verdict on Always say hello");
+    expect(doc).toContain("iteration 1: review: 0 followed, 0 broken; no verdict on always-say-hello");
     expect(doc).toContain(`## Review\n- no verdict: ${POLICY}`);
     expect(await session.status()).toBe("needs-attention");
   });
@@ -130,7 +130,7 @@ describe("the review step", () => {
 
   it("needs attention when the review finds a policy broken on the last iteration", async () => {
     const { session, agent, path, vault } = await fresh("late");
-    agent.queue(write("late"), review({ "Always say hello": "broken" }));
+    agent.queue(write("late"), review({ "always-say-hello": "broken" }));
     expect(await session.start({ maxIterations: 1 })).toMatchObject({ state: "needs-attention", iterations: 1 });
     expect((await readDocument(vault, path)).properties).toMatchObject({ followed: [], broken: [POLICY] });
   });
@@ -172,17 +172,17 @@ describe("the review step", () => {
 
   it("judges a promise with no check: an unmet one goes back to the worker, and a met one counts as met", async () => {
     const { session, agent, vault, path } = await fresh("warm", (m) => m.warm);
-    agent.queue(write("warm"), review({ "Kind words": ["unmet", "It is curt."] }), () => {}, review());
+    agent.queue(write("warm"), review({ "kind-words": ["unmet", "It is curt."] }), () => {}, review());
     const result = await session.start();
     expect(result).toMatchObject({ state: "done", iterations: 2 });
     const [first, second] = agent.started[0]!.prompts;
     expect(first).toContain("- The review judges this promise: it has no check.");
-    expect(second).toContain("- Kind words (promise): unmet, It is curt.");
-    expect(agent.started[1]!.prompts[0]).toContain("## Promises\n\n### Kind words\n\nPath: internal/judged/promises/Kind words.md\n\nThe greeting is warm.");
-    expect(agent.started[1]!.prompts[0]).not.toContain("### Greeting note");
+    expect(second).toContain("- kind-words (promise): unmet, It is curt.");
+    expect(agent.started[1]!.prompts[0]).toContain("## Promises\n\n### kind-words\n\nPath: internal/judged/promises/kind-words/PROMISE.md\n\nThe greeting is warm.");
+    expect(agent.started[1]!.prompts[0]).not.toContain("### greeting-note");
     const doc = await readDocument(vault, path);
-    expect(doc.properties.met).toEqual(["[[internal/judged/promises/Greeting note|Greeting note]]", "[[internal/judged/promises/Kind words|Kind words]]"]);
-    expect(doc.body).toContain("- [x] [[internal/judged/promises/Kind words|Kind words]] — review: The scripted reviewer finds it met.");
+    expect(doc.properties.met).toEqual(["[[internal/judged/promises/greeting-note/PROMISE|greeting-note]]", "[[internal/judged/promises/kind-words/PROMISE|kind-words]]"]);
+    expect(doc.body).toContain("- [x] [[internal/judged/promises/kind-words/PROMISE|kind-words]] — review: The scripted reviewer finds it met.");
     expect(doc.body).toContain("iteration 1: review: 1 followed, 0 broken, 0 met, 1 unmet");
     const details = await session.details();
     expect(details.documents.filter((d) => d.kind === "promises").map(({ met, judged, reason }) => ({ met, judged, reason }))).toEqual([
@@ -196,9 +196,9 @@ describe("the review step", () => {
     agent.queue(write("waiting"), () => {});
     await session.start({ maxIterations: 1 });
     const doc = await readDocument(vault, path);
-    expect(doc.properties.unmet).toEqual(["[[internal/judged/promises/Kind words|Kind words]]"]);
+    expect(doc.properties.unmet).toEqual(["[[internal/judged/promises/kind-words/PROMISE|kind-words]]"]);
     expect(doc.body).toContain("iteration 1: 1 met, 0 unmet");
-    const kind = (await session.details()).documents.find((d) => d.name === "Kind words");
+    const kind = (await session.details()).documents.find((d) => d.name === "kind-words");
     expect(kind).toMatchObject({ met: false, judged: true, reason: "the review judges it" });
   });
 
@@ -206,9 +206,9 @@ describe("the review step", () => {
     const { session } = await fresh("before", (m) => m.warm);
     const documents = (await session.details()).documents.filter((d) => d.kind !== "skills");
     expect(documents.map(({ name, met, followed, judged, reason }) => ({ name, met, followed, judged, reason }))).toEqual([
-      { name: "Greeting note", met: undefined, followed: undefined, judged: false, reason: undefined },
-      { name: "Kind words", met: undefined, followed: undefined, judged: true, reason: undefined },
-      { name: "Always say hello", met: undefined, followed: undefined, judged: undefined, reason: undefined },
+      { name: "greeting-note", met: undefined, followed: undefined, judged: false, reason: undefined },
+      { name: "kind-words", met: undefined, followed: undefined, judged: true, reason: undefined },
+      { name: "always-say-hello", met: undefined, followed: undefined, judged: undefined, reason: undefined },
     ]);
   });
 
@@ -223,7 +223,7 @@ describe("the review step", () => {
 
   it("needs attention with no review when a check returns review, as an unknown check does", async () => {
     const { session, agent, vault, path } = await fresh("unknown", (m) => m.unknown);
-    const reason = 'iteration 1: 0 met, 0 unmet, 1 for review: Odd check — unknown check "nonesuch"';
+    const reason = 'iteration 1: 0 met, 0 unmet, 1 for review: odd-check — unknown check "nonesuch"';
     expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason });
     expect(agent.started).toHaveLength(1);
     expect(await vault.read(path)).toContain(reason);
@@ -251,21 +251,21 @@ describe("the review step", () => {
       results.push(JSON.parse((await reviewer.tool("yami_review", { verdicts: [] })).text));
       const wrong = await reviewer.tool("yami_review", {
         verdicts: [
-          { item: "Always say hello", verdict: "met", reason: "A policy cannot be met." },
+          { item: "always-say-hello", verdict: "met", reason: "A policy cannot be met." },
           { item: "Nothing", verdict: "followed", reason: "No such item." },
         ],
       });
       expect(wrong.isError).toBe(true);
       results.push(JSON.parse(wrong.text));
-      results.push(JSON.parse((await reviewer.tool("yami_review", { verdicts: [{ item: "[[internal/judged/policies/Always say hello]]", verdict: "followed", reason: "It said hello." }] })).text));
+      results.push(JSON.parse((await reviewer.tool("yami_review", { verdicts: [{ item: "[[internal/judged/policies/always-say-hello/POLICY]]", verdict: "followed", reason: "It said hello." }] })).text));
     });
     expect(await session.start()).toMatchObject({ state: "done" });
-    const item = { kind: "policy", name: "Always say hello", path: "internal/judged/policies/Always say hello.md" };
+    const item = { kind: "policy", name: "always-say-hello", path: "internal/judged/policies/always-say-hello/POLICY.md" };
     expect(results).toEqual([
       { recorded: 0, errors: [], remaining: [item] },
       {
         recorded: 0,
-        errors: ["Always say hello is a policy: its verdict is followed or broken, not met.", '"Nothing" is no policy or promise of this review. Judge only: Always say hello.'],
+        errors: ["always-say-hello is a policy: its verdict is followed or broken, not met.", '"Nothing" is no policy or promise of this review. Judge only: always-say-hello.'],
         remaining: [item],
       },
       { recorded: 1, errors: [], remaining: [] },
@@ -278,13 +278,13 @@ describe("the review step", () => {
     agent.queue(write("look"), async (_prompt, reviewer) => {
       const tool = reviewer.options.tools!.tools.find((candidate) => candidate.name === "yami_review")!;
       calls.push({ title: toolTitle(tool, {}), result: await reviewer.tool("yami_review", {}) });
-      await reviewer.tool("yami_review", { verdicts: [{ item: "Always say hello", verdict: "followed", reason: "It said hello." }] });
+      await reviewer.tool("yami_review", { verdicts: [{ item: "always-say-hello", verdict: "followed", reason: "It said hello." }] });
     });
     expect(await session.start()).toMatchObject({ state: "done" });
     expect(calls).toEqual([
       {
         title: "List the items to judge",
-        result: { isError: false, text: JSON.stringify({ recorded: 0, errors: [], remaining: [{ kind: "policy", name: "Always say hello", path: "internal/judged/policies/Always say hello.md" }] }) },
+        result: { isError: false, text: JSON.stringify({ recorded: 0, errors: [], remaining: [{ kind: "policy", name: "always-say-hello", path: "internal/judged/policies/always-say-hello/POLICY.md" }] }) },
       },
     ]);
   });
@@ -294,10 +294,10 @@ describe("the review step", () => {
     let kept: AgentTool | undefined;
     agent.queue(write("late-call"), async (_prompt, reviewer) => {
       kept = reviewer.options.tools?.tools.find((tool) => tool.name === "yami_review");
-      await reviewer.tool("yami_review", { verdicts: [{ item: "Always say hello", verdict: "followed", reason: "It said hello." }] });
+      await reviewer.tool("yami_review", { verdicts: [{ item: "always-say-hello", verdict: "followed", reason: "It said hello." }] });
     });
     expect(await session.start()).toMatchObject({ state: "done" });
-    const late = await runTool(kept!, { verdicts: [{ item: "Always say hello", verdict: "broken", reason: "Too late." }] }, new AbortController().signal);
+    const late = await runTool(kept!, { verdicts: [{ item: "always-say-hello", verdict: "broken", reason: "Too late." }] }, new AbortController().signal);
     expect(late).toEqual({ isError: true, text: "This review has ended. A verdict counts only while its review runs." });
   });
 });
@@ -314,8 +314,8 @@ describe("the self-check tool", () => {
       expect(await vault.read(path)).toBe(before);
     }, review());
     expect(await session.start()).toMatchObject({ state: "done" });
-    const promise = { promise: "internal/judged/promises/Greeting note.md", name: "Greeting note" };
-    const judged = ["internal/judged/promises/Kind words.md"];
+    const promise = { promise: "internal/judged/promises/greeting-note/PROMISE.md", name: "greeting-note" };
+    const judged = ["internal/judged/promises/kind-words/PROMISE.md"];
     expect(seen).toEqual([
       { checks: [{ ...promise, status: "unmet", detail: "no file at greetings/self.md" }], judged },
       { checks: [{ ...promise, status: "met", detail: "found greetings/self.md" }], judged },

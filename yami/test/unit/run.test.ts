@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
+import { FileConversations } from "../../src/conversation/index.js";
 import { link, readDocument } from "../../src/document/index.js";
 import { Yami, YamiModule, type SessionStatus } from "../../src/index.js";
 import { review, ScriptedAgent, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
@@ -39,17 +40,17 @@ describe("a run of the agent loop", () => {
     expect(result).toMatchObject({ state: "done", iterations: 2 });
     expect(result.reason).toBeUndefined();
     const [first, second] = agent.started[0]!.prompts;
-    expect(first).toContain('This is the Yami session "second", a "Greeting" session of the module "Hello world". The session document is hello/second.md.');
+    expect(first).toContain('This is the Yami session "second", a "greet" session of the module "Hello world". The session document is hello/second.md.');
     expect(first).toContain("## Policies");
     expect(first).toContain("## Promises");
     expect(first).toContain("- greeting: Hello");
     // The README quotes this text, so a host or a test can tell check feedback in a conversation record.
-    expect(second).toBe("Yami checked the promises after your last turn.\n\n- Greeting note: unmet, no file at greetings/second.md\n\nMeet the unmet promises. Follow the policies.");
+    expect(second).toBe("Yami checked the promises after your last turn.\n\n- greeting-note: unmet, no file at greetings/second.md\n\nMeet the unmet promises. Follow the policies.");
     const doc = await vault.read(path);
     expect(doc).toContain("iteration 1: 0 met, 1 unmet");
     expect(doc).toContain("iteration 2: 1 met, 0 unmet");
     expect(doc).toContain("iteration 2: review: 1 followed, 0 broken");
-    expect(doc).toContain("- [x] [[internal/hello/promises/Greeting note|Greeting note]]");
+    expect(doc).toContain("- [x] [[internal/hello/promises/greeting-note/PROMISE|greeting-note]]");
     expect(doc).toContain("state: done");
     expect(doc).toContain('conversation: "[[conversations/hello second|hello second]]"');
     const record = await vault.read(result.conversation!);
@@ -84,12 +85,12 @@ describe("a run of the agent loop", () => {
     expect(first).toContain("Keep it to one line");
   });
 
-  it("opens the conversation with the template's access and adds its instructions", async () => {
+  it("opens the conversation with the flow's access and adds its instructions", async () => {
     class Quiet extends Hello {
       readonly id = "quiet";
       readonly sessionsIn = "internal";
       readonly instructions = "Module instructions.";
-      readonly hush = this.template({ id: "hush", name: "Hush", access: "read-only", instructions: "Template instructions.", promises: [this.note], maxIterations: 1 });
+      readonly hush = this.flow({ name: "hush", description: "Quiet.", access: "read-only", instructions: "Flow instructions.", promises: [this.note], maxIterations: 1 });
     }
     const quiet = new Quiet();
     t = await testYami({ modules: [quiet] });
@@ -97,34 +98,34 @@ describe("a run of the agent loop", () => {
     expect(session.path).toBe("internal/quiet/sessions/hidden.md");
     await session.start();
     expect(t.agent.last!.options.access).toBe("read-only");
-    expect(t.agent.last!.prompts[0]).toContain("Module instructions.\n\nTemplate instructions.");
+    expect(t.agent.last!.prompts[0]).toContain("Module instructions.\n\nFlow instructions.");
     expect(await t.vault.read("conversations/quiet hidden.md")).toContain("access: read-only");
   });
 
-  it("needs attention when the iterations run out, by the template's count or the run's", async () => {
+  it("needs attention when the iterations run out, by the flow's count or the run's", async () => {
     const { session, vault, path } = await fresh("never");
     expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 3, reason: "iteration 3: 0 met, 1 unmet" });
     expect(await session.start({ maxIterations: 1 })).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 4: 0 met, 1 unmet" });
     const doc = await vault.read(path);
     expect(doc).toContain("state: needs-attention");
     expect(doc).toContain("iteration: 4");
-    expect(doc).toContain('unmet:\n  - "[[internal/hello/promises/Greeting note|Greeting note]]"');
+    expect(doc).toContain('unmet:\n  - "[[internal/hello/promises/greeting-note/PROMISE|greeting-note]]"');
   });
 
   it("needs attention when the reviewer gives no verdict on a promise with no check", async () => {
     class Manual extends Hello {
       readonly id = "manual";
-      readonly judged = this.promise("Judged", "A person decides.");
-      readonly judge = this.template({ id: "judge", name: "Judge", promises: [this.judged] });
+      readonly judged = this.promise({ name: "judged", description: "A person decides.", body: "A person decides." });
+      readonly judge = this.flow({ name: "judge", description: "Judged.", promises: [this.judged] });
     }
     const manual = new Manual();
     t = await testYami({ modules: [manual] });
     const session = await manual.judge.create({ name: "manual" });
-    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 1: review: 0 met, 0 unmet; no verdict on Judged" });
+    expect(await session.start()).toMatchObject({ state: "needs-attention", iterations: 1, reason: "iteration 1: review: 0 met, 0 unmet; no verdict on judged" });
     const doc = await t.vault.read(session.path);
     expect(doc).toContain("iteration 1: 0 met, 0 unmet");
-    expect(doc).toContain("iteration 1: review: 0 met, 0 unmet; no verdict on Judged");
-    expect(doc).toContain("- no verdict: [[internal/manual/promises/Judged|Judged]]");
+    expect(doc).toContain("iteration 1: review: 0 met, 0 unmet; no verdict on judged");
+    expect(doc).toContain("- no verdict: [[internal/manual/promises/judged/PROMISE|judged]]");
   });
 
   it("fails when the harness fails", async () => {
@@ -167,14 +168,14 @@ describe("a run of the agent loop", () => {
     expect(await vault.read(path)).toContain("the module's own check");
   });
 
-  it("refuses a document that is no session, of a module the Yami lacks, or naming a template the module lacks", async () => {
+  it("refuses a document that is no session, of a module the Yami lacks, or naming a flow the module lacks", async () => {
     const { yami, vault } = await fresh("x");
     await vault.write("plain.md", "No properties.\n");
     await vault.write("hello/lost.md", "---\ntype: session\nmodule: gone\n---\n");
-    await vault.write("hello/odd.md", "---\ntype: session\nmodule: hello\ntemplate: missing\n---\n");
+    await vault.write("hello/odd.md", "---\ntype: session\nmodule: hello\nflow: missing\n---\n");
     await expect(yami.session("plain.md").start()).rejects.toThrow("plain.md is not a session document.");
     await expect(yami.session("hello/lost.md").start()).rejects.toThrow('of the module "gone", which this Yami does not have');
-    await expect(yami.session("hello/odd.md").start()).rejects.toThrow('names the template "missing"');
+    await expect(yami.session("hello/odd.md").start()).rejects.toThrow('names the flow "missing"');
   });
 });
 
@@ -221,6 +222,27 @@ describe("the status of a session", () => {
 });
 
 describe("stop, kill, and resume", () => {
+  it("sends no turn when a stop comes while the conversation opens", async () => {
+    t = await testYami();
+    const agent = new ScriptedAgent();
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => (open = resolve));
+    let opening!: () => void;
+    const asked = new Promise<void>((resolve) => (opening = resolve));
+    const files = new FileConversations(t.vault);
+    const yami = new Yami({ vault: t.vault, agents: [agent], modules: [new Hello()], conversations: { open: async (options) => (opening(), await opened, files.open(options)) } });
+    await yami.enable();
+    const session = await (yami.module("hello") as Hello).greet.create({ name: "early" });
+    const run = session.start();
+    await asked;
+    const stopped = session.stop();
+    open();
+    await stopped;
+    expect(await run).toMatchObject({ state: "stopped", iterations: 0 });
+    expect(agent.started[0]!.prompts).toEqual([]);
+    await yami.close();
+  });
+
   it("stops a turn and records it; a resume checks first, then continues the same conversation", async () => {
     const { session, vault, path, agent } = await fresh("paused");
     const { turn, begun } = hold();
@@ -332,7 +354,7 @@ describe("the wiki, built in", () => {
       readonly id = "journal";
       readonly name = "Journal";
       readonly sessionsIn = "none";
-      readonly own = this.policy("Own words", "Quote the user exactly.");
+      readonly own = this.policy({ name: "own-words", description: "Quote the user.", body: "Quote the user exactly." });
     }
     const journal = new Journal();
     t = await testYami({ modules: [journal] });
@@ -345,7 +367,7 @@ describe("the wiki, built in", () => {
     expect(files.path).toBe("internal/wiki/sessions/Mine.md");
     const doc = await readDocument(vault, files.path);
     expect(doc.properties.sources).toEqual(["[[wiki/sources/a (source)|a (source)]]", "[[wiki/sources/b (source)|b (source)]]"]);
-    expect(doc.properties.policies).toContain("[[internal/journal/policies/Own words|Own words]]");
+    expect(doc.properties.policies).toContain("[[internal/journal/policies/own-words/POLICY|own-words]]");
     expect(doc.properties.policies).toHaveLength(4);
     const two = await yami.ingest({ files: ["papers/a.md", "papers/b.md"] });
     expect(two.path).toMatch(/Ingest a and 1 more /);
@@ -426,8 +448,8 @@ describe("a note whose properties do not parse", () => {
   it("linked by a session, leaves its promise unmet and names the note, instead of failing the run", async () => {
     class Reads extends Hello {
       readonly id = "reads";
-      readonly checked = this.promise("Notes checked", "Every linked note is checked.", { check: "property", field: "notes", name: "checked", value: true });
-      readonly read = this.template({ id: "read", name: "Read", promises: [this.checked], maxIterations: 1 });
+      readonly checked = this.promise({ name: "notes-checked", description: "Every note is checked.", check: "property", field: "notes", property: "checked", value: true, body: "Every linked note is checked." });
+      readonly read = this.flow({ name: "read", description: "Reads.", promises: [this.checked], maxIterations: 1 });
       readonly schema = { notes: { type: "links" as const, default: [] } };
     }
     const reads = new Reads();

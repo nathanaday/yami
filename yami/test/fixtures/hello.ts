@@ -9,7 +9,23 @@ description: How to greet a person or a session by name.
 To greet, write the greeting word from the session, a comma, and the name. Keep it to one line, with no other words.
 `;
 
-/** The smallest module: one policy, one promise, one skill, one template, one session field, and one tool. */
+export const POLITE_POLICY = `---
+name: always-say-hello
+description: Begin every reply with the greeting.
+---
+Begin every reply with the session's greeting, exactly as the \`greeting\` session property gives it.
+`;
+
+export const NOTE_PROMISE = `---
+name: greeting-note
+description: A note with the greeting.
+check: exists
+path: greetings/{{session}}.md
+---
+Create this note. Its content is one line: the greeting, addressed to the session by name.
+`;
+
+/** The smallest module: one policy, one promise, one skill, one flow, one session field, and one tool. */
 export class Hello extends YamiModule {
   readonly id: string = "hello";
   readonly name: string = "Hello world";
@@ -17,12 +33,9 @@ export class Hello extends YamiModule {
   readonly schema: Schema = { greeting: { type: "text", default: "Hello" } };
 
   readonly greeting = this.skill(GREETING_SKILL);
-  readonly polite = this.policy("Always say hello", "Begin every reply with the session's greeting, exactly as the `greeting` session property gives it.");
-  readonly note = this.promise("Greeting note", "Create this note. Its content is one line: the greeting, addressed to the session by name.", {
-    check: "exists",
-    path: "greetings/{{session}}.md",
-  });
-  readonly greet = this.template({ id: "greet", name: "Greeting", skills: [this.greeting], policies: [this.polite], promises: [this.note] });
+  readonly polite = this.policy(POLITE_POLICY);
+  readonly note = this.promise(NOTE_PROMISE);
+  readonly greet = this.flow({ name: "greet", description: "Greets the session by name.", skills: [this.greeting], policies: [this.polite], promises: [this.note] });
 
   tools(): AgentTool[] {
     return [

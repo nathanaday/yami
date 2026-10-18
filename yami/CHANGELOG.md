@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.6.0 · library-loop module-forms round 1
+
+Every document of a module now has the form of a skill, a kind of session is a flow, and an agent is a worker that any session or conversation runs in a fresh context with the tool `yami_agent`. Claude Code is the favored and better-supported harness; Codex runs agents through the same tool. Yami reads no old form, and migrates no vault: move the documents as the items below say.
+
+### Breaking
+- **Forms.** A module's agents, policies, promises, skills, and flows are folders named by the document's name, each with one file: `agents/<name>/AGENT.md`, `policies/<name>/POLICY.md`, `promises/<name>/PROMISE.md`, `skills/<name>/SKILL.md`, and `flows/<name>/FLOW.md`. Each file starts with `name`, its folder's name in lower-case letters, digits, and dashes, and `description`, and has no `type` and no `module`. Migrate a document: `internal/notes/policies/Cite sources.md` with `type: policy` and `module: notes` → `internal/notes/policies/cite-sources/POLICY.md` with `name: cite-sources` and `description: …`.
+- **The builders take a form.** `this.policy(name, text, properties)` and `this.promise(name, text, properties)` → `this.policy(markdown)` and `this.promise(markdown)`, whose frontmatter holds the `name` and the `description`, or `this.promise({ name, description, body, ...properties })`. Every form builder takes `files` to put beside the form. A builder throws on a form with no name or no description, and on a name that is not lower-case letters, digits, and dashes.
+- **An agent is Yami's, not Claude Code's.** `this.agent` makes an `AGENT.md` with `access` (`read-only`, the default, or `edit`) that `yami_agent` runs on both harnesses, not a Claude Code subagent with `tools`. Migrate: `this.agent({ name, description, tools: ["Read", "Grep"], body })` → `this.agent({ name, description, access: "read-only", body })`, and in a skill, "use the subagent `<module>:<name>`" → "call `yami_agent` with the agent `<name>`". The Claude adapter now denies each subagent that Claude Code would load from a skill set's `agents/` folder.
+- **Template becomes flow.** `SessionTemplate` → `Flow`, `TemplateOptions` → `FlowOptions`, `this.template({ id, name, … })` → `this.flow({ name, description, … })`: the name is the id, and the description is required. `module.templates` → `module.flows`, `module.templateOf(id)` → `module.flowOf(name)`, `session.template()` → `session.flow()`, `SessionSummary.template` → `SessionSummary.flow`, and the `new` act's `template` → `flow`. `SessionAction.on`, `yami.sessions(of)`, `yami.summaries(of)`, `ObsidianYami.newSession(flow)`, and `ObsidianYami.activeSession(of)` take a `Flow`. Migrate: `this.template({ id: "checkout", name: "Checkout", … })` → `this.flow({ name: "checkout", description: "…", … })`.
+- **The core field `template` is `flow`,** and a session links its agents in the new core field `agents`. A module schema with a field `flow` or `agents` throws. Migrate a view that read `properties.template`: read `properties.flow`.
+- **A flow has no body.** `TemplateOptions.body` is gone: every new session has a `# <name>`, an empty `## Request`, `## Deliverables`, and `## Progress`. Migrate a body that asked the person for input: `this.template({ body: "## Change\n\nName the change here." })` → `flow.create({ request: "…" })`, or say it in the flow's `instructions`.
+- **Labels, commands, and names come from the flow's name.** `flow.label` is `New <name>` with each dash as a space: the flow `code-review` gives `New code review`. The command id is `<module id>-new-<flow name>`. A session's default name is the flow's name, capitalized, and the time: `Code review 2026-10-17 14-30`. The first prompt says `a "code-review" session of the module …`.
+- **Vault modules.** A vault module is the module document and at least one `flows/<name>/FLOW.md`. Migrate `templates/Review a change.md` with `type: template` → `flows/review-a-change/FLOW.md` with `name: review-a-change` and `description`, no `type`, and no body. A flow names its forms: `policies: ["[[Be kind]]"]` → `policies: [be-kind]`, and `<module>:<name>` for a form of another module. Articles stay `[[links]]`. Yami does not read `templates/`.
+- **Schemas.** `TEMPLATE` is gone, and `DOCUMENT_TYPES` is `module`, `session`, `conversation`, `topic`, `source`, `snapshot`, and `change`. `POLICY` and `PROMISE` are form schemas with `name` and `description` required. Migrate `validate(doc.properties, TEMPLATE)` → `validate(doc.properties, FLOW)`.
+- **The `property` check reads `property`,** since `name` is a promise's own name. Migrate: `check: property, field: sources, name: status, value: absorbed` → `check: property, field: sources, property: status, value: absorbed`.
+- **`Layout.agents` is `Layout.folders.agents`,** and `Layout.folders` adds `flows`. `LinkedKind` adds `agents`, and `LINKED_KINDS` is promises, policies, skills, agents, articles.
+- **The wiki module's documents have names:** `cite-every-claim`, `one-plan`, `one-topic`, `change-applied`, `sources-absorbed`, and `clean-topics`. A feedback line says `- sources-absorbed: unmet, …`, not `- Sources absorbed: unmet, …`.
+- **The wiki's index leaves out the forms** of every module: the folders `agents/`, `flows/`, `policies/`, `promises/`, and `skills/` of `internal/<module>/`. A search with `types: ["policy"]` finds nothing now.
+- **`yami.tools()` holds `yami_agent`,** second after `yami_check`. Migrate code that took a tool by its position: find it by its name.
+
+### Added
+- `yami_agent({ agent, task })`, in every session and every conversation: runs an agent of any module in a fresh context on the caller's agent, records the run as a conversation note, and returns `{ agent, conversation, message }`. A `read-only` agent gets only the `readOnly` tools; no agent gets `yami_agent`; several run at the same time; a stop or a kill of the caller stops them; a read-only caller runs only read-only agents; an unknown name returns the agents the caller can name. `AGENT_TOOL`, `AgentCaller`, and `AgentReply` from `yami`.
+- `yami.tools(caller?)`: the tool set for a caller, `{ agent, module, session, access, approval }`. Yami gives each agent its own set, and each run's worker the set for its session.
+- A flow's `agents`: the first prompt lists each agent of the session with its description and access, and says how to call it.
+- The Request section: `flow.create({ name, request, fields, add })` writes `request` into `## Request`. The base skill says that the Request section, the session fields, and the articles are the session's input, and when to call an agent. Yami replaces the base skill of 0.3.0 to 0.5.1 when a person never edited it.
+- Names: a flow and a session name a form by its bare name in the module, or `<module>:<name>` in another module. The loop reads what Yami writes, a link with the full path, and a name that a person types.
+- `AGENT`, `SKILL`, `FLOW`, `FORMS`, and `FormKind` from `yami/document`; `Flow`, `FlowOptions`, `FormParts`, and `formPath(layout, kind, name)` from `yami`; `setAgents(roots)` from `yami/agent`.
+- Problems of vault modules: a form whose `name` is not its folder's name, a `FLOW.md` with body text (move it into `instructions`), a flat file where a folder belongs (`policies/x.md` → `policies/x/POLICY.md`), a name that resolves to nothing, and a flow that names a form with a problem. Each says how to fix it.
+- `yami.createModule(name)` and the New module command write the five forms, with a read-only agent `checker` that the flow names.
+- `yami/testing`: a `ScriptedSession.tool` call gets the turn's signal, which aborts when the turn is interrupted or the session closes, as on a harness. An agent that `yami_agent` runs takes the next turn of the script.
+
+### Changed
+- A stop or a kill reaches a run through one signal. A stop interrupts the live turn, the worker's or the reviewer's; a kill closes it at once and interrupts nothing. A stop that comes while the worker's conversation opens now sends no turn.
+- The review runs on the same fresh-context run as the agent tool, and behaves as before.
+- `yami.problems` is in order by module and by document.
+- `watchModules`, and so `createYami`, discovers again when any file in a form's folder changes.
+
+### Fixed
+- Two conversations that opened at the same time got the same note, so one overwrote the other: in `FileConversations`, and in the Obsidian conversation manager. Each now gets a note of its own.
+
 ## 0.5.1 · library-loop vault-modules round 5
 
 ### Changed

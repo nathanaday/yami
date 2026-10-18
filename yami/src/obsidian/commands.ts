@@ -102,7 +102,7 @@ export function addSessionCommands(yami: ObsidianYami): void {
 /**
  * For each module: a command for each of its acts (a new session, an action on no session), and one for
  * each action on a session. Returns the function that brings the commands up to date with `yami.modules`:
- * it adds the commands of a module that is new or changed, and removes those of a module, a template, or
+ * it adds the commands of a module that is new or changed, and removes those of a module, a flow, or
  * an action that is gone. `createYami` calls it when the modules change.
  */
 export function addModuleCommands(yami: ObsidianYami): () => void {
@@ -112,7 +112,7 @@ export function addModuleCommands(yami: ObsidianYami): () => void {
     for (const module of yami.modules) {
       const icon = moduleIcon(module);
       for (const act of module.acts()) {
-        const id = act.kind === "new" ? `${module.id}-new-${act.template.id}` : `${module.id}-${act.action.id}`;
+        const id = act.kind === "new" ? `${module.id}-new-${act.flow.name}` : `${module.id}-${act.action.id}`;
         const name = `${module.name}: ${act.kind === "new" ? `${act.label.charAt(0).toLowerCase()}${act.label.slice(1)}` : act.label}`;
         wanted.set(id, { module, command: { id, name, icon, callback: () => void yami.runModuleAct(act) } });
       }

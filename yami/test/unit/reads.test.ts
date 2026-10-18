@@ -13,11 +13,11 @@ afterEach(async () => {
   t = undefined;
 });
 
-/** A module with a second template, an article, and an action on its sessions that applies once a session is done. */
+/** A module with a second flow, an article, and an action on its sessions that applies once a session is done. */
 class Rich extends Hello {
   readonly id = "rich";
   readonly guide = this.article("Style guide", "Short lines.");
-  readonly tidy = this.template({ id: "tidy", name: "Tidy", articles: [this.guide], promises: [this.note] });
+  readonly tidy = this.flow({ name: "tidy", description: "Tidies.", articles: [this.guide], promises: [this.note] });
   readonly archive = this.action({ id: "archive", name: "Archive this greeting", on: this.greet, when: (p) => p.state === "done", run: async (s) => `Archived ${s.path}.` });
 }
 
@@ -32,7 +32,7 @@ const write = (name: string) => () => t!.vault.write(`greetings/${name}.md`, `He
 const kinds = (session: Session, properties: Record<string, unknown>) => session.acts(properties).map((a) => `${a.kind}:${a.label}`);
 
 describe("what a view of the sessions reads", () => {
-  it("summarizes each session in one read, newest first, for one module or template", async () => {
+  it("summarizes each session in one read, newest first, for one module or flow", async () => {
     const { yami, rich, agent } = await fresh();
     await rich.greet.create({ name: "a" });
     agent.queue(write("b"), review());
@@ -40,7 +40,7 @@ describe("what a view of the sessions reads", () => {
     await b.start();
     await rich.tidy.create({ name: "c" });
     const all = await yami.summaries(rich);
-    expect(all.map((s) => [s.name, s.status, s.template?.id, s.iteration, s.met, s.unmet])).toEqual([
+    expect(all.map((s) => [s.name, s.status, s.flow?.name, s.iteration, s.met, s.unmet])).toEqual([
       ["c", "open", "tidy", 0, 0, 0],
       ["b", "done", "greet", 1, 1, 0],
       ["a", "open", "greet", 0, 0, 0],
@@ -58,7 +58,7 @@ describe("what a view of the sessions reads", () => {
     const session = await rich.tidy.create({ name: "x" });
     const before = await session.details();
     expect(before.documents.map((d) => [d.kind, d.name, d.path, d.met])).toEqual([
-      ["promises", "Greeting note", "internal/rich/promises/Greeting note.md", undefined],
+      ["promises", "greeting-note", "internal/rich/promises/greeting-note/PROMISE.md", undefined],
       ["articles", "Style guide", "internal/rich/articles/Style guide.md", undefined],
     ]);
     expect(before.conversation).toBeUndefined();
@@ -82,7 +82,7 @@ describe("what a view of the sessions reads", () => {
     const session = await rich.greet.create({ name: "never" });
     await session.start({ maxIterations: 1 });
     const details = await session.details();
-    expect(details.documents.find((d) => d.kind === "promises")).toMatchObject({ name: "Greeting note", met: false });
+    expect(details.documents.find((d) => d.kind === "promises")).toMatchObject({ name: "greeting-note", met: false });
     expect(details).toMatchObject({ status: "needs-attention", met: 0, unmet: 1 });
   });
 
@@ -126,14 +126,14 @@ describe("what a view of the sessions reads", () => {
     expect(await start.run()).toBe("sunk: failed after 1 iteration: iteration 1: turn failed: boom");
   });
 
-  it("keeps stop and kill for a live run whose document names a template the module lacks", async () => {
+  it("keeps stop and kill for a live run whose document names a flow the module lacks", async () => {
     const { rich, agent } = await fresh();
     const session = await rich.greet.create({ name: "odd" });
     let release!: () => void;
     agent.queue(() => new Promise<void>((resolve) => (release = resolve)));
     const run = session.start({ maxIterations: 1 });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(kinds(session, { ...(await session.read()).properties, template: "gone" })).toEqual(["stop:Stop", "kill:Kill the agent"]);
+    expect(kinds(session, { ...(await session.read()).properties, flow: "gone" })).toEqual(["stop:Stop", "kill:Kill the agent"]);
     release();
     await run;
   });
@@ -142,10 +142,10 @@ describe("what a view of the sessions reads", () => {
     const { yami, rich, vault } = await fresh();
     await rich.greet.create({ name: "odd" });
     await rich.greet.create({ name: "broken" });
-    await vault.write("rich/odd.md", (await vault.read("rich/odd.md")).replace("template: greet", "template: gon"));
-    await vault.write("rich/broken.md", (await vault.read("rich/broken.md")).replace("template: greet", "template: [unclosed"));
+    await vault.write("rich/odd.md", (await vault.read("rich/odd.md")).replace("flow: greet", "flow: gon"));
+    await vault.write("rich/broken.md", (await vault.read("rich/broken.md")).replace("flow: greet", "flow: [unclosed"));
     const summaries = await yami.summaries(rich);
-    expect(summaries.map((s) => [s.name, s.template?.id])).toEqual([["odd", undefined]]);
+    expect(summaries.map((s) => [s.name, s.flow?.name])).toEqual([["odd", undefined]]);
   });
 
   it("puts the newest session first by when it was created, whatever its name", async () => {
@@ -157,20 +157,20 @@ describe("what a view of the sessions reads", () => {
     expect((await yami.summaries(rich)).map((s) => s.name)).toEqual(["Apple", "Mango", "Zebra"]);
   });
 
-  it("marks a promise that a session links by its name, as the loop records it by its path", async () => {
+  it("marks a promise that a person names by its bare name, as the loop records it by its path", async () => {
     const { rich, vault, agent } = await fresh();
     const session = await rich.greet.create({ name: "named" });
-    await vault.write(session.path, (await vault.read(session.path)).replace('"[[internal/rich/promises/Greeting note|Greeting note]]"', '"[[Greeting note]]"'));
-    agent.queue(write("named"));
-    await session.start();
-    expect((await session.details()).documents.find((d) => d.kind === "promises")).toMatchObject({ target: "Greeting note", path: "internal/rich/promises/Greeting note.md", met: true });
+    await vault.write(session.path, (await vault.read(session.path)).replace('"[[internal/rich/promises/greeting-note/PROMISE|greeting-note]]"', "greeting-note"));
+    agent.queue(write("named"), review());
+    expect(await session.start()).toMatchObject({ state: "done" });
+    expect((await session.details()).documents.find((d) => d.kind === "promises")).toMatchObject({ target: "greeting-note", path: "internal/rich/promises/greeting-note/PROMISE.md", met: true });
   });
 
-  it("gives what a person can do with a module: a new session from each template that offers one, then each action on no session", () => {
+  it("gives what a person can do with a module: a new session from each flow that offers one, then each action on no session", () => {
     const rich = new Rich();
     const acting = new (class extends Rich {
       readonly id = "acting";
-      readonly hidden = this.template({ id: "hidden", name: "Hidden", command: false });
+      readonly hidden = this.flow({ name: "hidden", description: "Hidden.", command: false });
       readonly publish = this.action({ id: "publish", name: "Publish", run: async () => "Published." });
     })();
     const quiet = new (class extends Rich {
@@ -178,8 +178,8 @@ describe("what a view of the sessions reads", () => {
       readonly sessionsIn = "none";
     })();
     expect(quiet.acts()).toEqual([]);
-    expect(acting.acts().map((a) => `${a.kind}:${a.label}`)).toEqual(["new:New greeting", "new:New tidy", "action:Publish"]);
-    expect(rich.acts().map((a) => a.label)).toEqual(["New greeting", "New tidy"]);
+    expect(acting.acts().map((a) => `${a.kind}:${a.label}`)).toEqual(["new:New greet", "new:New tidy", "action:Publish"]);
+    expect(rich.acts().map((a) => a.label)).toEqual(["New greet", "New tidy"]);
   });
 
   it("names each status for a person", () => {

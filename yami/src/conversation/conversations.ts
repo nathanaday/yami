@@ -62,6 +62,9 @@ export interface Conversations {
  * shows the typing. Approvals go to `onPermission`, or are denied.
  */
 export class FileConversations implements Conversations {
+  /** The paths of notes that open now: two conversations that open at the same time get two notes. */
+  readonly #opening = new Set<string>();
+
   constructor(
     private readonly vault: Vault,
     private readonly onPermission?: PermissionHandler,
@@ -91,22 +94,27 @@ export class FileConversations implements Conversations {
     } else {
       const folder = options.folder ?? CONVERSATION_FOLDER;
       const existing = new Set(await this.vault.list(folder));
-      path = availablePath(folder, noteName(options.name), (candidate) => existing.has(candidate));
-      session = await start();
-      await this.vault.write(
-        path,
-        newConversation({
-          agent: options.agent.harness,
-          model: options.agent.preferences.model,
-          effort: options.agent.preferences.effort,
-          session: session.id,
-          approval: options.approval,
-          access: options.access,
-          status: "active",
-          created: stamp(new Date(), "YYYY-MM-DD HH:mm"),
-          module: options.module ? link(options.module) : undefined,
-        }),
-      );
+      path = availablePath(folder, noteName(options.name), (candidate) => existing.has(candidate) || this.#opening.has(candidate));
+      this.#opening.add(path);
+      try {
+        session = await start();
+        await this.vault.write(
+          path,
+          newConversation({
+            agent: options.agent.harness,
+            model: options.agent.preferences.model,
+            effort: options.agent.preferences.effort,
+            session: session.id,
+            approval: options.approval,
+            access: options.access,
+            status: "active",
+            created: stamp(new Date(), "YYYY-MM-DD HH:mm"),
+            module: options.module ? link(options.module) : undefined,
+          }),
+        );
+      } finally {
+        this.#opening.delete(path);
+      }
     }
     const vault = this.vault;
     let stopping = false;

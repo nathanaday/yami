@@ -4,7 +4,7 @@ The Yami library. The design policy is in [`design.md`](../design.md).
 
 | Module | What it does |
 | --- | --- |
-| `yami` | The SDK: define modules, their session templates, tools, checks, and actions, find the modules defined in the vault, and run the agent loop and its review on session documents. |
+| `yami` | The SDK: define modules, their forms, flows, tools, checks, and actions, find the modules defined in the vault, run the agent loop and its review on session documents, and run agents in a fresh context. |
 | `yami/obsidian` | The Obsidian layer: `createYami`, the vault adapter, shared documents, conversation notes, the approval prompts, and the commands. |
 | `yami/wiki` | The knowledge base: one index over every note, the link graph, the query algorithms, match, lint, changes, and versions. |
 | `yami/agent` | Starts a harness, Claude Code or Codex, and runs conversations with it. |
@@ -14,7 +14,7 @@ The Yami library. The design policy is in [`design.md`](../design.md).
 | `yami/esbuild` | The esbuild options of an Obsidian plugin built on Yami. |
 | `yami/markdown` | The type of a `.md` file imported as text. |
 
-`VERSION` from `yami` is the version of the package, such as `"0.5.1"`. A host can show it, for example in a bug report.
+`VERSION` from `yami` is the version of the package, such as `"0.6.0"`. A host can show it, for example in a bug report.
 
 `yami/obsidian` is the one module that uses the Obsidian API, CodeMirror, and the DOM. The other modules are plain TypeScript, and the build checks that they stay so. A plugin's modules import `yami`, so they and their tests run in Node.
 
@@ -41,22 +41,31 @@ export default class MyPlugin extends Plugin {
 }
 ```
 
-A module is a class. Its skills, policies, and promises are markdown files beside it, imported as text:
+A module is a class. Its skills, agents, policies, and promises are markdown files beside it, in their forms, imported as text:
 
 ```ts
 import { defineTool, YamiModule, z, type AgentTool, type Schema } from "yami";
 import checkoutSkill from "./skills/checkout/SKILL.md";
-import madePromise from "./promises/Reading list made.md";
+import shelverAgent from "./agents/shelver/AGENT.md";
+import madePromise from "./promises/reading-list-made/PROMISE.md";
 
 export class Librarian extends YamiModule {
   readonly id = "librarian";
   readonly name = "Librarian";
-  readonly schema: Schema = { request: { type: "text" }, status: { type: "text", values: ["out", "returned"] } };
+  readonly schema: Schema = { status: { type: "text", values: ["out", "returned"] } };
   readonly checks = { "checked-out": checkedOut };
 
-  readonly checkoutSkill = this.skill(checkoutSkill);
-  readonly made = this.promise("Reading list made", madePromise);
-  readonly checkout = this.template({ id: "checkout", name: "Checkout", skills: [this.checkoutSkill], promises: [this.made], maxIterations: 2 });
+  readonly checkoutSkill = this.skill(checkoutSkill);      // name: checkout
+  readonly shelver = this.agent(shelverAgent);             // name: shelver, access: read-only
+  readonly made = this.promise(madePromise);               // name: reading-list-made, check: checked-out
+  readonly checkout = this.flow({
+    name: "checkout",
+    description: "A reading list, with a copy of each document.",
+    skills: [this.checkoutSkill],
+    agents: [this.shelver],
+    promises: [this.made],
+    maxIterations: 2,
+  });
 
   readonly returnAction = this.action({
     id: "return",
@@ -74,8 +83,8 @@ export class Librarian extends YamiModule {
 
 The plugin's build needs `pluginBuild` from `yami/esbuild`, which loads `.md` files as text, and its `tsconfig.json` needs `"types": ["yami/markdown"]`. With these, the plugin gets:
 
-- **Commands** for each agent (New conversation with claude, Run this session with Claude), for the session open in the editor (Resume this session, Stop this session, Kill this session's agent), for each template (Librarian: new checkout), for each action (Librarian: return this checkout), for the wiki (search, lint, versions, ingest), and New module.
-- **Every agent** works in the vault, with Yami's self-check tool (`yami_check`), the tools of every module (`librarian_checkout`, `wiki_search`, …), the base skill (`/yami:run`), and the skills of every module (`/librarian:checkout`). A reviewer gets only the tools that change nothing, and `yami_review`.
+- **Commands** for each agent (New conversation with claude, Run this session with Claude), for the session open in the editor (Resume this session, Stop this session, Kill this session's agent), for each flow (Librarian: new checkout), for each action (Librarian: return this checkout), for the wiki (search, lint, versions, ingest), and New module.
+- **Every agent** works in the vault, with Yami's self-check tool (`yami_check`), the agent tool (`yami_agent`), the tools of every module (`librarian_checkout`, `wiki_search`, …), the base skill (`/yami:run`), and the skills of every module (`/librarian:checkout`). A reviewer gets only the tools that change nothing, and `yami_review`.
 - **Every module** installs its documents into the vault when the workspace is ready, and never overwrites a file that exists.
 - **Vault modules**: a person can define a module in the vault with markdown only. Yami finds it at start and as it changes, and the plugin gets its commands. See [Vault modules](#vault-modules).
 
@@ -83,21 +92,18 @@ The plugin's build needs `pluginBuild` from `yami/esbuild`, which loads `.md` fi
 
 - A **vault** is the Obsidian vault.
 - A **module** is one agent workflow in the vault, for example the wiki or the librarian. A code module is a class of the plugin; a vault module is markdown in the vault.
-- A **template** is one kind of session of a module: the skills, policies, promises, and articles that a new session links, and how a run goes.
-- A **session** is one piece of work, and one markdown document. The document is the front page of the work: what the session must deliver, what it must follow, and how far it is. An agent reads it to know the work.
+- A **flow** is one kind of session of a module, and it reads as a function signature: its input, its method, its constraints, and its output. See [A flow as a signature](#a-flow-as-a-signature).
+- A **session** is one piece of work, and one markdown document. The document is the front page of the work: what the session must do, what it must deliver, what it must follow, and how far it is. An agent reads it to know the work.
 - A **run** is one pass of the agent loop over a session.
 - A **review** is the step of a run in which a new read-only agent judges the session's policies, and its promises that have no check.
+- An **agent** is a worker with a brief of its own. A session or a conversation runs one in a fresh context with the tool `yami_agent`, on both harnesses. See [Agents](#agents).
 
-Every document that Yami writes has a `type` property, and links are the identity of documents. Yami writes a link with the full path and the document name as the alias, `[[internal/notes/policies/Cite sources|Cite sources]]`, so Obsidian resolves it whatever other documents are named.
+Every document that Yami writes has a `type` property, and links and names are the identity of documents. Yami writes a link with the full path and the document's name as the alias, `[[internal/notes/policies/cite-sources/POLICY|cite-sources]]`, so Obsidian resolves it whatever other documents are named.
 
 | `type` | What it is |
 | --- | --- |
 | `module` | One note for each enabled module. A vault module's document also defines the module. |
-| `template` | One kind of session of a vault module, in `internal/<id>/templates/`. |
 | `session` | The session document. Core fields, plus the module's own fields. |
-| `policy` | Rules that a session must follow. The body is the rule text. |
-| `promise` | A deliverable: what, where, and how Yami checks it. |
-| `skill` | A skill in the standard `SKILL.md` form. |
 | `conversation` | A conversation with an agent: the messages, the replies, and the tool calls. |
 | `topic` | A note the wiki maintains about one subject, with its claims cited to sources. In `wiki/topics/`. |
 | `source` | A note that stands for one original the wiki learned from, and links or embeds it. In `wiki/sources/`. |
@@ -105,24 +111,90 @@ Every document that Yami writes has a `type` property, and links are the identit
 | `snapshot` | One version of the knowledge base, with a gzip archive of every note beside it. In `internal/wiki/snapshots/`. |
 | article | Any note. Its content becomes context for the agent. |
 
+### The forms
+
+A module's agents, policies, promises, skills, and flows have one form, the form of a skill: a folder named by the document's name, with one file in it. The folder can hold other files, which the document names by path. The file has no `type` and no `module` property: its folder and its file name give both.
+
+| Form | Its file | What it is | Its properties, after `name` and `description` |
+| --- | --- | --- | --- |
+| Agent | `agents/<name>/AGENT.md` | The brief of a worker that runs in a fresh context. The body is the brief. | `access`: `read-only` (the default) or `edit`. |
+| Policy | `policies/<name>/POLICY.md` | Rules that a session follows. The body is the rule text. | none |
+| Promise | `promises/<name>/PROMISE.md` | A deliverable, where it goes, and how Yami checks it. | `check`, `path`, and the properties that its check reads. See [Promises and checks](#promises-and-checks). |
+| Skill | `skills/<name>/SKILL.md` | A skill in the standard form. | none |
+| Flow | `flows/<name>/FLOW.md` | One kind of session. It has no body. | The keys of [a flow](#a-flow-as-a-signature). |
+
+Each file starts with `name` and `description`, as a `SKILL.md` does. `name` is the document's id: lower-case letters, digits, and dashes, and the same as its folder's name. `description` says in one sentence what the document is.
+
+```markdown
+---
+name: cite-sources
+description: Every claim names its source.
+---
+Every claim in the summary links the note it came from.
+```
+
+A flow and a session name their skills, agents, policies, and promises:
+
+- **A bare name**, such as `cite-sources`, names a document of the session's own module.
+- **`<module>:<name>`**, such as `wiki:cite-every-claim`, names a document of another module.
+- **A link**, such as `[[internal/notes/policies/cite-sources/POLICY|cite-sources]]`, is what Yami writes in a session document, so a person can open the document in Obsidian. The loop reads both what Yami writes and a bare name that a person types.
+
+Articles stay `[[links]]` to any note: by path, or by name in the module's `articles/`, then its internal folder, then the whole vault. The forms are not knowledge: the wiki's index leaves out the folders of the forms, so lint finds no duplicate name in them.
+
+### A flow as a signature
+
+A flow says what a kind of session takes, how it works, what it must follow, and what it must deliver, as `agent(input, policies) -> promises`:
+
+| Part | The keys of a flow | |
+| --- | --- | --- |
+| Input | `fields`, `articles` | The session's Request section, its fields, and its articles. |
+| Method | `instructions`, `skills`, `agents` | How the agent works: the instructions of the module and the flow, the skills to load, and the agents to call. |
+| Constraints | `policies`, `access` | The rules, which the review judges, and `read-only`, which keeps the agent from changing any file except through the tools. |
+| Output | `promises` | What the session delivers, which the checks or the review decide. |
+
+The other keys: `name` and `description`, `maxIterations` (the agent turns in one run, default 3), and `command` (`false` when the host offers no command to create a session). A flow has no body: every new session gets the same sections. The command and the button for a flow say `New <name>`, with each dash of the name as a space: the flow `code-review` gives `New code review`.
+
+### The Request section
+
+Every new session has a `## Request` section: what the session must do. `flow.create({ name, request })` fills it. Without a request it stays empty, for the person to write before they run the session. The base skill tells the agent that the Request section, the session fields, and the articles are the session's input.
+
+```markdown
+# PR 12
+
+## Request
+Review the change in PR 12. Look at the parser first.
+
+## Deliverables
+- [ ] [[internal/code-review/promises/report-written/PROMISE|report-written]]
+
+## Progress
+```
+
+### The layout
+
 A module's documents are installed into the vault, so users can read and edit them. The layout of a module with the id `notes`:
 
 ```
-Yami.base                        vault ledger: every module, and every session grouped by module
-notes/                           the sessions, one document each
+Yami.base                              vault ledger: every module, and every session grouped by module
+notes/                                 the sessions, one document each
   weekly.md
-internal/notes/                  what the module needs, out of the way of the sessions
-  notes.md                       type: module
-  sessions.base                  module ledger: the sessions of this module
-  templates/                     a vault module's template documents (a code module has none)
-  policies/Cite sources.md
-  promises/Summary written.md
-  skills/summarize/SKILL.md
-internal/yami/skills/run/SKILL.md   the base Yami skill, which every run invokes as /yami:run
+internal/notes/                        what the module needs, out of the way of the sessions
+  notes.md                             type: module
+  sessions.base                        module ledger: the sessions of this module
+  flows/weekly/FLOW.md                 a vault module's flows (a code module's flows are code)
+  agents/checker/AGENT.md
+  policies/cite-sources/POLICY.md
+  promises/summary-written/PROMISE.md
+  skills/summarize/SKILL.md            and the files that the skill names, beside it
+  articles/Style guide.md
+internal/yami/skills/run/SKILL.md      the base Yami skill, which every run invokes as /yami:run
 conversations/
-  notes weekly.md                the conversation note that records the runs of the session
-  notes weekly review.md         the conversation note of a review
+  notes weekly.md                      the conversation note that records the runs of the session
+  notes weekly review.md               the conversation note of a review
+  notes checker.md                     the conversation note of a run of the agent checker
 ```
+
+A code module installs its forms in this layout, but no `FLOW.md`: its flows are the code of `this.flow`, and a `FLOW.md` that Yami never reads would mislead a person who edits it.
 
 The ledgers are Obsidian bases: live views over the properties of the session documents. Yami writes each base once, and keeps the properties of the session documents current.
 
@@ -132,7 +204,7 @@ The ledgers are Obsidian bases: live views over the properties of the session do
 
 `readDocument`, `writeDocument`, and `updateDocument` handle a document as `{ path, properties, body }`. Properties that do not parse throw a `PropertiesError`, which names the document and gives the parser's reason. `replaceSection` replaces one `## heading` section of a body. `link`, `linkTarget`, `linksOf`, and `resolveLink` handle `[[links]]` in properties.
 
-The schemas of the built-in types are `MODULE`, `TEMPLATE`, `SESSION`, `POLICY`, and `PROMISE`. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form. A field's type is `text`, `number`, `boolean`, `date`, `list`, `link`, `links`, or `map` (names with values).
+The schemas of the built-in types are `MODULE`, `SESSION`, and `CONVERSATION`, and of the forms `AGENT`, `POLICY`, `PROMISE`, `SKILL`, and `FLOW`. `FORMS` gives each form's folder, file, and schema: `FORMS.policy` is `{ folder: "policies", file: "POLICY.md", schema: POLICY }`. `documentName(path)` gives the name of a form from its folder. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form. A field's type is `text`, `number`, `boolean`, `date`, `list`, `link`, `links`, or `map` (names with values).
 
 `vaultLedger` and `moduleLedger` return the text of the two bases.
 
@@ -166,26 +238,33 @@ A module is a subclass of `YamiModule`. Its fields declare it, and builders in i
 
 | Builder | Makes |
 | --- | --- |
-| `this.skill(markdown, files?)` | A skill in the standard `SKILL.md` form. The frontmatter holds its `name` and `description`. `files` go beside `SKILL.md`, such as the briefs of its workers. `this.skill({ name, description, body, files })` makes one from its parts. |
-| `this.policy(name, markdown, properties?)` | A policy. |
-| `this.promise(name, markdown, properties?)` | A promise. Its `check`, and the properties the check reads, go in the frontmatter or in `properties`. |
-| `this.article(name, markdown, properties?)` | An article. |
-| `this.agent(markdown)` | A Claude Code subagent of the module's skill set, invoked as `<module id>:<name>`, with its `name`, `description`, and `tools` in the frontmatter. Claude Code enforces its tool list, so an agent with no edit tool cannot change a file. Codex has no subagents. |
-| `this.template(options)` | A kind of session: `id`, `name`, the `skills`, `policies`, `promises`, and `articles` that a new session links, `maxIterations` (default 3), `access` (`read-only`: the agent changes no file except through the tools), `instructions`, the `fields` and the `body` of a new session, and `command: false` when the host offers no command to create one. |
-| `this.action(options)` | An act of the person that a host offers as a command named `<module name>: <action name>`: on the session open in the editor (`on`, a template, and `when`, a test of its properties), on one of several things the person picks (`choose`), or with no input. `run` returns a message, or `{ message, open }`. |
+| `this.skill(form, files?)` | A skill, `SKILL.md`. |
+| `this.agent(form, files?)` | An agent, `AGENT.md`, that any session or conversation can run with `yami_agent`. Its `access` is `read-only` (the default) or `edit`. |
+| `this.policy(form, files?)` | A policy, `POLICY.md`. |
+| `this.promise(form, files?)` | A promise, `PROMISE.md`. Its `check`, and the properties the check reads, go in its header. |
+| `this.article(name, markdown, properties?)` | An article: a note in `articles/`, whose content is context for the agent. |
+| `this.flow(options)` | A kind of session, from the keys of a `FLOW.md`: `name` and `description`, the `skills`, `agents`, `policies`, `promises`, and `articles` that a new session links, `fields`, `maxIterations` (default 3), `access` (`read-only`: the agent changes no file except through the tools), `instructions`, and `command: false` when the host offers no command to create one. |
+| `this.action(options)` | An act of the person that a host offers as a command named `<module name>: <action name>`: on the session open in the editor (`on`, a flow, and `when`, a test of its properties), on one of several things the person picks (`choose`), or with no input. `run` returns a message, or `{ message, open }`. |
+
+A form's builder takes the form's markdown, whose frontmatter holds its `name` and `description`, or its parts, `{ name, description, body, files, ...properties }`. It takes the document's name from the frontmatter. It throws when the name or the description is missing, when the name is not lower-case letters, digits, and dashes, and when the module has a document of that kind and name already. `files` go beside the form's file, such as the briefs of a skill's workers.
+
+```ts
+readonly brief = this.policy({ name: "brief", description: "One line for each point.", body: "Write one line for each point." });
+readonly written = this.promise({ name: "summary-written", description: "The summary note.", check: "exists", path: "notes/{{session}}.md", body: "Write the summary." });
+```
 
 `module.hasSkills` says whether the module's internal folder holds skills, so that Yami gives it to the agents as a skill set.
 
-`module.templates` lists the module's templates. `module.templateOf(id)` gives the template with that id, for example one that a host stored in a setting or a URI. It gives `undefined` for an id that no template has, and the first template for `undefined`, `null`, or `""`, as for a session document with no `template` property. It never throws.
+`module.flows` lists the module's flows. `module.flowOf(name)` gives the flow with that name, for example one that a host stored in a setting or a URI. It gives `undefined` for a name that no flow has, and the first flow for `undefined`, `null`, or `""`, as for a session document with no `flow` property. It never throws.
 
 ```ts
-const template = yami.module("code-review")?.templateOf("review-a-change");
-if (template) await template.create({ name: "PR 12" });
+const flow = yami.module("code-review")?.flowOf("review-a-change");
+if (flow) await flow.create({ name: "PR 12", request: "Review the change in PR 12." });
 ```
 
-`tools()` returns the module's tools, made with `defineTool({ name, description, input: { text: z.string() }, readOnly, title, run })`. The agent sees a tool as `<module id>_<tool name>`, with each dash of the id as an underscore: `code-review` and `post_comment` give `code_review_post_comment`. Set `readOnly: true` on a tool that changes nothing, no file and no state of the host, so that a reviewer gets it too; a tool without it is one that can change things, and a review does not get it. Once the module is added to a Yami, `this.yami`, `this.vault`, `this.wiki`, and `this.layout` are available to its tools, checks, and actions.
+`tools()` returns the module's tools, made with `defineTool({ name, description, input: { text: z.string() }, readOnly, title, run })`. The agent sees a tool as `<module id>_<tool name>`, with each dash of the id as an underscore: `code-review` and `post_comment` give `code_review_post_comment`. Set `readOnly: true` on a tool that changes nothing, no file and no state of the host, so that a reviewer and a read-only agent get it too; a tool without it is one that can change things, and they do not get it. Once the module is added to a Yami, `this.yami`, `this.vault`, `this.wiki`, and `this.layout` are available to its tools, checks, and actions.
 
-A module writes its files when the Yami enables it, and only the files that do not exist, so edits in the vault stay. The template's documents go under `internal/<id>/`: `policies/`, `promises/`, `articles/`, `skills/<name>/SKILL.md`, and `agents/`. A template's `skills`, `policies`, `promises`, and `articles` take any `DocumentRef`, `{ kind, name, path, link }`, of which `ModuleDocument` is one.
+A module writes its files when the Yami enables it, and only the files that do not exist, so edits in the vault stay. Its forms go under `internal/<id>/`, each in its folder, and its articles in `internal/<id>/articles/`. `formPath(layout, kind, name)` gives a form's path: `formPath(module.layout, "policy", "brief")` is `internal/<id>/policies/brief/POLICY.md`. A flow's `skills`, `agents`, `policies`, `promises`, and `articles` take any `DocumentRef`, `{ kind, name, path, link }`, of which `ModuleDocument` is one.
 
 ### Vault modules
 
@@ -193,17 +272,18 @@ A person can define a module in the vault with markdown only, and no code. A vau
 
 ```
 internal/code-review/
-  code-review.md                 the module document: type: module
-  templates/Review a change.md   a template document: type: template, one for each kind of session
-  skills/review/SKILL.md         the documents that the templates link, in the folders a code module uses
-  policies/Be kind.md
-  promises/Report written.md
-  articles/, agents/
-  sessions.base                  the module ledger, which Yami writes
-code-review/                     the sessions, as for a code module
+  code-review.md                       the module document: type: module
+  flows/review-a-change/FLOW.md        one flow for each kind of session
+  skills/review/SKILL.md               the forms that the flows name
+  agents/second-look/AGENT.md
+  policies/be-kind/POLICY.md
+  promises/report-written/PROMISE.md
+  articles/
+  sessions.base                        the module ledger, which Yami writes
+code-review/                           the sessions, as for a code module
 ```
 
-The folder's name is the module's id: lower-case letters, digits, and dashes. `yami` is Yami's own id. A folder is a vault module when it has the module document and at least one document in `templates/`, and no code module has its id. A module document that a code module left behind, with no templates, is not a module.
+The folder's name is the module's id: lower-case letters, digits, and dashes. `yami` is Yami's own id. A folder is a vault module when it has the module document and at least one flow, and no code module has its id. A module document that a code module left behind, with no flow, is not a module.
 
 The module document's properties, none required:
 
@@ -215,44 +295,57 @@ The module document's properties, none required:
 | `color` | The color of the module's folder, as a hex code. | a basic color by the id |
 | `instructions` | Text added to the first prompt of each run. | none |
 
-The body of the module document is for a person. A template document holds every option of a code module's `this.template`:
+The body of the module document is for a person. A `FLOW.md` holds every option of a code module's `this.flow`, and no body:
 
 | Property | What it sets | Default |
 | --- | --- | --- |
-| `type` | `template`. Required. | |
-| `name` | The template's name. Its command says "New" and the name. | the file's name |
-| `description` | What the template is for. | none |
-| `skills`, `policies`, `promises`, `articles` | The documents that a new session links, as `[[links]]` or names. The first skill loads first. | none |
+| `name` | The flow's name: its folder's name. Required. Its command says `New` and the name. | |
+| `description` | What the flow is for. Required. | |
+| `skills`, `agents`, `policies`, `promises` | The forms that a new session links, by name: a bare name in the module, `<module>:<name>` in another module. The first skill loads first. | none |
+| `articles` | The notes that a new session links, as `[[links]]`. | none |
+| `fields` | The session fields of a new session, each with its default: `fields: { change: "", rounds: 1 }`. A field's type is the type of its default. | none |
 | `maxIterations` | Agent turns in one run: a whole number of 1 or more. | 3 |
 | `access` | `edit`, or `read-only`: the agent changes no file except through the tools. | `edit` |
 | `instructions` | Text added to the first prompt of a run, after the module's. | none |
-| `fields` | The session fields of a new session, each with its default: `fields: { change: "", rounds: 1 }`. A field's type is the type of its default. | none |
 | `command` | `false` when the host offers no command that creates a session. | `true` |
 
-The body of the template document is the body of a new session, before its Deliverables and Progress: for example a section for the person to fill in.
+```markdown
+---
+name: review-a-change
+description: One review of one change.
+skills: [review]
+agents: [second-look]
+policies: [be-kind, wiki:cite-every-claim]
+promises: [report-written]
+fields: { change: "" }
+instructions: Write the report in code-review/{{session}}/Report.md.
+---
+```
 
-- **The template's id** comes from its file name: lower case, with accents left out, and each run of other characters than letters and digits as one dash. `templates/Review a change.md` is `review-a-change`. `idFromName(name)` applies the rule. A session records the id in its `template` property, so a renamed template document leaves its sessions with no template, and they fail to run with a clear error.
-- **A link** resolves as a session's links do: by its path, or by its name, first in the module's folder for its kind, then the module's internal folder, then the whole vault. A skill is found by its folder's name in the module's `skills/`. A link to a document of another module works.
-- **The module's session fields** are the fields of all its templates. The first template, by file name, sets a field's type.
+- A session records the flow's name in its `flow` property, so a renamed flow leaves its sessions with no flow, and they fail to run with a clear error.
+- **The module's session fields** are the fields of all its flows. The first flow, by name, sets a field's type.
 
-`yami.discover()` reads the vault modules, and `yami.enable()` calls it. `createYami` calls it a moment after a module document, a template document, or the base skill changes, or a file is created, renamed, or removed, so a person sees a change within a second, with no reload. A vault module is a `VaultModule`, a subclass of `YamiModule`, so a host uses it through the API of any module: the module list, its templates, its sessions and summaries, its acts, its colors, its icon, and its ledger. `module instanceof VaultModule` says that a module came from the vault, and `module.document` is its module document. A vault module has no tools, checks, or actions of its own: its sessions get every tool that Yami serves and the core checks, and the review judges what code cannot check.
+`yami.discover()` reads the vault modules, and `yami.enable()` calls it. `createYami` calls it a moment after a module document, a file in a form's folder, or the base skill changes, or a file is created, renamed, or removed, so a person sees a change within a second, with no reload. A vault module is a `VaultModule`, a subclass of `YamiModule`, so a host uses it through the API of any module: the module list, its flows, its sessions and summaries, its acts, its colors, its icon, and its ledger. `module instanceof VaultModule` says that a module came from the vault, and `module.document` is its module document. A vault module has no tools, checks, or actions of its own: its sessions get every tool that Yami serves and the core checks, its agents run through `yami_agent`, and the review judges what code cannot check.
 
 | Call | What it does |
 | --- | --- |
-| `yami.discover()` | Writes the base skill when it is missing or holds a text that an earlier Yami shipped (see [The Yami](#the-yami)). Reads the vault modules again, and updates `yami.modules` and `yami.problems`. A module whose documents did not change keeps its object. A new module gets its ledger, and the agents get the skill sets as they are now. A live run keeps the module and the template it started with. Calls run one after another. |
-| `yami.problems` | What a person must fix or know, from the last `discover`: each `ModuleProblem` has the `module` id, the `path` of its document or folder, the `document` with the problem when one holds it (a view can open it; none for a problem of the folder: its name, or a missing module document), and a `message` that says how to fix it. A problem of a vault module keeps out what it names. A problem of the module `yami`, at `BASE_SKILL`, says that the base skill holds a person's edits and not the text of this version. |
-| `yami.onModulesChange(listener)` | Calls the listener when a `discover` finds a vault module or a template that is new, changed, or gone, or a problem that is new or fixed. Returns the function that stops it. |
-| `yami.createModule(name)` | Writes a starter vault module, `internal/<idFromName(name)>/`: the module document `<id>.md`; the template `templates/Task.md`; the skill `skills/task/SKILL.md`; the policy `policies/Stay in scope.md`; and the promise `promises/Result note.md`, with the `exists` check on `<id>/{{session}}/Result.md`. Then it discovers, and returns the new module. A session from the starter runs to `done` when the agent writes its result note and the review finds the policy followed. It refuses a name that gives no id, `yami`, and an id that a module or a folder of `internal/` has. |
+| `yami.discover()` | Writes the base skill when it is missing or holds a text that an earlier Yami shipped (see [The Yami](#the-yami)). Reads the vault modules again, and updates `yami.modules` and `yami.problems`. A module whose documents did not change keeps its object. A new module gets its ledger, and the agents get the skill sets as they are now. A live run keeps the module and the flow it started with. Calls run one after another. |
+| `yami.problems` | What a person must fix or know, from the last `discover`, by module and by document: each `ModuleProblem` has the `module` id, the `path` of its document or folder, the `document` with the problem when one holds it (a view can open it; none for a problem of the folder: its name, or a missing module document), and a `message` that says how to fix it. A problem of a vault module keeps out what it names. A problem of the module `yami`, at `BASE_SKILL`, says that the base skill holds a person's edits and not the text of this version. |
+| `yami.onModulesChange(listener)` | Calls the listener when a `discover` finds a vault module or a flow that is new, changed, or gone, or a problem that is new or fixed. Returns the function that stops it. |
+| `yami.createModule(name)` | Writes a starter vault module, `internal/<idFromName(name)>/`, in the five forms: the module document `<id>.md`; the flow `flows/task/FLOW.md`; the skill `skills/task/SKILL.md`; the read-only agent `agents/checker/AGENT.md`; the policy `policies/stay-in-scope/POLICY.md`; and the promise `promises/result-note/PROMISE.md`, with the `exists` check on `<id>/{{session}}/Result.md`. Then it discovers, and returns the new module. A session from the starter runs to `done` when the agent writes its result note and the review finds the policy followed. It refuses a name that gives no id, `yami`, and an id that a module or a folder of `internal/` has. |
 
-These problems never stop Yami, another module, or a valid template of the same module. Each is in `yami.problems`, and keeps out what it names:
+These problems never stop Yami, another module, or a valid flow of the same module. Each is in `yami.problems`, says how to fix it, and keeps out what it names:
 
 | Problem | What stays out |
 | --- | --- |
-| A module document or a template document whose properties do not parse | the module, or the template |
-| A module document that is missing, or has no `type: module` | the module |
+| A module document whose properties do not parse, that is missing, or that has no `type: module` | the module |
 | A folder name that is no valid id, `yami`, or the id of a code module | the module (the code module wins) |
-| A template document with no `type: template`, a bad value (`access: readonly`, `maxIterations: 0`, a `name` that is no text), a field that is a core session field or has another type in another template, or a file name that gives no id or the id of another template | the template |
-| A template's link to nothing | the template, until the document is there |
+| A form whose properties do not parse, that has no `name` or `description`, or a bad value (`access: readonly`) | the form, and each flow that names it |
+| A form whose `name` is not its folder's name, or whose folder's name is no id | the form, and each flow that names it |
+| A `FLOW.md` with body text: the message says to move the text into `instructions` | the flow |
+| A flat file where a folder belongs, such as `policies/be-kind.md`: the message says to move it to `policies/be-kind/POLICY.md` | the file, which no name finds |
+| A flow's name that resolves to nothing, or a link to no note in `articles` | the flow, until the document is there |
+| A flow with `maxIterations: 0`, or a field that is a core session field or has another type in another flow | the flow |
 | A `color` that is no hex code, or a module property that is not text | only that value, which takes its default |
 | A base skill that a person edited (module `yami`) | nothing: every run uses the edited skill |
 
@@ -260,12 +353,12 @@ These problems never stop Yami, another module, or a valid template of the same 
 await yami.enable();                          // installs the code modules and the base skill, then discovers
 yami.onModulesChange(() => render(yami.modules, yami.problems));
 const review = yami.module("code-review")!;   // a VaultModule
-const session = await review.templates[0]!.create({ name: "PR 12", fields: { change: "PR 12" } });
+const session = await review.flows[0]!.create({ name: "PR 12", request: "Review PR 12.", fields: { change: "PR 12" } });
 ```
 
 ### Sessions
 
-`template.create({ name, exact, fields, add })` writes a session document and returns its `Session`. The document links the template's documents and those in `add`, such as a policy of another module, and holds the template's `fields` and `fields`. Its name defaults to the template's name and the time. A name that a file cannot take is made safe, and a name in use gets " (2)"; `exact: true` refuses either instead.
+`flow.create({ name, exact, request, fields, add })` writes a session document and returns its `Session`. The document links the flow's documents and those in `add`, such as a policy or an agent of another module, holds the flow's `fields` and `fields`, and has the `request` as its Request section. Its name defaults to the flow's name and the time, such as `Code review 2026-10-17 14-30`. A name that a file cannot take is made safe, and a name in use gets " (2)"; `exact: true` refuses either instead.
 
 `yami.session(path)` gives the handle of any session document. The same path gives the same handle.
 
@@ -278,9 +371,9 @@ const session = await review.templates[0]!.create({ name: "PR 12", fields: { cha
 | `status()` | `working`, `checking`, or `reviewing` while a run is live in this Yami; otherwise the state the document records: `open`, `done`, `needs-attention`, `failed`, or `stopped`. A document that says `running` with no live run reads as `stopped`. |
 | `check()` | Runs the checks of the session's promises now, and records nothing: `{ checks, judged }`, where each check has the `promise` path, its `name`, its `status`, and the `detail`, and `judged` lists the promises with no check, for the review. The self-check tool returns the same. |
 | `on(listener)` | Calls the listener at each change of status. `yami.onSession(listener)` does the same for every session. |
-| `read()`, `module()`, `template()` | The document, its module, and its template. |
+| `read()`, `module()`, `flow()` | The document, its module, and its flow. |
 
-`yami.running` lists the sessions with a live run, and `yami.sessions(module or template?)` the session documents of the vault.
+`yami.running` lists the sessions with a live run, and `yami.sessions(module or flow?)` the session documents of the vault.
 
 ### What a view reads
 
@@ -288,23 +381,23 @@ A view of the sessions, such as a panel, gets its data and its acts here, and ho
 
 | Call | Gives |
 | --- | --- |
-| `yami.summaries(module or template?)` | Each session at a glance, newest first by `created`, from one read of each document: `name`, `module`, `template`, `status`, `created`, `iteration`, `met` and `unmet` (counts at the last check), and the `properties`. A document whose template the module lacks shows with no template; one whose properties do not parse, as in the middle of an edit, is left out until they do. |
-| `session.details()` | The summary, and `documents`: each linked promise, policy, skill, and article with the `path` it resolves to (none for a link that finds no note); for a promise whether the last check or review `met` it, and whether it is `judged` (it has no check, so the review judges it); for a policy whether the last review found it `followed`; and for both the `reason`, as the session document shows it (the check's detail, `review: <reason>`, or `the review judges it` for a promise; the reviewer's reason for a policy; undefined before any); the `conversation` note; the `review`, the conversation note of the last review; the `harness`; and the `progress` lines, each with its `time`. |
-| `session.acts(properties)` | What a person can do with the session now, from its properties as read: `start` with each agent, `resume` when it has a conversation, `stop` and `kill` while a run is live (whatever the document says), and each module action on its template whose `when` holds. An act has a `label`, such as "Run with Claude", and `run()`, which resolves with what to tell the person, such as `PR 12: done after 1 iteration.`, or `PR 12: failed after 1 iteration: iteration 1: turn failed: boom` with the run's `reason`. The commands use it too. |
-| `module.acts()` | What a person can do with a module itself: `new` from each template that offers a command (its `label` is the template's), then each `action` on no session. `runModuleAct(act)` in `yami/obsidian` does one. |
+| `yami.summaries(module or flow?)` | Each session at a glance, newest first by `created`, from one read of each document: `name`, `module`, `flow`, `status`, `created`, `iteration`, `met` and `unmet` (counts at the last check), and the `properties`. A document whose flow the module lacks shows with no flow; one whose properties do not parse, as in the middle of an edit, is left out until they do. |
+| `session.details()` | The summary, and `documents`: each linked promise, policy, skill, agent, and article with the `path` it resolves to (none for a link that finds no note); for a promise whether the last check or review `met` it, and whether it is `judged` (it has no check, so the review judges it); for a policy whether the last review found it `followed`; and for both the `reason`, as the session document shows it (the check's detail, `review: <reason>`, or `the review judges it` for a promise; the reviewer's reason for a policy; undefined before any); the `conversation` note; the `review`, the conversation note of the last review; the `harness`; and the `progress` lines, each with its `time`. |
+| `session.acts(properties)` | What a person can do with the session now, from its properties as read: `start` with each agent, `resume` when it has a conversation, `stop` and `kill` while a run is live (whatever the document says), and each module action on its flow whose `when` holds. An act has a `label`, such as "Run with Claude", and `run()`, which resolves with what to tell the person, such as `PR 12: done after 1 iteration.`, or `PR 12: failed after 1 iteration: iteration 1: turn failed: boom` with the run's `reason`. The commands use it too. |
+| `module.acts()` | What a person can do with a module itself: `new` from each flow that offers a command (its `label` is the flow's), then each `action` on no session. `runModuleAct(act)` in `yami/obsidian` does one. |
 | `STATUS_LABELS` | The words for each status: "Not started", "Working", "Checking", "Reviewing", "Done", "Needs attention", "Failed", "Stopped". |
-| `yami.modules`, `yami.problems`, `yami.onModulesChange(listener)` | The modules with the vault modules, what keeps a vault module or a template out, and a call when either changes. See [Vault modules](#vault-modules). |
+| `yami.modules`, `yami.problems`, `yami.onModulesChange(listener)` | The modules with the vault modules, what keeps a vault module or a flow out, and a call when either changes. See [Vault modules](#vault-modules). |
 | `yami.onSessionsChange(listener)` | In Obsidian, one feed for a view of the modules and the sessions: a call after a session document or a module's document changes, a run changes its status, or a discovery changes `modules` or `problems`. A view that subscribes to it needs no `onModulesChange`. |
-| `template.label` | What a button or a command that creates a session says: "New checkout". |
-| `LINKED_KINDS` | The fields that link documents, in the order a person reads them: promises, policies, skills, articles. |
+| `flow.label` | What a button or a command that creates a session says: `New <name>`, with each dash as a space: "New checkout", "New code review". |
+| `LINKED_KINDS` | The fields that link documents, in the order a person reads them: promises, policies, skills, agents, articles. |
 | `yami.agentName(agent)` | The name of an agent in acts: its harness, with a number after the first agent of a harness; in Obsidian, the name it is registered under. |
 
 ### The agent loop
 
 Each iteration is one agent turn, one verification, and a review when the checks pass.
 
-1. **Context.** The first prompt invokes the base skill, `/yami:run`, which says how every session runs: read the session document, load its skills, follow every policy, deliver every promise, check the work with `yami_check` before the turn ends, and expect a review. The prompt holds only what is particular to the session: its name and path, the instructions of the module and the template, the session properties, the session document's body, and the content of every linked policy, promise, and article. A linked skill goes by its command when the agent has its module's skill set: the prompt lists the session's skills, and the base skill tells the agent to load the first one now and the others when needed. A skill the agent does not have is inlined, and so is the base skill for an agent that does not have Yami's skill set.
-2. **Action.** One turn on a harness session with `accept-edits` approval, the template's access, and the vault as the working directory. The agent can call `yami_check` to run the checks itself before it ends the turn.
+1. **Context.** The first prompt invokes the base skill, `/yami:run`, which says how every session runs: read the input (the Request section, the session properties, and the articles), load its skills, call its agents for work that needs a fresh context, follow every policy, deliver every promise, check the work with `yami_check` before the turn ends, and expect a review. The prompt holds only what is particular to the session: its name and path, the instructions of the module and the flow, the session properties, the session document's body with its Request section, the content of every linked policy, promise, and article, and the name and description of each linked agent, with how to call it. A linked skill goes by its command when the agent has its module's skill set: the prompt lists the session's skills, and the base skill tells the agent to load the first one now and the others when needed. A skill the agent does not have is inlined, and so is the base skill for an agent that does not have Yami's skill set.
+2. **Action.** One turn on a harness session with `accept-edits` approval, the flow's access, and the vault as the working directory. The agent can call `yami_check` to run the checks itself before it ends the turn, and `yami_agent` to run an agent.
 3. **Verification.** Yami reads the session document again, since the agent's tools can change its properties, and runs the `check` of each promise that has one. It updates `met`, `unmet`, the Deliverables checklist, and the Progress section of the session document. If a promise is unmet, the next prompt says which, and why.
 4. **Review.** When every check is met, and the session links a policy or a promise with no `check`, Yami opens a new conversation with the same agent, read-only, and the status is `reviewing`. The reviewer gets the session document, the policies, the promises to judge, the names of those items as the only ones to judge, the worker's last message, and the run's conversation note, which records every tool call. It gives each policy the verdict `followed` or `broken`, and each promise `met` or `unmet`, each with a reason, and records them with `yami_review`. The reviewer changes nothing: its access is read-only, and its tools are only those whose `readOnly` is true, with its own `yami_review`, which no other agent has and which refuses once the review ends. A broken policy or an unmet promise goes back to the worker as the next prompt, the same as an unmet check. The session document records the verdicts: `followed` and `broken` list the policies, `met` and `unmet` include the judged promises, the Review section gives each verdict with its reason, and `review` links the review's conversation note.
 
@@ -338,24 +431,68 @@ The session ends `done` when every check is met and the review finds every polic
 
 `new Yami({ vault, agents, modules, wiki, conversations, conversationFolder })` is the runtime of one vault. In Obsidian, `createYami` builds it. The wiki module is built in and comes first in `yami.modules`, then the plugin's modules, then the vault modules.
 
-- It sets each agent's working directory to the vault, and gives it `yami.tools()`, one tool set named `yami` with Yami's own tools and the tools of every module, and `yami.skills()`, Yami's skill set `internal/yami` with the base skill, and each module's internal folder that holds skills.
-- Yami's own tools: `yami_check({ session })`, which every agent gets, runs the checks of a session's promises and returns `session.check()`, with no record in the document. `yami_review({ verdicts })` is only in the tool set of one review's conversation, bound to that review: it records the reviewer's verdicts, and refuses a verdict of the wrong kind, an item of no review, and any call after the review ends. It returns `{ recorded, errors, remaining }`; called with no `verdicts`, `yami_review({})`, it shows what is left to judge.
+- It sets each agent's working directory to the vault, and gives it `yami.tools({ agent })`, one tool set named `yami` with Yami's own tools and the tools of every module, and `yami.skills()`, Yami's skill set `internal/yami` with the base skill, and each module's internal folder that holds skills.
+- `yami.tools(caller?)` gives the tool set for a caller, `{ agent, module, session, access, approval }`, all optional: `yami_agent` of the set runs agents on the caller's agent (default: the Yami's first), names a bare name in the caller's `module`, links the caller's `session` from their notes, and takes the caller's `access` and `approval` (default: the agent's preferences). Each run's worker gets the set for its session: `yami.tools({ agent, module: "notes", session: "notes/Weekly.md", access: "edit", approval: "accept-edits" })`.
+- Yami's own tools: `yami_check({ session })`, which every agent gets, runs the checks of a session's promises and returns `session.check()`, with no record in the document. `yami_agent({ agent, task })`, which every agent gets, runs an agent: see [Agents](#agents). `yami_review({ verdicts })` is only in the tool set of one review's conversation, bound to that review: it records the reviewer's verdicts, and refuses a verdict of the wrong kind, an item of no review, and any call after the review ends. It returns `{ recorded, errors, remaining }`; called with no `verdicts`, `yami_review({})`, it shows what is left to judge.
 - `yami.wiki` is the vault's one `Wiki`. The conversation folder stays out of its index.
 - `yami.enable()` installs every code module and the base skill, then discovers the vault modules. A host calls it on every start. The base skill, `BASE_SKILL`, is `internal/yami/skills/run/SKILL.md`, so a person can read and edit it. At each `discover`, Yami writes `BASE_SKILL_TEXT` there when no file is at the path, or when the file holds a text that an earlier version of Yami shipped, since then the person never edited it. A file with any other text holds a person's edits: Yami keeps it, and `yami.problems` reports it with the module `yami`. To get the new text, delete the file; the next `discover` writes it again.
 - `yami.discover()`, `yami.problems`, `yami.onModulesChange(listener)`, and `yami.createModule(name)`: the vault modules. See [Vault modules](#vault-modules).
 - `yami.ingest({ files | folder, name?, policies? })` captures files as sources of the wiki and creates an ingest session that links them, with the policies on top of the wiki's own.
-- `conversations` decides how the conversation notes of runs are kept. The default writes them straight to the vault and denies every approval; `createYami` gives notes with the message box, so a person can watch a run and answer its approvals. A `Conversations` of a host's own must start the agent's sessions with `OpenConversation.tools` when the run gives them, in place of the agent's tools: the review relies on it.
+- `conversations` decides how the conversation notes of runs are kept. The default writes them straight to the vault and denies every approval; `createYami` gives notes with the message box, so a person can watch a run and answer its approvals. A `Conversations` of a host's own must start the agent's sessions with `OpenConversation.tools` when the run gives them, in place of the agent's tools: the worker, the review, and the agents rely on it. It must also give two conversations that open at the same time two notes, as two agents of one session need.
 - `yami.close()` kills every live run and closes every agent session.
+
+### Agents
+
+An agent is a worker with a brief of its own, `agents/<name>/AGENT.md`. Every session and every conversation in the vault has the tool `yami_agent`, which runs one in a fresh context:
+
+```
+yami_agent({ agent: "checker", task: "Read notes/Weekly.md and the notes it links. List each claim that has no source." })
+→ { "agent": "notes:checker", "conversation": "conversations/notes checker.md", "message": "…" }
+```
+
+1. **The name.** A bare name names an agent of the caller's module, the session's. `<module>:<name>` names an agent of any module. A conversation has no module, so it names an agent as `<module>:<name>`. A name that finds no agent is an error that lists the agents the caller can name.
+2. **A fresh context on the caller's agent.** Yami starts a new conversation on the caller's agent: the same harness and preferences, the skill sets, and the vault as the working directory. Its one message holds the agent's description, its brief (the body of `AGENT.md`), and the task. The agent knows nothing else of the caller, so the task must hold what the agent needs.
+3. **Access.** A `read-only` agent changes no file, and gets only the tools that declare `readOnly`, as a reviewer does. An `edit` agent gets every tool. No agent gets `yami_agent`, so agents do not nest. A read-only caller, such as an ingest session, runs only read-only agents.
+4. **The record.** The run is a conversation note, `<module> <agent>`, which links the session document as `module` when a session called.
+5. **The result.** The tool returns the agent's final message and the path of its note. An agent returns its message only, and the caller decides what to do with it. An agent that fails or is stopped gives an error result with the reason and the note.
+6. **Several at once, stopped with the caller.** A caller can run several agents at the same time, each with its own conversation and note. When the caller's turn is interrupted, or its run is stopped or killed, its agents stop too.
+
+A flow's `agents` lists the agents that its sessions call: the first prompt lists each one with its description and its access, and says how to call it. A session can call any module's agent, listed or not. `AGENT_TOOL` is the tool's name, and `AgentReply` the type of its result.
+
+The review and the agent tool share one implementation of a fresh-context run: a new conversation, one turn, its note, and its stop.
+
+### Claude Code and Codex
+
+Claude Code is the favored and better-supported harness. Codex runs agents through the same tool, so a module's agents work the same on both, and the live tests run the agent tool on both. The differences for agents:
+
+| | Claude Code | Codex |
+| --- | --- | --- |
+| A run of `yami_agent` | A new Claude Code session, in the host. | A new Codex thread on its own `app-server`, in the host. |
+| The harness's own subagents | Claude Code has its Agent tool too. A skill set is a plugin of the session, and Claude Code would load each `.md` under the set's `agents/` folder as a subagent named `<set>:<folders>:<name>`, so `agents/checker/AGENT.md` would be `notes:checker:checker`. The adapter denies each of them (`setAgents`), so a skill set lends its skills only and a module's agents run through `yami_agent` only. | Codex has no subagents. |
+| A read-only agent | Claude Code's read-only tools. Its own Agent tool stays, and a subagent inherits the read-only tools. | Codex's read-only sandbox. |
+| A stop of the caller | Interrupts the agent's turn once Claude Code has started it. | Interrupts the agent's turn, and stops its server and its commands. |
 
 ### Promises and checks
 
-A promise names a `check` and gives it properties. `{{session}}` in a value is the session name, and `{{field}}` is a session property.
+A promise names a `check` and gives it properties, in the header of its `PROMISE.md` after its `name` and `description`. `{{session}}` in a value is the session name, and `{{field}}` is a session property.
+
+```markdown
+---
+name: sources-absorbed
+description: Every source of the session is absorbed.
+check: property
+field: sources
+property: status
+value: absorbed
+---
+Every source of this session has `status: absorbed`.
+```
 
 | `check` | Properties | Met when |
 | --- | --- | --- |
 | `exists` | `path` | The file exists. |
 | `contains` | `path`, `text` | The file exists and contains the text. |
-| `property` | `field`, `name`, `value`, `atLeast` | Every note linked in the session's `field` has the property `name` equal to `value`, and the field links at least `atLeast` notes (default 0). It reads the notes from the vault, so a note the index leaves out, such as a change, counts too. |
+| `property` | `field`, `property`, `value`, `atLeast` | Every note linked in the session's `field` has the property that `property` names equal to `value`, and the field links at least `atLeast` notes (default 0). It reads the notes from the vault, so a note the index leaves out, such as a change, counts too. |
 | `lint` | `path`, or `folder`, or `field` | The wiki's lint finds no error in the note, the folder, or the notes linked in the session's `field` and every note that links them. |
 | none | | Never by Yami. The review judges the promise after the checks pass. |
 
@@ -384,7 +521,7 @@ await wiki.versions();                                                          
 await wiki.restore(3);                                                              // version 3 back, as a new version
 ```
 
-- **The index holds every note** of the vault, except the folders in `exclude`, the types in `skipTypes` (conversation, session, module, change, and snapshot by default), and the files of module skills. Links resolve as Obsidian resolves them, over every note, indexed or not: by path, or by name, and a name that several notes share goes to the shortest path. `locate(target)` gives that note; `resolve(target)` gives it only when the index holds it. A link to a note the index leaves out, such as a session, is not dead, and it is not an edge of the graph. A note holds a tag and every tag above it, so `tags: ["school"]` finds a note tagged `school/cs513`.
+- **The index holds every note** of the vault, except the folders in `exclude`, the types in `skipTypes` (conversation, session, module, change, and snapshot by default), the forms of every module (the folders `agents/`, `flows/`, `policies/`, `promises/`, and `skills/` of `internal/<module>/`), and the frozen copies of sources. Links resolve as Obsidian resolves them, over every note, indexed or not: by path, or by name, and a name that several notes share goes to the shortest path. `locate(target)` gives that note; `resolve(target)` gives it only when the index holds it. A link to a note the index leaves out, such as a session, is not dead, and it is not an edge of the graph. A note holds a tag and every tag above it, so `tags: ["school"]` finds a note tagged `school/cs513`.
 - **`refresh()` reads the vault again.** About 500 notes take a quarter of a second. The tools and the checks call it, so they see the agent's writes. The embeddings are the one cache, keyed by the hash of each chunk, in `internal/wiki/cache/embeddings.json`; a refresh embeds only new chunks.
 - **A hit** has the `path`, a `score` in `[0, 1]` with the best at 1, a `snippet`, and `why`: "title match", "linked from Codex harness", "in the community of Claude harness", or the chunk that matched.
 - **The tag hierarchy** is by the tags' names: `ml/vision` is below `ml`. `wiki.neighbors(note)` gives the note's own tags, the tags above them (the top first), and the tags one level below them, each with the count of notes that hold it or a tag below it. `wiki.tag(tag)` gives the tags above a tag, the tags one level below it, and the notes that hold it themselves, by name; `wiki.tag()` gives the top, each tag with no `/`. Both are async, and read the vault again first when the index is stale. `wiki.tags()` lists every tag with its count. `wiki.holds(path, properties)` says whether the index holds a note: the rule of its refresh, which a change feed can use. A note's `ownTags` are the tags its `tags` property holds, and `tags` adds every tag above them. Tags are lower case, without `#` or empty parts, so `#ML//Vision/` is `ml/vision`. The index builds the hierarchy at each refresh, and stores nothing.
@@ -449,8 +586,8 @@ The gold file is a list of `{ "query", "expected": ["path or [[name]]"] }`; `ben
 
 The one module built into Yami. Its folder, `wiki/`, holds the knowledge base, `wiki/topics/` and `wiki/sources/`, for a person to read. Its sessions, ledger, changes, versions, and cache are under `internal/wiki/`.
 
-- Its `ingest` template makes a session whose `sources` field links the source notes to absorb, and whose `changes` field links the changes it applied. `yami.ingest` captures the files and creates the session; the commands **Wiki: ingest this file** and **Wiki: ingest a folder** call it.
-- Ingest sessions run with `access: "read-only"`: the agent reads anything and changes nothing except through `wiki_change`. Its policies: cite every claim, change the wiki through one plan, one subject one topic. Its promises: `Change applied` (at least one applied change), `Sources absorbed` (each source has `status: absorbed`), and `Clean topics` (`lint` over the sources and the topics that cite them).
+- Its `ingest` flow makes a session whose `sources` field links the source notes to absorb, and whose `changes` field links the changes it applied. `yami.ingest` captures the files and creates the session; the commands **Wiki: ingest this file** and **Wiki: ingest a folder** call it.
+- Ingest sessions run with `access: "read-only"`: the agent reads anything and changes nothing except through `wiki_change`. Its policies: `cite-every-claim`, `one-plan` (change the wiki through one plan), and `one-topic` (one subject, one topic). Its promises: `change-applied` (at least one applied change), `sources-absorbed` (each source has `status: absorbed`), and `clean-topics` (`lint` over the sources and the topics that cite them). A module adds its own policies to an ingest as `wiki:` names do: `yami.ingest({ files, policies: [this.ownWords] })`.
 - Its skill, `/wiki:ingest`, is a map-reduce: `wiki_chunks` for each source, one worker per chunk that reads `extractor.md` (an Item Map of subjects and cited claims), `wiki_match` for every subject at once, one worker per slice that reads `drafter.md` (the writes), then one plan for `wiki_change`. `page-forms.md` gives the topic and source forms. The three files sit in the skill's folder, and the lead gives each worker a path, not the text. A long document or a folder of documents costs the same care as one.
 - Its tools, for every agent in the vault: `wiki_search`, `wiki_match`, `wiki_lint`, `wiki_tags`, `wiki_neighbors` (a note's or a tag's place in the tag hierarchy, so an agent can walk a large wiki by subject), `wiki_chunks`, and `wiki_change`. Each but `wiki_change` is `readOnly`, so a reviewer has it. The search tool's description carries the citation procedure, so a plain conversation answers from the wiki without a skill. "Ask the wiki" needs no wiki code: start a conversation with the question.
 - Its ledger, `internal/wiki/sessions.base`, has the session tables and two more: `Versions`, each with its link to the change, and `Changes`.
@@ -552,10 +689,11 @@ await session.send("/wiki:ingest Absorb the sources of this session.");
 | `/<set>:<skill>` | Claude Code puts the skill's instructions in the turn. | The adapter puts the skill's instructions and folder in the turn. |
 | The model chooses a skill | The Skill tool. | The model reads the skill's files with a command. The adapter allows a command that only reads files in the skill folders (`cat`, `sed -n 'Np'`, `head`, `tail`, `nl`, `ls`, plainly quoted, no pipe or redirect) without asking. Any other command asks as usual. |
 | Read-only sessions | The Skill tool and the Agent tool stay on. A subagent inherits the read-only tools, so it cannot write either. | The read-only sandbox applies. |
+| A set's `agents/` folder | Claude Code would load each `.md` in it as a subagent, so the adapter denies each one: `setAgents(roots)` gives their names. | Not read. |
 
 Codex also offers extra skill roots, but from one it reads a skill it chose with a command that asks for approval under `ask`, and it sometimes builds the path wrong; so the adapter lists the skills itself.
 
-`setSkills(roots)` lists the skills of skill sets, `slashCommand(text)` splits a `/command`, `skillTurn(skill, message)` is the text that the Codex adapter sends for a skill, `skillList(skills)` its instructions, and `isSkillRead(command, folders, cwd)` its read rule.
+`setSkills(roots)` lists the skills of skill sets, `setAgents(roots)` the subagents that Claude Code would load from them, `slashCommand(text)` splits a `/command`, `skillTurn(skill, message)` is the text that the Codex adapter sends for a skill, `skillList(skills)` its instructions, and `isSkillRead(command, folders, cwd)` its read rule.
 
 ### App tools
 
@@ -611,11 +749,11 @@ The Obsidian layer. It holds what needs the Obsidian API: `createYami`, the vaul
 | `wiki` | | Options of the wiki, such as an `embedder` or the `defaultAlgorithm`. The conversation folder and Obsidian's Excluded files always stay out of its index. |
 | `conversationFolder` | `conversations` | The folder of conversation notes. |
 | `idleMinutes` | 15 | Minutes after which an agent process with no open message box closes. |
-| `commands` | every group | `{ conversations, sessions, wiki, modules }`: the groups of commands to add. `modules` is the New module command. The commands of the modules' templates and actions are always added. |
+| `commands` | every group | `{ conversations, sessions, wiki, modules }`: the groups of commands to add. `modules` is the New module command. The commands of the modules' flows and actions are always added. |
 | `statusBar` | `true` | A status bar item that says which agents work. |
 | `folderColors` | `true` | Each module's folder in the module's color in the file explorer, its internal folder muted, and `internal/` gray (`INTERNAL_COLOR`). `folderColorRules(yami)` gives the CSS. |
 
-It gives each module's commands the module's icon, and warns in the console of a module whose icon Obsidian does not have. It discovers the vault modules a moment after a module document, a template document, or the base skill changes, or a file is created, renamed, or removed (`watchModules`), and then adds and removes each template's command as the template appears and goes, and updates the folder colors. Removing a command needs Obsidian 1.7.2 or later. New module asks for a name in a prompt with one text field: Enter creates the module with `yami.createModule` and opens its module document, and Escape cancels. It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations, and removes the shared-document hub.
+It gives each module's commands the module's icon, and warns in the console of a module whose icon Obsidian does not have. It discovers the vault modules a moment after a module document, a file in a form's folder, or the base skill changes, or a file is created, renamed, or removed (`watchModules`), and then adds and removes each flow's command as the flow appears and goes, and updates the folder colors. Removing a command needs Obsidian 1.7.2 or later. New module asks for a name in a prompt with one text field: Enter creates the module with `yami.createModule` and opens its module document, and Escape cancels. It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations, and removes the shared-document hub.
 
 The commands and their ids. Obsidian adds the plugin's id before each, as `<plugin id>:new-module`, so a test runs one with `app.commands.executeCommandById`:
 
@@ -625,16 +763,16 @@ The commands and their ids. Obsidian adds the plugin's id before each, as `<plug
 | `sessions` | `run-session-<agent name>`, `resume-session`, `stop-session`, `kill-session` | Run this session with Claude, Resume this session, … |
 | `wiki` | `wiki-search`, `wiki-related`, `wiki-compare`, `wiki-match`, `wiki-lint-note`, `wiki-lint-vault`, `wiki-snapshot`, `wiki-versions`, `wiki-restore`, `wiki-refresh`, `wiki-ingest-file`, `wiki-ingest-folder` | Wiki: search, … |
 | `modules` | `new-module` | New module |
-| always | `<module id>-new-<template id>` | `<module name>: new <template name>`, for each template that offers a command |
+| always | `<module id>-new-<flow name>` | `<module name>: new <flow name>`, with each dash of the flow's name as a space, for each flow that offers a command |
 | always | `<module id>-<action id>` | `<module name>: <action name>`, for each action |
 
-`watchModules(app, component, yami)` is the discovery trigger, for a host that builds its own `Yami`: it discovers again 300 ms after the last of close changes (a module document, a template document, or the base skill changed, or any file created, renamed, or removed), and stops when the component unloads.
+`watchModules(app, component, yami)` is the discovery trigger, for a host that builds its own `Yami`: it discovers again 300 ms after the last of close changes (a module document, a file in a form's folder, or the base skill changed, or any file created, renamed, or removed), and stops when the component unloads.
 
 `ObsidianYami` adds what a plugin's own commands and views need:
 
-- `activeSession(module or template?)`, the session open in the editor; `activeFile()` and `activeSelection()`; `properties(path)`, a note's properties from Obsidian's cache.
+- `activeSession(module or flow?)`, the session open in the editor; `activeFile()` and `activeSelection()`; `properties(path)`, a note's properties from Obsidian's cache.
 - `onSessionsChange(listener)`: a call when the sessions or the modules may look different, after a session document or a module's document changes, a run changes its status, or a discovery changes `modules` or `problems`. A view of both needs this feed only. Close calls become one. `onWikiChange(listener)`: a call when a note that the wiki holds, or would hold, changes, for a view of the wiki. A change to a note the index leaves out, such as a conversation, makes no call.
-- `newSession(template)`: creates a session, opens it, and says so. `runAction(action, session?)`: does a module's action, and first lets the person pick when it has choices. `runModuleAct(act)`: does an act of `module.acts()`.
+- `newSession(flow)`: creates a session, opens it, and says so. `runAction(action, session?)`: does a module's action, and first lets the person pick when it has choices. `runModuleAct(act)`: does an act of `module.acts()`.
 - `open(path, mode)`; `pick(items, label, placeholder)`, a list to pick one from; and `notify(work)`, which shows the message of a promise, opens the note it names, shows an error in a notice, and resolves when it has.
 - `moduleIcon(module)`, the name of the module's icon, or `MODULE_ICON` when Obsidian does not have it, for `setIcon`.
 - `agentName(agent)`, the name the agent is registered under; `hub` and `conversations`, the shared documents and the conversation notes, for other plugins.
@@ -714,7 +852,7 @@ import { testYami } from "yami/testing";
 const librarian = new Librarian();
 const t = await testYami({ modules: [librarian] });         // a Yami over a fresh vault in a temporary folder, every module enabled
 const v = await testYami({ files: { "internal/notes": "test/fixtures/notes" } });   // with files copied in first, so enable finds a vault module
-const session = await librarian.checkout.create({ name: "RL" });
+const session = await librarian.checkout.create({ name: "RL", request: "Books on reinforcement learning." });
 t.agent.queue(async (prompt, session) => { /* the agent's first turn: write files, call session.tool(name, input) */ }, review());
 expect(await session.start()).toMatchObject({ state: "done" });
 await t.dispose();                                          // stops every run and removes the vault
@@ -722,13 +860,20 @@ await t.dispose();                                          // stops every run a
 
 - `testYami({ modules, turns, wiki, files })`: `files` maps a vault path to a file or a folder on disk, which `testYami` copies into the vault before it enables the modules. A relative disk path starts at the working directory of the test run. A file it cannot copy throws, with the path.
 - `FsVault` is a `Vault` over a folder of the file system.
-- `ScriptedAgent` runs the next function of its script for each turn of each of its sessions, and completes a turn with no function left. The script is shared by the agent's sessions, so a review takes the turn after the worker's. A turn gets the message and the `ScriptedSession`, whose `tool(name, input)` calls a tool as the harness would. A turn that never resolves runs until `stop` or `kill`, as a harness's does. `agent.started` holds every session in order; `agent.last.prompts` holds the messages of its last session, and `agent.last.options` the tools, skills, and access it got.
+- `ScriptedAgent` runs the next function of its script for each turn of each of its sessions, and completes a turn with no function left. The script is shared by the agent's sessions, so a review takes the turn after the worker's. A turn gets the message and the `ScriptedSession`, whose `tool(name, input)` calls a tool as the harness would: the tool's signal aborts when the turn is interrupted or the session closes. A turn that never resolves runs until `stop` or `kill`, as a harness's does. An agent that `yami_agent` runs is a new session of the same agent, so it takes the next turn of the script. `agent.started` holds every session in order; `agent.last.prompts` holds the messages of its last session, and `agent.last.options` the tools, skills, and access it got.
 - `review(verdicts?)` is a turn that plays the reviewer: it records a verdict with `yami_review` for each item of the review, the one that `verdicts` names (by the item's name or path, as a verdict or `[verdict, reason]`), and otherwise `followed` or `met`. A reviewer that gives no verdict is a turn that does nothing. It throws in a session that is no review's.
 
 ```ts
 // The worker meets the check; the reviewer finds the policy broken; the worker fixes it; the next review passes.
-t.agent.queue(writeTheNote, review({ "Cite sources": ["broken", "The second claim has no source."] }), fixTheNote, review());
+t.agent.queue(writeTheNote, review({ "cite-sources": ["broken", "The second claim has no source."] }), fixTheNote, review());
 expect(await session.start()).toMatchObject({ state: "done", iterations: 2 });
+
+// The worker calls the agent checker; the agent's turn is the next one, in a session of its own.
+t.agent.queue(async (_prompt, worker) => {
+  const { text } = await worker.tool("yami_agent", { agent: "checker", task: "Check notes/x.md." });
+  // text is {"agent":"notes:checker","conversation":"conversations/notes checker.md","message":"Nothing is missing."}
+  await writeTheNote();
+}, () => ({ text: "Nothing is missing." }));
 ```
 - `markdownText()` is a Vite plugin for `vitest.config`, which imports a `.md` file as its text, as the plugin's build does.
 
@@ -747,7 +892,7 @@ await copyStyles("styles.css");
 ## Build and tests
 
 - `npm run build` first type-checks every module except `yami/obsidian` with `tsconfig.core.json`. That check has no DOM types, and it maps `obsidian` and `@codemirror/*` to an empty module, so a core file that uses them, or imports a file of `yami/obsidian`, fails the build. Then `tsc` builds the whole library.
-- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules, the vault modules, the loop, the review, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, and in `test/unit/obsidian/` the shared documents, the conversation manager, the modules' commands, and the discovery trigger over a fake Obsidian app.
+- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules and their forms, the vault modules and their problems, the loop, the review, the agent tool, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, and in `test/unit/obsidian/` the shared documents, the conversation manager, the modules' commands, and the discovery trigger over a fake Obsidian app.
 - `npm run bench` runs the retrieval benchmark against the vault in `YAMI_BENCH_VAULT`; see [The benchmark](#the-benchmark).
-- `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, and resume.
+- `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, skills, the agent tool in a session, and resume; for Claude Code also that a skill set's `agents/` gives no subagent.
 - The plugin's `npm run test:obsidian` drives the real Obsidian app with `yami/obsidian`.

@@ -5,9 +5,9 @@ import type { Yami } from "../module/yami.js";
 import { ChangeFeed } from "./change-feed.js";
 
 /**
- * Discovers the vault modules again 300 ms after the last of close changes: a module document, a template
- * document, or the base skill is changed, or any file is created, renamed, or removed, since that can change
- * what a template's link finds. `yami.onModulesChange` then hears of any change. It stops when the component unloads.
+ * Discovers the vault modules again 300 ms after the last of close changes: a module document, a file in
+ * the folder of a form (`agents/`, `flows/`, `policies/`, `promises/`, or `skills/`), or the base skill is
+ * changed, or any file is created, renamed, or removed, since that can change what a flow's name finds. `yami.onModulesChange` then hears of any change. It stops when the component unloads.
  * `createYami` calls it; a host that builds its own `Yami` can call it too.
  */
 export function watchModules(app: App, component: Component, yami: Yami): void {

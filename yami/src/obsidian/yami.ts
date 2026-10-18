@@ -3,7 +3,7 @@ import type { Agent } from "../agent/agent.js";
 import type { Harness } from "../agent/types.js";
 import { CONVERSATION_FOLDER } from "../conversation/conversations.js";
 import { basename } from "../document/document.js";
-import { SessionTemplate, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
+import { Flow, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
 import type { Session } from "../module/session.js";
 import { Yami } from "../module/yami.js";
 import type { WikiOptions } from "../wiki/wiki.js";
@@ -47,7 +47,7 @@ export interface YamiPluginOptions {
   idleMinutes?: number;
   /**
    * The groups of commands to add. Default: every group. `modules` is the New module command. The commands
-   * of the modules' templates and actions are always added.
+   * of the modules' flows and actions are always added.
    */
   commands?: Partial<Record<CommandGroup, boolean>>;
   /** A status bar item that says which agents work. Default true. */
@@ -204,12 +204,12 @@ export class ObsidianYami extends Yami {
 
   /** Does an act of a module: creates the session of a `new` act and opens it, or does the action. */
   runModuleAct(act: ModuleAct): Promise<void> {
-    return act.kind === "new" ? this.newSession(act.template) : this.runAction(act.action);
+    return act.kind === "new" ? this.newSession(act.flow) : this.runAction(act.action);
   }
 
-  /** Creates a session from a template, opens it, and says so. */
-  newSession(template: SessionTemplate): Promise<void> {
-    return this.notify(template.create().then((session) => ({ message: `Created ${session.path}.`, open: session.path })));
+  /** Creates a session from a flow, opens it, and says so. */
+  newSession(flow: Flow): Promise<void> {
+    return this.notify(flow.create().then((session) => ({ message: `Created ${session.path}.`, open: session.path })));
   }
 
   /**
@@ -246,15 +246,15 @@ export class ObsidianYami extends Yami {
 
   /**
    * The session open in the active editor: a session document of a module of this Yami, and of the
-   * module or the template given. It reads the properties from Obsidian's cache, so commands can ask it often.
+   * module or the flow given. It reads the properties from Obsidian's cache, so commands can ask it often.
    */
-  activeSession(of?: YamiModule | SessionTemplate): Session | undefined {
+  activeSession(of?: YamiModule | Flow): Session | undefined {
     const file = this.app.workspace.getActiveFile();
     const properties = file?.extension === "md" ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
     if (!file || properties?.type !== "session") return undefined;
     const module = this.module(String(properties.module ?? ""));
     if (!module || module.sessionsIn === "none" || file.path !== `${module.layout.sessions}/${file.name}`) return undefined;
-    if (of instanceof SessionTemplate ? module.templateOf(properties.template) !== of : of && of !== module) return undefined;
+    if (of instanceof Flow ? module.flowOf(properties.flow) !== of : of && of !== module) return undefined;
     return this.session(file.path);
   }
 

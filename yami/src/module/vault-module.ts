@@ -1,14 +1,14 @@
-import { basename, link, parseDocument, PropertiesError, type Document } from "../document/document.js";
-import { MODULE, SESSION, TEMPLATE, validate, type FieldType, type Schema } from "../document/schema.js";
+import { basename, documentName, link, linksOf, parseDocument, PropertiesError, resolveLink, type Document } from "../document/document.js";
+import { FORMS, MODULE, SESSION, validate, type FieldType, type FormKind, type Schema } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { YAMI_ID } from "./base-skill.js";
 import { hexColor } from "./colors.js";
-import { linkedDocuments } from "./links.js";
-import { ID, idFromName, INTERNAL, MODULE_ICON, moduleLayout, YamiModule, type DocumentKind, type DocumentRef, type LinkedKind, type TemplateOptions } from "./module.js";
+import { parseName, resolveForm } from "./links.js";
+import { formPath, ID, idFromName, INTERNAL, KIND_OF, MODULE_ICON, moduleLayout, YamiModule, type DocumentRef, type FlowOptions, type Layout, type LinkedKind } from "./module.js";
 
 /**
- * Something wrong with a vault module's documents, which keeps a module or a template out until a person
- * fixes it. Or, with the module `yami`, a base skill that holds a person's edits and not this version's text.
+ * Something wrong with a vault module's documents, which keeps a module or a flow out until a person fixes
+ * it. Or, with the module `yami`, a base skill that holds a person's edits and not this version's text.
  */
 export interface ModuleProblem {
   /** The module's id: the name of its folder under `internal/`. `yami` for the base skill. */
@@ -31,18 +31,18 @@ export interface VaultModuleDefinition {
   icon: string;
   color?: string;
   instructions?: string;
-  /** The session fields of every template, by the type of their defaults. */
+  /** The session fields of every flow, by the type of their defaults. */
   schema: Schema;
   /** Whether `internal/<id>/skills/` holds a skill. */
   skills: boolean;
-  templates: TemplateOptions[];
+  flows: FlowOptions[];
 }
 
 /**
- * A module defined in the vault with no code: the module document `internal/<id>/<id>.md` and a template
- * document for each kind of session in `internal/<id>/templates/`. It has no tools, checks, or actions of
- * its own: its sessions use the tools that Yami serves and the core checks, and the review judges the rest.
- * Yami makes one for each valid folder; `yami.discover()` reads them again.
+ * A module defined in the vault with no code: the module document `internal/<id>/<id>.md` and a
+ * `flows/<name>/FLOW.md` for each kind of session, with its forms in the folders a code module installs.
+ * It has no tools, checks, or actions of its own: its sessions use the tools that Yami serves and the core
+ * checks, and the review judges the rest. Yami makes one for each valid folder; `yami.discover()` reads them again.
  */
 export class VaultModule extends YamiModule {
   readonly id: string;
@@ -67,7 +67,7 @@ export class VaultModule extends YamiModule {
     this.schema = definition.schema;
     this.document = definition.document;
     this.#skills = definition.skills;
-    for (const template of definition.templates) this.template(template);
+    for (const flow of definition.flows) this.flow(flow);
   }
 
   override get hasSkills(): boolean {
@@ -75,28 +75,40 @@ export class VaultModule extends YamiModule {
   }
 }
 
-const KIND_OF: Record<LinkedKind, Exclude<DocumentKind, "agent">> = { articles: "article", policies: "policy", promises: "promise", skills: "skill" };
+/** The kind of form that each folder of a module holds. */
+const FORM_OF = new Map<string, FormKind>(Object.entries(FORMS).map(([kind, form]) => [form.folder, kind as FormKind]));
+
+type Problem = (path: string, message: string) => void;
+
+interface Folder {
+  /** The form files, `<folder>/<name>/<FILE>.md`. */
+  forms: { kind: FormKind; path: string }[];
+  /** Markdown files directly in a form's folder, where a folder belongs. */
+  flat: { kind: FormKind; path: string }[];
+}
 
 /**
- * Reads the vault modules: each folder `internal/<id>/` with a module document and at least one document
- * in `templates/`, whose id no module in `taken` has. A module or a template with a problem stays out, and
- * the problem says why; a bad color only falls back to the default.
+ * Reads the vault modules: each folder `internal/<id>/` with a module document and at least one flow, whose
+ * id no module in `taken` has. A module, a flow, or a form with a problem stays out, and the problem says
+ * why and how to fix it; a bad color only falls back to the default.
  */
 export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>): Promise<{ definitions: VaultModuleDefinition[]; problems: ModuleProblem[] }> {
   const files = await vault.list(INTERNAL);
-  const folders = new Map<string, { templates: string[]; skills: boolean }>();
-  const folder = (id: string) => folders.get(id) ?? folders.set(id, { templates: [], skills: false }).get(id)!;
-  for (const path of files) {
+  const folders = new Map<string, Folder>();
+  for (const path of [...files].sort()) {
     const parts = path.split("/");
-    if (definesModule(path) && parts[2] === "templates") folder(parts[1]!).templates.push(path);
-    if (parts.length === 5 && parts[2] === "skills" && parts[4] === "SKILL.md") folder(parts[1]!).skills = true;
+    const kind = FORM_OF.get(parts[2] ?? "");
+    if (!kind) continue;
+    const folder = folders.get(parts[1]!) ?? folders.set(parts[1]!, { forms: [], flat: [] }).get(parts[1]!)!;
+    if (parts.length === 5 && parts[4] === FORMS[kind].file) folder.forms.push({ kind, path });
+    else if (parts.length === 4 && path.endsWith(".md")) folder.flat.push({ kind, path });
   }
-  const definitions: VaultModuleDefinition[] = [];
   const problems: ModuleProblem[] = [];
-  for (const [id, { templates, skills }] of [...folders].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    if (!templates.length) continue;
+  const modules: { id: string; folder: Folder; doc: Document; problem: Problem }[] = [];
+  for (const [id, folder] of [...folders].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    if (![...folder.forms, ...folder.flat].some((form) => form.kind === "flow")) continue;
     const root = `${INTERNAL}/${id}`;
-    const problem = (path: string, message: string) => problems.push({ module: id, path, ...(path !== root && { document: path }), message });
+    const problem: Problem = (path, message) => problems.push({ module: id, path, ...(path !== root && { document: path }), message });
     if (taken.has(id)) {
       problem(root, `The plugin's code has a module with the id ${id}, and it wins. Rename the folder ${root}/ to give the vault module an id of its own.`);
       continue;
@@ -110,10 +122,9 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
       problem(root, `"${id}" cannot be a module id. Rename the folder${better ? ` to ${better}` : ""}: lower-case letters, digits, and dashes.`);
       continue;
     }
-    const layout = moduleLayout(id);
-    const document = layout.moduleDoc;
+    const document = moduleLayout(id).moduleDoc;
     if (!files.includes(document)) {
-      problem(root, `The folder has templates but no module document. Create ${document} with the property type: module.`);
+      problem(root, `The folder has flows but no module document. Create ${document} with the property type: module.`);
       continue;
     }
     const doc = await read(vault, document, problem);
@@ -122,6 +133,27 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
       problem(document, `Set the property type: module.`);
       continue;
     }
+    modules.push({ id, folder, doc, problem });
+  }
+
+  // Every form of every vault module first, so that a flow of one module can name a form of another.
+  const broken = new Set<string>();
+  const docs = new Map<string, Document>();
+  for (const { folder, problem } of modules) {
+    for (const { kind, path } of folder.flat) {
+      const name = idFromName(basename(path)) || "name";
+      problem(path, `A ${kind} is a folder with a ${FORMS[kind].file} in it. Move this file to ${path.slice(0, path.lastIndexOf("/"))}/${name}/${FORMS[kind].file}, and set name: ${name}.`);
+    }
+    for (const { kind, path } of folder.forms) {
+      const doc = await checkForm(vault, kind, path, problem);
+      if (doc) docs.set(path, doc);
+      else broken.add(path);
+    }
+  }
+
+  const definitions: VaultModuleDefinition[] = [];
+  for (const { id, folder, doc, problem } of modules) {
+    const document = doc.path;
     const props = doc.properties;
     const text = (name: string): string | undefined => {
       // The module document of a vault module needs no property but its type.
@@ -140,23 +172,22 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
     }
     const instructions = text("instructions");
 
+    const layout = moduleLayout(id);
     const schema: Schema = {};
-    const ids = new Map<string, string>();
-    const options: TemplateOptions[] = [];
-    for (const path of templates.sort()) {
+    const flows: FlowOptions[] = [];
+    for (const { kind, path } of folder.forms) {
+      const flowDoc = docs.get(path);
+      if (kind !== "flow" || !flowDoc) continue;
       const before = problems.length;
-      const template = await readTemplate(vault, path, layout, problem);
-      if (!template) continue;
-      const other = ids.get(template.id);
-      if (other) problem(path, `The template id ${template.id} is the id of ${other} too, as both file names give it. Rename one of the files.`);
-      for (const [name, value] of Object.entries(template.fields ?? {})) {
+      const flow = await readFlow(vault, flowDoc, id, layout, broken, problem);
+      if (!flow) continue;
+      for (const [field, value] of Object.entries(flow.fields ?? {})) {
         const type = fieldType(value);
-        if (schema[name] && schema[name]!.type !== type) problem(path, `The field ${name} is ${describe(type)} here and ${describe(schema[name]!.type)} in another template. Give it one type.`);
+        if (schema[field] && schema[field]!.type !== type) problem(path, `The field ${field} is ${describe(type)} here and ${describe(schema[field]!.type)} in another flow. Give it one type.`);
       }
       if (problems.length > before) continue;
-      ids.set(template.id, path);
-      for (const [name, value] of Object.entries(template.fields ?? {})) schema[name] ??= { type: fieldType(value), ...(value !== null && { default: value }) };
-      options.push(template);
+      for (const [field, value] of Object.entries(flow.fields ?? {})) schema[field] ??= { type: fieldType(value), ...(value !== null && { default: value }) };
+      flows.push(flow);
     }
     definitions.push({
       id,
@@ -167,21 +198,27 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
       color,
       instructions,
       schema,
-      skills,
-      templates: options,
+      skills: folder.forms.some((form) => form.kind === "skill"),
+      flows,
     });
   }
-  return { definitions, problems };
+  // By module and by document, so a person reads the problems of one document together.
+  const order = (a: ModuleProblem, b: ModuleProblem) => (a.module === b.module ? (a.path === b.path ? 0 : a.path < b.path ? -1 : 1) : a.module < b.module ? -1 : 1);
+  return { definitions, problems: problems.sort(order) };
 }
 
-/** Whether a path is a module document, `internal/<id>/<id>.md`, or a template document, `internal/<id>/templates/<name>.md`. */
+/**
+ * Whether a change at a path can change what the vault modules are: a module document,
+ * `internal/<id>/<id>.md`, or a file in the folder of a form, such as `internal/<id>/policies/<name>/POLICY.md`
+ * or a flat `internal/<id>/policies/<name>.md`.
+ */
 export function definesModule(path: string): boolean {
   const parts = path.split("/");
-  return parts[0] === INTERNAL && path.endsWith(".md") && ((parts.length === 3 && parts[2] === `${parts[1]}.md`) || (parts.length === 4 && parts[2] === "templates"));
+  return parts[0] === INTERNAL && path.endsWith(".md") && ((parts.length === 3 && parts[2] === `${parts[1]}.md`) || (parts.length >= 4 && FORM_OF.has(parts[2]!)));
 }
 
 /** Reads a document. Properties that do not parse are a problem, and give nothing. */
-async function read(vault: Vault, path: string, problem: (path: string, message: string) => void): Promise<Document | undefined> {
+async function read(vault: Vault, path: string, problem: Problem): Promise<Document | undefined> {
   try {
     return parseDocument(vault, path, await vault.read(path));
   } catch (error) {
@@ -191,51 +228,77 @@ async function read(vault: Vault, path: string, problem: (path: string, message:
   }
 }
 
-/** Reads a template document into the options of a template. Each problem it finds is reported, and gives nothing. */
-async function readTemplate(vault: Vault, path: string, layout: ReturnType<typeof moduleLayout>, problem: (path: string, message: string) => void): Promise<TemplateOptions | undefined> {
+/** Reads a form and checks its header: its properties, and a `name` that is its folder's name. A flow also has no body. Each problem is reported, and gives nothing. */
+async function checkForm(vault: Vault, kind: FormKind, path: string, problem: Problem): Promise<Document | undefined> {
   const doc = await read(vault, path, problem);
   if (!doc) return undefined;
-  const props = doc.properties;
-  if (props.type !== "template") {
-    problem(path, `Set the property type: template, or move the document out of templates/.`);
-    return undefined;
-  }
+  const folder = basename(path.slice(0, path.lastIndexOf("/")));
   let ok = true;
   const fail = (message: string) => {
     problem(path, message);
     ok = false;
   };
-  for (const error of validate(props, TEMPLATE)) fail(`The property ${error}.`);
-  const id = idFromName(basename(path));
-  if (!id) fail(`The file name gives no template id. Name the file with letters or digits.`);
+  if (!ID.test(folder)) {
+    const better = idFromName(folder);
+    fail(`"${folder}" cannot name a ${kind}. Rename the folder${better ? ` to ${better}` : ""}, and set the same name: lower-case letters, digits, and dashes.`);
+  }
+  for (const error of validate(doc.properties, FORMS[kind].schema)) fail(`The property ${error}.${error === "name is missing" ? ` Set name: ${folder}.` : ""}`);
+  const name = doc.properties.name;
+  if (typeof name === "string" && name !== folder) fail(`The name is "${name}", and the folder is ${folder}. A name is its folder's name: set name: ${folder}, or rename the folder.`);
+  if (kind === "flow" && doc.body.trim()) fail(`A flow has no body. Move the text into the property instructions, and leave the body empty.`);
+  return ok ? doc : undefined;
+}
+
+/** Reads a valid `FLOW.md` into the options of a flow. Each problem it finds is reported, and gives nothing. */
+async function readFlow(vault: Vault, doc: Document, module: string, layout: Layout, broken: ReadonlySet<string>, problem: Problem): Promise<FlowOptions | undefined> {
+  const props = doc.properties;
+  let ok = true;
+  const fail = (message: string) => {
+    problem(doc.path, message);
+    ok = false;
+  };
   const turns = props.maxIterations;
   if (typeof turns === "number" && (!Number.isInteger(turns) || turns < 1)) fail(`maxIterations must be a whole number of 1 or more, not ${turns}.`);
   const fields = (props.fields ?? {}) as Properties;
   const core = Object.keys(fields).filter((field) => field in SESSION);
   if (core.length) fail(core.length === 1 ? `The field ${core[0]} is a core session field, which Yami sets. Rename it.` : `The fields ${core.join(", ")} are core session fields, which Yami sets. Rename them.`);
-  if (!ok) return undefined;
 
-  const links: Record<LinkedKind, DocumentRef[]> = { articles: [], policies: [], promises: [], skills: [] };
-  for (const found of await linkedDocuments(vault, layout, props)) {
-    const kind = KIND_OF[found.kind];
-    if (!found.path) fail(`The template links the ${kind} "${found.target}", which is not in the vault. Create it, or fix the link in ${found.kind}.`);
-    else links[found.kind].push({ kind, name: found.name, path: found.path, link: link(found.path) });
+  const links: Record<LinkedKind, DocumentRef[]> = { agents: [], articles: [], policies: [], promises: [], skills: [] };
+  for (const field of ["skills", "agents", "policies", "promises", "articles"] as const) {
+    const kind = KIND_OF[field];
+    for (const value of linksOf(props[field])) {
+      if (kind === "article") {
+        const path = await resolveLink(vault, value, [layout.folders.articles, layout.internal]);
+        if (path) links.articles.push({ kind, name: documentName(path), path, link: link(path) });
+        else fail(`The flow links the article "${value}", which is not in the vault. Create it, or fix the link in articles.`);
+        continue;
+      }
+      const path = await resolveForm(vault, kind, value, module);
+      const named = parseName(value, module);
+      if (!path) {
+        fail(
+          named
+            ? `The flow names the ${kind} "${value}", which is not in the vault. Create ${formPath(moduleLayout(named.module), kind, named.name)}, or fix the name in ${field}.`
+            : `The flow names the ${kind} "${value}", which is no name. Name a ${kind} by its folder's name, or as <module>:<name>, in ${field}.`,
+        );
+      } else if (broken.has(path)) fail(`The flow names the ${kind} "${value}", whose document has a problem. Fix ${path} first.`);
+      else links[field].push({ kind, name: documentName(path), path, link: link(path) });
+    }
   }
   if (!ok) return undefined;
   const optional = <T>(name: string) => (props[name] === undefined || props[name] === null ? undefined : (props[name] as T));
   return {
-    id,
-    name: optional<string>("name")?.trim() || basename(path),
-    description: optional<string>("description"),
+    name: props.name as string,
+    description: props.description as string,
     skills: links.skills as DocumentRef<"skill">[],
+    agents: links.agents as DocumentRef<"agent">[],
     policies: links.policies as DocumentRef<"policy">[],
     promises: links.promises as DocumentRef<"promise">[],
     articles: links.articles as DocumentRef<"article">[],
+    fields,
     maxIterations: optional<number>("maxIterations"),
     access: optional<"edit" | "read-only">("access"),
     instructions: optional<string>("instructions"),
-    fields,
-    body: doc.body,
     command: optional<boolean>("command"),
   };
 }
@@ -252,4 +315,3 @@ function fieldType(value: unknown): FieldType {
 function describe(type: FieldType): string {
   return type === "list" ? "a list" : type === "map" ? "names with values" : type === "number" ? "a number" : type === "boolean" ? "true or false" : "text";
 }
-

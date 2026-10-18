@@ -34,10 +34,36 @@ export function setSkills(roots: string[]): SetSkill[] {
   return out;
 }
 
+/**
+ * The subagents that Claude Code would load from the `agents/` folder of each skill set, by the names it
+ * gives them: `<set>:<folders>:<name>`, where the folders lead from `agents/` to the file and `name` is the
+ * file's `name`, or its file name. A skill set lends only its skills, so the Claude adapter denies these.
+ */
+export function setAgents(roots: string[]): string[] {
+  const names: string[] = [];
+  const walk = (folder: string, parts: string[]) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const file = path.join(folder, entry.name);
+      if (entry.isDirectory()) walk(file, [...parts, entry.name]);
+      else if (entry.name.endsWith(".md")) names.push([...parts, frontValue(readFileSync(file, "utf8"), "name") || entry.name.slice(0, -3)].join(":"));
+    }
+  };
+  for (const root of roots) {
+    const folder = path.join(root, "agents");
+    if (existsSync(folder)) walk(folder, [path.basename(root)]);
+  }
+  return names;
+}
+
 /** The `description` of a `SKILL.md` front matter, on one line. */
 function describe(text: string): string {
+  return frontValue(text, "description");
+}
+
+/** A value of one line in a markdown file's front matter, without its quotes. */
+function frontValue(text: string, key: string): string {
   const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
-  const line = front.match(/^description:\s*(.*)$/m)?.[1]?.trim() ?? "";
+  const line = front.match(new RegExp(`^${key}:\\s*(.*)$`, "m"))?.[1]?.trim() ?? "";
   return line.replace(/^(["'])([\s\S]*)\1$/, "$2");
 }
 

@@ -3,13 +3,14 @@
 export { Yami, type IngestOptions, type SessionListener, type YamiOptions } from "./module/yami.js";
 export {
   checkName,
+  Flow,
+  formPath,
   idFromName,
   INTERNAL,
   MODULE_ICON,
   ModuleDocument,
   moduleSkills,
   safeName,
-  SessionTemplate,
   skillCommand,
   VAULT_LEDGER,
   YamiModule,
@@ -18,6 +19,8 @@ export {
   type ChoiceAction,
   type DocumentKind,
   type DocumentRef,
+  type FlowOptions,
+  type FormParts,
   type Layout,
   type LinkedKind,
   type ModuleAct,
@@ -25,8 +28,8 @@ export {
   type Place,
   type PlainAction,
   type SessionAction,
-  type TemplateOptions,
 } from "./module/module.js";
+export { AGENT_TOOL, type AgentCaller, type AgentReply } from "./module/agent-run.js";
 export {
   Session,
   STATUS_LABELS,
@@ -49,4 +52,4 @@ export { checks, expand, runCheck, type Check, type CheckContext, type CheckResu
 export { moduleTools, TOOL_SET } from "./module/tools.js";
 export { WikiModule } from "./module/wiki.js";
 export { defineTool, z, type AgentTool, type ToolOutput } from "./agent/index.js";
-export type { Field, FieldType, LedgerView, Properties, Schema, SessionState, Vault } from "./document/index.js";
+export type { Field, FieldType, FormKind, LedgerView, Properties, Schema, SessionState, Vault } from "./document/index.js";

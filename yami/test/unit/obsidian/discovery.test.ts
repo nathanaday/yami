@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 const MODULE = "internal/notes/notes.md";
-const TEMPLATE = "internal/notes/templates/Daily.md";
+const FLOW = "internal/notes/flows/daily/FLOW.md";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function write(path: string, properties: Properties) {
@@ -56,23 +56,23 @@ function nextChange(): Promise<void> {
 }
 
 describe("watchModules", () => {
-  it("discovers again a moment after a module document or a template document is created, changed, or removed", async () => {
+  it("discovers again a moment after a module document or a flow is created, changed, or removed", async () => {
     t = await testYami();
     const obsidian = fakeObsidian();
     watchModules(obsidian.app, obsidian.component, t.yami);
 
     await write(MODULE, { type: "module", name: "Notes" });
-    await write(TEMPLATE, { type: "template" });
+    await write(FLOW, { name: "daily", description: "A daily note." });
     let change = nextChange();
-    obsidian.fire("create", TEMPLATE);
+    obsidian.fire("create", FLOW);
     await change;
-    expect(t.yami.module("notes")?.templates.map((template) => template.name)).toEqual(["Daily"]);
+    expect(t.yami.module("notes")?.flows.map((flow) => flow.description)).toEqual(["A daily note."]);
 
-    await write(TEMPLATE, { type: "template", name: "Journal page" });
+    await write(FLOW, { name: "daily", description: "A journal page." });
     change = nextChange();
-    obsidian.fire("modify", TEMPLATE);
+    obsidian.fire("modify", FLOW);
     await change;
-    expect(t.yami.module("notes")?.templates.map((template) => template.name)).toEqual(["Journal page"]);
+    expect(t.yami.module("notes")?.flows.map((flow) => flow.description)).toEqual(["A journal page."]);
 
     await write(MODULE, { type: "module", name: "Daily notes" });
     change = nextChange();
@@ -80,9 +80,9 @@ describe("watchModules", () => {
     await change;
     expect(t.yami.module("notes")?.name).toBe("Daily notes");
 
-    await t.vault.remove(TEMPLATE);
+    await t.vault.remove(FLOW);
     change = nextChange();
-    obsidian.fire("delete", TEMPLATE);
+    obsidian.fire("delete", FLOW);
     await change;
     expect(t.yami.module("notes")).toBeUndefined();
     obsidian.unload();
@@ -114,20 +114,25 @@ describe("watchModules", () => {
     watchModules(obsidian.app, obsidian.component, t.yami);
 
     obsidian.fire("modify", "notes/Idea.md");
-    obsidian.fire("modify", "internal/notes/policies/Be kind.md");
+    obsidian.fire("modify", "internal/notes/articles/Guide.md");
     await sleep(400);
     expect(discover).not.toHaveBeenCalled();
 
-    // A created, renamed, or removed file can change what a template's link finds.
+    // A change to any form can change a flow, or a problem.
+    for (const folder of ["agents", "flows", "policies", "promises", "skills"]) obsidian.fire("modify", `internal/notes/${folder}/kind/FORM.md`);
+    await sleep(400);
+    expect(discover).toHaveBeenCalledTimes(1);
+
+    // A created, renamed, or removed file can change what a flow's name finds.
     obsidian.fire("create", "notes/Idea.md");
     obsidian.fire("rename", "notes/Idea 2.md", "notes/Idea.md");
     obsidian.fire("delete", "notes/Idea 2.md");
     await sleep(400);
-    expect(discover).toHaveBeenCalledTimes(1);
+    expect(discover).toHaveBeenCalledTimes(2);
 
     obsidian.fire("create", "notes/Late.md");
     obsidian.unload();
     await sleep(400);
-    expect(discover).toHaveBeenCalledTimes(1);
+    expect(discover).toHaveBeenCalledTimes(2);
   });
 });

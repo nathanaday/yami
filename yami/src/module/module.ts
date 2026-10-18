@@ -1,7 +1,7 @@
 import type { AgentTool } from "../agent/types.js";
 import { type LedgerView, moduleLedger, vaultLedger } from "../document/bases.js";
 import { link, parseDocument, writeDocument } from "../document/document.js";
-import { timestamp, type Schema } from "../document/schema.js";
+import { FORMS, timestamp, type FormKind, type Schema } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
 import type { Check } from "./checks.js";
@@ -14,8 +14,15 @@ export const INTERNAL = "internal";
 /** The icon of a module that names none. */
 export const MODULE_ICON = "box";
 
-export type LinkedKind = "articles" | "policies" | "promises" | "skills";
-export type DocumentKind = "policy" | "promise" | "skill" | "article" | "agent";
+/** The session fields that link documents. */
+export type LinkedKind = "agents" | "articles" | "policies" | "promises" | "skills";
+/** The kinds of document that a module installs and a session links: the forms but the flow, and the article. */
+export type DocumentKind = "agent" | "policy" | "promise" | "skill" | "article";
+
+/** The session field that links each kind of document. */
+export const FIELD_OF: Record<DocumentKind, LinkedKind> = { agent: "agents", article: "articles", policy: "policies", promise: "promises", skill: "skills" };
+/** The kind of document that each session field links. */
+export const KIND_OF: Record<LinkedKind, DocumentKind> = { agents: "agent", articles: "article", policies: "policy", promises: "promise", skills: "skill" };
 
 /** Where a module keeps a kind of file: its own folder, which a person reads, or its internal folder. */
 export type Place = "folder" | "internal";
@@ -32,22 +39,20 @@ export interface Layout {
   ledger: string;
   /** The module document. */
   moduleDoc: string;
-  /** The folders of the module's documents, by the session field that links them. */
-  folders: Record<LinkedKind, string>;
-  /** The folder of the module's Claude Code subagents. */
-  agents: string;
+  /** The folders of the module's documents: one for each linked kind, and the flows. */
+  folders: Record<LinkedKind | "flows", string>;
 }
 
-/** The form of a module, template, or action id: lower-case letters, digits, and dashes. */
+/** The form of a module id, and of a document's name: lower-case letters, digits, and dashes. */
 export const ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /**
- * A document that a template links: a module's own document, or any document of the vault that a vault
- * template links. `ModuleDocument` is one.
+ * A document that a flow links: a module's own document, or any document of the vault that a vault flow
+ * links. `ModuleDocument` is one.
  */
 export interface DocumentRef<K extends DocumentKind = DocumentKind> {
   readonly kind: K;
-  /** What the document is called: its file name, or the folder name of a skill. */
+  /** What the document is called: the name of a form's folder, or an article's file name. */
   readonly name: string;
   /** The vault path of the document. */
   readonly path: string;
@@ -56,8 +61,21 @@ export interface DocumentRef<K extends DocumentKind = DocumentKind> {
 }
 
 /**
- * A document that a module installs into its internal folder: a policy, a promise, a skill, an article,
- * or a subagent. The module writes it only when no file is at its path, so the user can edit it in the vault.
+ * The parts of a form, for a builder that does not take markdown: its `name` and `description`, its body,
+ * the files beside it, and any other property, such as a promise's `check` or an agent's `access`.
+ */
+export interface FormParts {
+  name: string;
+  description: string;
+  body: string;
+  /** Files beside the form's file, by name, which the document names by path. */
+  files?: Record<string, string>;
+  [property: string]: unknown;
+}
+
+/**
+ * A document that a module installs into its internal folder: an agent, a policy, a promise, a skill, or an
+ * article. The module writes it only when no file is at its path, so the user can edit it in the vault.
  */
 export class ModuleDocument<K extends DocumentKind = DocumentKind> implements DocumentRef<K> {
   constructor(
@@ -68,16 +86,14 @@ export class ModuleDocument<K extends DocumentKind = DocumentKind> implements Do
     readonly text: string,
     /** Properties on top of the frontmatter. */
     readonly properties: Properties = {},
-    /** A skill's other files, by name, which it or its workers read when needed. They go beside `SKILL.md`. */
+    /** Other files, by name, which the document or its workers read when needed. They go beside the document. */
     readonly files: Record<string, string> = {},
   ) {}
 
   /** The vault path of the document. */
   get path(): string {
     const lay = this.module.layout;
-    if (this.kind === "agent") return `${lay.agents}/${this.name}.md`;
-    if (this.kind === "skill") return `${lay.folders.skills}/${this.name}/SKILL.md`;
-    return `${lay.folders[FOLDER_OF[this.kind as Exclude<DocumentKind, "agent" | "skill">]]}/${this.name}.md`;
+    return this.kind === "article" ? `${lay.folders.articles}/${this.name}.md` : formPath(lay, this.kind as FormKind, this.name);
   }
 
   /** The document as a link, the form a session's properties hold. */
@@ -89,12 +105,11 @@ export class ModuleDocument<K extends DocumentKind = DocumentKind> implements Do
   async install(vault: Vault): Promise<void> {
     const path = this.path;
     if (!(await vault.exists(path))) {
-      // A skill and an agent are files in their harness's own form, with no Yami properties.
-      const harnessForm = this.kind === "skill" || this.kind === "agent";
-      if (harnessForm && !Object.keys(this.properties).length) await vault.write(path, this.text);
+      // A form's folder and file give its kind and its module, so it has no Yami properties.
+      const own = this.kind === "article" ? { type: this.kind, module: this.module.id } : {};
+      if (!Object.keys({ ...own, ...this.properties }).length) await vault.write(path, this.text);
       else {
         const doc = parseDocument(vault, path, this.text);
-        const own = harnessForm ? {} : { type: this.kind, module: this.module.id };
         await writeDocument(vault, { path, properties: { ...own, ...doc.properties, ...this.properties, ...own }, body: doc.body });
       }
     }
@@ -105,86 +120,88 @@ export class ModuleDocument<K extends DocumentKind = DocumentKind> implements Do
   }
 }
 
-const FOLDER_OF: Record<Exclude<DocumentKind, "agent" | "skill">, LinkedKind> = { article: "articles", policy: "policies", promise: "promises" };
-
-export interface TemplateOptions {
-  /** Unique in the module. Lower-case letters, digits, and dashes. */
-  id: string;
+/** The keys of a `FLOW.md`, for a code module's `this.flow`. */
+export interface FlowOptions {
+  /** The flow's id, unique in the module: lower-case letters, digits, and dashes. */
   name: string;
-  description?: string;
+  /** What the flow is for. */
+  description: string;
   /** The skills of a new session. The first is loaded at the start of a run. */
   skills?: DocumentRef<"skill">[];
+  /** The agents that a session calls with `yami_agent`. The first prompt lists them. */
+  agents?: DocumentRef<"agent">[];
   /** The rules a session follows. A review judges them after the checks pass. */
   policies?: DocumentRef<"policy">[];
   /** What a session delivers. The session is done when every promise is met: by its check, or by the review when it has none. */
   promises?: DocumentRef<"promise">[];
   /** Notes whose content is context for the agent. */
   articles?: DocumentRef<"article">[];
+  /** The module's session fields of a new session. */
+  fields?: Properties;
   /** Agent turns in one run. Default 3. */
   maxIterations?: number;
   /** `read-only`: the agent changes no file except through the tools. Default `edit`. */
   access?: "edit" | "read-only";
   /** Text added to the first prompt of a run, after the module's own instructions. */
   instructions?: string;
-  /** The module's session fields of a new session. */
-  fields?: Properties;
-  /** The body of a new session document, before its Deliverables and Progress: for example a section for the person to fill in. */
-  body?: string;
-  /** Whether a host offers a command that creates a session from the template. Default true. */
+  /** Whether a host offers a command that creates a session from the flow. Default true. */
   command?: boolean;
 }
 
 /**
- * One kind of session of a module: the skills, policies, promises, and articles that a new session
- * document links, and how a run goes. A session links its documents in its own properties, and a run
- * uses those links, so a person can change them in the document.
+ * One kind of session of a module, as a signature. Its input: the Request section, the session fields,
+ * and the articles. Its method: the instructions, the skills, and the agents. Its constraints: the
+ * policies and the access. Its output: the promises. A session links its documents in its own properties,
+ * and a run uses those links, so a person can change them in the document.
  */
-export class SessionTemplate {
-  readonly id: string;
+export class Flow {
   readonly name: string;
-  readonly description: string | undefined;
+  readonly description: string;
   readonly skills: DocumentRef<"skill">[];
+  readonly agents: DocumentRef<"agent">[];
   readonly policies: DocumentRef<"policy">[];
   readonly promises: DocumentRef<"promise">[];
   readonly articles: DocumentRef<"article">[];
+  readonly fields: Properties;
   readonly maxIterations: number;
   readonly access: "edit" | "read-only";
   readonly instructions: string | undefined;
-  readonly fields: Properties;
-  readonly body: string;
   readonly command: boolean;
 
   constructor(
     readonly module: YamiModule,
-    options: TemplateOptions,
+    options: FlowOptions,
   ) {
-    if (!ID.test(options.id)) throw new Error(`"${options.id}" cannot be a template id: use lower-case letters, digits, and dashes.`);
-    this.id = options.id;
+    if (!ID.test(options.name)) throw new Error(`"${options.name}" cannot name a flow: use lower-case letters, digits, and dashes.`);
     this.name = options.name;
     this.description = options.description;
     this.skills = options.skills ?? [];
+    this.agents = options.agents ?? [];
     this.policies = options.policies ?? [];
     this.promises = options.promises ?? [];
     this.articles = options.articles ?? [];
+    this.fields = options.fields ?? {};
     this.maxIterations = options.maxIterations ?? 3;
     this.access = options.access ?? "edit";
     this.instructions = options.instructions;
-    this.fields = options.fields ?? {};
-    this.body = options.body ?? "";
     this.command = options.command ?? true;
   }
 
-  /** What a button or a command that creates a session from the template says: `New checkout` for the template "Checkout". */
+  /** What a button or a command that creates a session from the flow says: `New code review` for the flow `code-review`. */
   get label(): string {
-    return `New ${/^\p{Lu}\p{Ll}/u.test(this.name) ? this.name.charAt(0).toLowerCase() + this.name.slice(1) : this.name}`;
+    return `New ${this.name.replaceAll("-", " ")}`;
   }
 
   /** The documents that a new session links, by the session field that holds them. */
   links(): Record<LinkedKind, DocumentRef[]> {
-    return { skills: this.skills, policies: this.policies, promises: this.promises, articles: this.articles };
+    return { agents: this.agents, articles: this.articles, policies: this.policies, promises: this.promises, skills: this.skills };
   }
 
-  /** Creates a session document from the template and returns its handle. */
+  /**
+   * Creates a session document from the flow and returns its handle. `request` fills its Request section.
+   * @example
+   * const session = await module.review.create({ name: "PR 12", request: "Review the change in PR 12." });
+   */
   create(session: NewSession = {}): Promise<Session> {
     return this.module.yami.createSession(this, session);
   }
@@ -211,7 +228,7 @@ interface ActionBase {
 
 /** An act on one session, the one open in the editor: for example, return a checkout. */
 export interface SessionAction extends ActionBase {
-  on: SessionTemplate;
+  on: Flow;
   /** Whether the act applies to the session, from its properties. Default: always. */
   when?: (properties: Properties) => boolean;
   run: (session: Session) => Promise<ActionResult>;
@@ -235,23 +252,25 @@ export interface PlainAction extends ActionBase {
 export type ModuleAction = SessionAction | ChoiceAction<any> | PlainAction;
 
 /**
- * Something a person can do with a module itself: create a session from a template that offers it, or an
+ * Something a person can do with a module itself: create a session from a flow that offers it, or an
  * action on no session. The host does it: a new session opens, and an action with choices asks first.
  */
-export type ModuleAct = { kind: "new"; label: string; template: SessionTemplate } | { kind: "action"; label: string; action: ChoiceAction<any> | PlainAction };
+export type ModuleAct = { kind: "new"; label: string; flow: Flow } | { kind: "action"; label: string; action: ChoiceAction<any> | PlainAction };
 
 /**
- * One agent workflow in the vault. A subclass declares the module's documents, its session templates, its
- * tools, its checks, and its actions as fields, with the builders below:
+ * One agent workflow in the vault. A subclass declares the module's documents, its flows, its tools, its
+ * checks, and its actions as fields, with the builders below. Each form is markdown whose frontmatter
+ * holds its `name` and `description`:
  *
  * ```ts
  * class Notes extends YamiModule {
  *   readonly id = "notes";
  *   readonly name = "Notes";
- *   readonly summarize = this.skill(summarizeMd);
- *   readonly cite = this.policy("Cite sources", citeMd);
- *   readonly summary = this.promise("Summary written", summaryMd);
- *   readonly weekly = this.template({ id: "weekly", name: "Weekly summary", skills: [this.summarize], policies: [this.cite], promises: [this.summary] });
+ *   readonly summarize = this.skill(summarizeMd);         // name: summarize
+ *   readonly cite = this.policy(citeMd);                  // name: cite-sources
+ *   readonly summary = this.promise(summaryMd);           // name: summary-written, check: exists, path: …
+ *   readonly checker = this.agent(checkerMd);             // name: checker, access: read-only
+ *   readonly weekly = this.flow({ name: "weekly", description: "A summary of the week.", skills: [this.summarize], agents: [this.checker], policies: [this.cite], promises: [this.summary] });
  * }
  * ```
  *
@@ -292,7 +311,7 @@ export abstract class YamiModule {
 
   /** Every document of the module, in the order the builders made them. */
   readonly documents: ModuleDocument[] = [];
-  readonly templates: SessionTemplate[] = [];
+  readonly flows: Flow[] = [];
   readonly actions: ModuleAction[] = [];
   #yami: Yami | undefined;
   #color: string | undefined;
@@ -322,11 +341,11 @@ export abstract class YamiModule {
     return moduleLayout(this.id, this.sessionsIn, this.ledgerIn);
   }
 
-  /** What a person can do with the module itself: a new session from each template that offers one, then each action on no session. */
+  /** What a person can do with the module itself: a new session from each flow that offers one, then each action on no session. */
   acts(): ModuleAct[] {
-    const templates = this.sessionsIn === "none" ? [] : this.templates.filter((t) => t.command);
+    const flows = this.sessionsIn === "none" ? [] : this.flows.filter((f) => f.command);
     return [
-      ...templates.map((template): ModuleAct => ({ kind: "new", label: template.label, template })),
+      ...flows.map((flow): ModuleAct => ({ kind: "new", label: flow.label, flow })),
       ...this.actions.filter((a): a is ChoiceAction<any> | PlainAction => !("on" in a)).map((action): ModuleAct => ({ kind: "action", label: action.name, action })),
     ];
   }
@@ -342,14 +361,14 @@ export abstract class YamiModule {
   }
 
   /**
-   * The template with this id, or `undefined` when no template has it. `undefined`, `null`, and `""` give the
-   * first template, as for a session document with no `template` property.
+   * The flow with this name, or `undefined` when no flow has it. `undefined`, `null`, and `""` give the
+   * first flow, as for a session document with no `flow` property. It never throws.
    * @example
-   * const template = yami.module("code-review")?.templateOf("review-a-change");
-   * if (template) await template.create({ name: "PR 12" });
+   * const flow = yami.module("code-review")?.flowOf("review-a-change");
+   * if (flow) await flow.create({ name: "PR 12", request: "Review the change in PR 12." });
    */
-  templateOf(id: unknown): SessionTemplate | undefined {
-    return id === undefined || id === null || id === "" ? this.templates[0] : this.templates.find((t) => t.id === id);
+  flowOf(name: unknown): Flow | undefined {
+    return name === undefined || name === null || name === "" ? this.flows[0] : this.flows.find((f) => f.name === name);
   }
 
   /** Adds the module to a Yami, with the color of its folder. A Yami calls it once. */
@@ -383,28 +402,31 @@ export abstract class YamiModule {
 
   /**
    * A skill in the standard `SKILL.md` form: markdown whose frontmatter holds its `name` and `description`,
-   * or the parts of one. `files` go beside `SKILL.md`, for the skill or its workers to read when needed.
+   * or its parts. `files` go beside `SKILL.md`, for the skill or its workers to read when needed.
    */
-  protected skill(markdown: string, files?: Record<string, string>): ModuleDocument<"skill">;
-  protected skill(skill: { name: string; description: string; body: string; files?: Record<string, string> }): ModuleDocument<"skill">;
-  protected skill(arg: string | { name: string; description: string; body: string; files?: Record<string, string> }, files?: Record<string, string>): ModuleDocument<"skill"> {
-    if (typeof arg !== "string") return this.add(new ModuleDocument(this, "skill", arg.name, arg.body, { name: arg.name, description: arg.description }, arg.files));
-    const name = frontmatterName(arg);
-    if (!name) throw new Error(`A skill of the ${this.constructor.name} module has no name in its frontmatter.`);
-    return this.add(new ModuleDocument(this, "skill", name, arg, {}, files));
+  protected skill(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"skill"> {
+    return this.form("skill", form, files);
   }
 
-  /** A policy: rules that a session follows. The text is markdown; `properties` go on top of its frontmatter. */
-  protected policy(name: string, text: string, properties?: Properties): ModuleDocument<"policy"> {
-    return this.add(new ModuleDocument(this, "policy", name, text, properties));
+  /** A policy, `POLICY.md`: rules that a session follows. The body is the rule text. */
+  protected policy(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"policy"> {
+    return this.form("policy", form, files);
   }
 
   /**
-   * A promise: a deliverable, and how Yami checks it. The `check` property names a check, with the
-   * properties it reads, in the frontmatter or in `properties`. A promise with no check is for a person to decide.
+   * A promise, `PROMISE.md`: a deliverable, and how Yami checks it. The `check` property names a check, with
+   * the properties it reads. A promise with no check is for the review to judge.
    */
-  protected promise(name: string, text: string, properties?: Properties): ModuleDocument<"promise"> {
-    return this.add(new ModuleDocument(this, "promise", name, text, properties));
+  protected promise(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"promise"> {
+    return this.form("promise", form, files);
+  }
+
+  /**
+   * An agent, `AGENT.md`: the brief of a worker that a session or a conversation runs in a fresh context with
+   * the tool `yami_agent`, on both harnesses. Its `access` is `read-only` (the default) or `edit`.
+   */
+  protected agent(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"agent"> {
+    return this.form("agent", form, files);
   }
 
   /** An article: a note whose content is context for the agent. */
@@ -412,26 +434,12 @@ export abstract class YamiModule {
     return this.add(new ModuleDocument(this, "article", name, text, properties));
   }
 
-  /**
-   * A Claude Code subagent of the module's skill set, invoked as `<module id>:<name>`: markdown whose
-   * frontmatter holds its `name`, `description`, and `tools`, or the parts of one. Its tools are the only
-   * tools it gets, so an agent with no edit tool cannot change a file. Codex has no subagents.
-   */
-  protected agent(markdown: string): ModuleDocument<"agent">;
-  protected agent(agent: { name: string; description: string; tools: string[]; body: string }): ModuleDocument<"agent">;
-  protected agent(arg: string | { name: string; description: string; tools: string[]; body: string }): ModuleDocument<"agent"> {
-    if (typeof arg !== "string") return this.add(new ModuleDocument(this, "agent", arg.name, arg.body, { name: arg.name, description: arg.description, tools: arg.tools.join(", ") }));
-    const name = frontmatterName(arg);
-    if (!name) throw new Error(`An agent of the ${this.constructor.name} module has no name in its frontmatter.`);
-    return this.add(new ModuleDocument(this, "agent", name, arg));
-  }
-
   /** A kind of session of the module. A host offers a command that creates one, unless `command` is false. */
-  protected template(options: TemplateOptions): SessionTemplate {
-    if (this.templates.some((t) => t.id === options.id)) throw new Error(`The template ${options.id} is in the module twice.`);
-    const template = new SessionTemplate(this, options);
-    this.templates.push(template);
-    return template;
+  protected flow(options: FlowOptions): Flow {
+    if (this.flows.some((f) => f.name === options.name)) throw new Error(`The flow ${options.name} is in the module twice.`);
+    const flow = new Flow(this, options);
+    this.flows.push(flow);
+    return flow;
   }
 
   /** An act of the person, which a host offers as a command named `<module name>: <action name>`. */
@@ -443,6 +451,23 @@ export abstract class YamiModule {
     if (this.actions.some((a) => a.id === action.id)) throw new Error(`The action ${action.id} is in the module twice.`);
     this.actions.push(action);
     return action;
+  }
+
+  private form<K extends Exclude<DocumentKind, "article">>(kind: K, form: string | FormParts, files?: Record<string, string>): ModuleDocument<K> {
+    // The id is set by now when the class declares it first, as a module does.
+    const what = `${kind === "agent" ? "An" : "A"} ${kind} of the ${this.id ?? this.constructor.name} module`;
+    let doc: ModuleDocument<K>;
+    if (typeof form === "string") {
+      const name = frontmatterValue(form, "name");
+      if (!name) throw new Error(`${what} has no name in its frontmatter.`);
+      if (!frontmatterValue(form, "description")) throw new Error(`${what}, ${name}, has no description in its frontmatter.`);
+      doc = new ModuleDocument(this, kind, name, form, {}, files);
+    } else {
+      const { name, description, body, files: own, ...more } = form;
+      doc = new ModuleDocument(this, kind, name, body, { name, description, ...more }, own ?? files);
+    }
+    if (!ID.test(doc.name)) throw new Error(`${what} is named "${doc.name}". A name is lower-case letters, digits, and dashes, and it names the document's folder.`);
+    return this.add(doc);
   }
 
   private add<K extends DocumentKind>(doc: ModuleDocument<K>): ModuleDocument<K> {
@@ -462,13 +487,19 @@ export function moduleLayout(id: string, sessionsIn: Place | "none" = "folder", 
     ledger: `${ledgerIn === "folder" ? id : internal}/sessions.base`,
     moduleDoc: `${internal}/${id}.md`,
     folders: {
+      agents: `${internal}/${FORMS.agent.folder}`,
       articles: `${internal}/articles`,
-      policies: `${internal}/policies`,
-      promises: `${internal}/promises`,
-      skills: `${internal}/skills`,
+      flows: `${internal}/${FORMS.flow.folder}`,
+      policies: `${internal}/${FORMS.policy.folder}`,
+      promises: `${internal}/${FORMS.promise.folder}`,
+      skills: `${internal}/${FORMS.skill.folder}`,
     },
-    agents: `${internal}/agents`,
   };
+}
+
+/** The vault path of a form: `internal/<module>/<folder>/<name>/<FILE>.md`, such as `internal/notes/policies/cite-sources/POLICY.md`. */
+export function formPath(lay: Layout, kind: FormKind, name: string): string {
+  return `${lay.internal}/${FORMS[kind].folder}/${name}/${FORMS[kind].file}`;
 }
 
 /**
@@ -484,18 +515,13 @@ export function idFromName(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** The `name` in a markdown file's frontmatter. */
-function frontmatterName(text: string): string | undefined {
+/** A property of one line in a markdown file's frontmatter, such as its `name`. */
+function frontmatterValue(text: string, key: string): string | undefined {
   const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1];
   return block
-    ?.match(/^name:[ \t]*(.+?)[ \t]*$/m)?.[1]
+    ?.match(new RegExp(`^${key}:[ \\t]*(.+?)[ \\t]*$`, "m"))?.[1]
     ?.replace(/^(["'])(.*)\1$/, "$2")
     .trim();
-}
-
-/** The path of a session's skill, which is a folder with a `SKILL.md`. */
-export function skillPath(lay: Layout, name: string): string {
-  return `${lay.folders.skills}/${name}/SKILL.md`;
 }
 
 /**

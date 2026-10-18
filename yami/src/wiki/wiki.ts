@@ -58,8 +58,8 @@ export interface WikiOptions {
 
 export const FIELD_WEIGHTS = { title: 3, aliases: 3, tags: 2, description: 2, body: 1 };
 
-/** Files that are not knowledge: the instructions of module skills and agents, and the frozen copies that sources embed. */
-const UNINDEXED = [/^internal\/[^/]+\/(skills|agents)\//, new RegExp(`^${ORIGINALS}/`)];
+/** Files that are not knowledge: the forms of the modules (agents, flows, policies, promises, and skills), and the frozen copies that sources embed. */
+const UNINDEXED = [/^internal\/[^/]+\/(agents|flows|policies|promises|skills)\//, new RegExp(`^${ORIGINALS}/`)];
 
 /** A seed of a graph query: a note and its weight. */
 export interface Seed {
@@ -368,7 +368,7 @@ export class Wiki {
 
   /**
    * Whether the index holds the note at a path that has these properties: a note outside the excluded
-   * folders, the module skills and agents, and the originals, of no skipped type, and no copy of another
+   * folders, the forms of the modules, and the originals, of no skipped type, and no copy of another
    * note. A host's change feed uses it to pass over a change that cannot change the wiki.
    */
   holds(path: string, properties: Properties = {}): boolean {

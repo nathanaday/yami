@@ -95,7 +95,7 @@ internal/wiki/              the wiki module's own: its sessions and ledger, the 
 
 1. A module's folder holds what a person reads. For most modules that is the session documents. A module sets `sessionsIn`: `folder` (the default); `internal`, when the module's folder holds its output instead, as the wiki's does, so its sessions go under `internal/<module>/sessions/`; or `none`, when the module has no sessions, as journals, and gets no ledger. `ledgerIn` puts the module ledger in the internal folder (the default) or in the module's folder.
 2. A session may keep the files it produces in a folder with its own name, beside its document: `librarian/<session>.md` and `librarian/<session>/`. Nothing else goes in a module's folder.
-3. Everything else that a module needs goes under `internal/<module>/`.
+3. Everything else that a module needs goes under `internal/<module>/`. A code module installs its forms there in the layout of a vault module, but no `FLOW.md`: its flows are code, made with `this.flow`.
 4. The paths come from `YamiModule.layout` in `yami/src/module/module.ts`. No other code builds these paths. The wiki folders are constants in `yami/src/wiki/folders.ts`, which assume the module id `wiki`.
 5. Each module has a color, so a person sees which folders belong together. The module's folder takes the color; its internal folder takes the color muted halfway toward gray, because a person reads it less; `internal/` is gray. A module sets its own `color`, or takes a basic color chosen by its id, so the color is the same on every start. The wiki is cyan. The colors are in `yami/src/module/colors.ts`; `yami/obsidian` shows them in the file explorer. Each module also has an icon, a name in the host's icon set, so a view can show the module at a glance. In Obsidian an icon that the app does not have shows as the default, `box`, and the console says so, because an icon name that a Lucide update removes must not stop the plugin from loading.
 
@@ -256,6 +256,7 @@ These facts cost days to learn. Keep them true, and read the `yami/agent` README
 4. Codex stops its commands only when its server stops. An interrupt stops the server and resumes the thread on a new one.
 5. Both harnesses ignore an interrupt that arrives before the turn starts on their side. The adapters wait for the start, then interrupt.
 6. The Claude Agent SDK expects Node's timers, `AbortController`, and `import.meta`, and the MCP SDK compiles schemas with `new Function`. In Obsidian's renderer the globals are Chromium's, and Obsidian's review rejects generated code. `pluginBuild` in `yami/esbuild` fixes all four, for the SDKs' own files only.
+7. Claude Code loads each `.md` under a plugin's `agents/` folder as a subagent, `agents/<name>/AGENT.md` too. A module's skill set is a plugin, so the Claude adapter denies each of those subagents with `Agent(<name>)` rules. A skill set lends its skills only; agents run through the agent tool.
 
 ## Testing
 

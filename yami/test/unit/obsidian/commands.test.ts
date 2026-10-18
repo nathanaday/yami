@@ -32,7 +32,7 @@ async function write(path: string, properties: Properties, body = "") {
 }
 
 describe("the commands of the modules in Obsidian", () => {
-  it("adds and removes each template's command as the template appears, changes, and goes", async () => {
+  it("adds and removes each flow's command as the flow appears, changes, and goes", async () => {
     t = await testYami({ modules: [new Hello()] });
     const yami = t.yami;
     const commands = new Map<string, Command>();
@@ -51,25 +51,25 @@ describe("the commands of the modules in Obsidian", () => {
     } as unknown as ObsidianYami;
     const sync = addModuleCommands(host);
     const listed = () => [...commands.values()].map((c) => `${c.id} · ${c.name} · ${c.icon}`);
-    expect(listed()).toEqual(["hello-new-greet · Hello world: new greeting · box"]);
+    expect(listed()).toEqual(["hello-new-greet · Hello world: new greet · box"]);
 
     await write("internal/notes/notes.md", { type: "module", name: "Notes", icon: "search" });
-    await write("internal/notes/templates/Daily note.md", { type: "template" });
+    await write("internal/notes/flows/daily-note/FLOW.md", { name: "daily-note", description: "A daily note." });
     await yami.discover();
     sync();
-    expect(listed()).toEqual(["hello-new-greet · Hello world: new greeting · box", "notes-new-daily-note · Notes: new daily note · search"]);
+    expect(listed()).toEqual(["hello-new-greet · Hello world: new greet · box", "notes-new-daily-note · Notes: new daily note · search"]);
     sync();
     expect(removed).toEqual([]);
 
-    await write("internal/notes/templates/Daily note.md", { type: "template", name: "Journal page" });
+    await write("internal/notes/flows/daily-note/FLOW.md", { name: "daily-note", description: "A daily page." });
     await yami.discover();
     sync();
     expect(removed).toEqual(["notes-new-daily-note"]);
-    expect(listed()).toContain("notes-new-daily-note · Notes: new journal page · search");
+    expect(listed()).toContain("notes-new-daily-note · Notes: new daily note · search");
 
-    await t.vault.remove("internal/notes/templates/Daily note.md");
+    await t.vault.remove("internal/notes/flows/daily-note/FLOW.md");
     await yami.discover();
     sync();
-    expect(listed()).toEqual(["hello-new-greet · Hello world: new greeting · box"]);
+    expect(listed()).toEqual(["hello-new-greet · Hello world: new greet · box"]);
   });
 });

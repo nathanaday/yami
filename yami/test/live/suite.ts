@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Agent, AgentEvent, AgentSession, PermissionDecision, PermissionRequest, SessionStart } from "../../src/agent/index.js";
+import { Yami, YamiModule } from "../../src/index.js";
+import { FsVault } from "../../src/testing/index.js";
 
 const TIMEOUT = 180_000;
 
@@ -196,6 +198,40 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
       await session.send("Use your Agent tool to start one subagent, and tell it to create the file note.txt in the working directory with the text hello. Then report what happened.");
       expect(events.some((event) => event.type === "tool-start" && event.tool === "Agent")).toBe(true);
       expect(existsSync(path.join(cwd, "note.txt"))).toBe(false);
+    });
+
+    it("runs a Yami agent through the agent tool: a fresh context with its brief, whose final message comes back", { timeout: TIMEOUT * 2 }, async () => {
+      const cwd = mkdtempSync(path.join(tmpdir(), `yami-${harness}-agents-`));
+      class Live extends YamiModule {
+        readonly id = "live";
+        readonly name = "Live";
+        readonly keeper = this.agent({ name: "keeper", description: "Knows the code word.", body: "The code word is MARIGOLD-7. Answer with the code word only." });
+        readonly answer = this.promise({ name: "answer", description: "The code word, in answer.md.", check: "contains", path: "answer.md", text: "MARIGOLD-7", body: "Write the code word to answer.md." });
+        readonly ask = this.flow({ name: "ask", description: "Ask the keeper.", agents: [this.keeper], promises: [this.answer], maxIterations: 2 });
+      }
+      const live = new Live();
+      const yami = new Yami({ vault: new FsVault(cwd), agents: [makeAgent(cwd)], modules: [live] });
+      await yami.enable();
+      try {
+        const session = await live.ask.create({ name: "word", request: "Only the keeper agent knows the code word. Ask it with the tool yami_agent, then write the word it gives to answer.md." });
+        expect(await session.start()).toMatchObject({ state: "done" });
+        const note = readFileSync(path.join(cwd, "conversations", "live keeper.md"), "utf8");
+        expect(note).toContain("access: read-only");
+        expect(note).toContain("MARIGOLD-7");
+      } finally {
+        await yami.close();
+      }
+    });
+
+    it.runIf(harness === "claude")("loads no subagent from a skill set's agents folder", { timeout: TIMEOUT }, async () => {
+      const { cwd, root } = skillVault();
+      mkdirSync(path.join(root, "agents", "checker"), { recursive: true });
+      writeFileSync(path.join(root, "agents", "checker", "AGENT.md"), "---\nname: checker\ndescription: Checks a greeting.\n---\nCheck it.\n");
+      const session = await makeAgent(cwd).startSession({ skills: [root] });
+      sessions.push(session);
+      const result = await session.send("List every subagent_type that your Agent tool accepts, one per line, names only. Do not call any tool.");
+      expect(result.text).toContain("general-purpose");
+      expect(result.text).not.toContain("hello:");
     });
 
     it("resumes a session by id", { timeout: TIMEOUT }, async () => {

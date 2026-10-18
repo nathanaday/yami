@@ -26,6 +26,7 @@ import { AsyncQueue } from "./async-queue.js";
 import { lineDiff } from "./diff.js";
 import { findExecutables, harnessEnv, pathDisplay } from "./executable.js";
 import { askPermission, BaseSession } from "./session.js";
+import { setAgents } from "./skills.js";
 import {
   type AgentInfo,
   type AgentSession,
@@ -181,6 +182,7 @@ export class ClaudeSession extends BaseSession {
     for (const appTool of tools?.tools ?? []) this.appTools.set(`mcp__${tools!.name}__${appTool.name}`, appTool);
     const readOnly = options.access === "read-only";
     const settingSources = options.settingSources ?? ["user", "project", "local"];
+    const hidden = setAgents(options.skills ?? []).map((name) => `Agent(${name})`);
     this.query = query({
       prompt: this.input,
       options: {
@@ -212,9 +214,11 @@ export class ClaudeSession extends BaseSession {
             mcpServers: { ...options.sdkOptions.mcpServers, [tools.name]: this.toolServer(tools) },
           }),
         // A skill set is a plugin folder: Claude Code names it by the folder and finds its skills in skills/.
+        // It would also load each .md under agents/ as a subagent, so the session denies them: a set lends its skills only.
         ...(options.skills?.length && {
           plugins: [...(options.sdkOptions?.plugins ?? []), ...options.skills.map((path) => ({ type: "local" as const, path, skipMcpDiscovery: true }))],
         }),
+        ...(hidden.length && { disallowedTools: [...(options.sdkOptions?.disallowedTools ?? []), ...hidden] }),
         ...(options.beforeFileChange && {
           hooks: {
             ...options.sdkOptions?.hooks,

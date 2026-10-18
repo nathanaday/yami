@@ -262,6 +262,18 @@ describe("ConversationManager", () => {
     expect(again.file.path).toMatch(/ Summarize Ideas please 2\.md$/);
   });
 
+  it("gives two notes that are created at the same time two paths, as two agents of one session need", async () => {
+    fake.folders.add("conversations");
+    const create = fake.app.vault.create;
+    // Obsidian adds a new file to the vault only once it is written.
+    fake.app.vault.create = async (path: string, content: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return create(path, content);
+    };
+    const notes = await Promise.all([manager.create(agents[0]!, { name: "Same", open: false }), manager.create(agents[0]!, { name: "Same", open: false })]);
+    expect(notes.map((file) => file.path).sort()).toEqual(["conversations/Same 2.md", "conversations/Same.md"]);
+  });
+
   it("uses the given agent, title, folder and module", async () => {
     const { file, text } = await start({
       message: "/atlas-obsidian:wiki-ingest",

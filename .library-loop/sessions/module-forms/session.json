@@ -11,5 +11,11 @@
     "showcase",
     "validator"
   ],
-  "rounds": []
+  "rounds": [
+    {
+      "n": 1,
+      "base": "6d16cea690acd88f557aed62f29ac3b1b0efc069",
+      "started": "2026-10-18T04:35:44.014Z"
+    }
+  ]
 }

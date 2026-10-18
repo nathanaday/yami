@@ -175,33 +175,47 @@ export class WikiModule extends YamiModule {
   ];
   readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, with a version in ${SNAPSHOTS}/ for each change and the change documents in ${CHANGES}/. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
 
-  readonly cite = this.policy(
-    "Cite every claim",
-    `Every claim in a topic names its source, as a link in the sentence or the paragraph, and the topic's \`sources\` property lists every source it cites. Never write a claim that a source does not make. When a source and a topic disagree, show both and set \`status: contested\`. Your own reasoning stays out of a topic.`,
-  );
-  readonly onePlan = this.policy(
-    "Change the wiki through one plan",
-    `Every change to \`${TOPICS}/\` and \`${SOURCES}/\` goes through \`wiki_change\`, as one plan of creates, modifies, and removes. Never write those notes yourself, never change the original that a source embeds or links, never change a \`## Notes\` section, and never edit the session document.`,
-  );
-  readonly oneTopic = this.policy(
-    "One subject, one topic",
-    `Before a new topic, call \`wiki_match\` with the subject's names. A hit means extend that topic. A near match means read the neighbors before you decide. Only a new subject gets a new topic, and its title is the name the sources use.`,
-  );
-  readonly changeApplied = this.promise(
-    "Change applied",
-    "At least one change plan of this session is applied. `wiki_change` links each applied change from the session.",
-    { check: "property", field: "changes", name: "status", value: "applied", atLeast: 1 },
-  );
-  readonly absorbed = this.promise(
-    "Sources absorbed",
-    "Every source of this session has `status: absorbed`, set by a modify in the plan after its claims are in the topics and its description, tags, Summary, and Structure are filled.",
-    { check: "property", field: "sources", name: "status", value: "absorbed" },
-  );
-  readonly clean = this.promise(
-    "Clean topics",
-    "The sources of this session, and every topic that cites them, pass lint with no error: no dead link, and a description on each. `wiki_lint` shows what is left.",
-    { check: "lint", field: "sources" },
-  );
+  readonly cite = this.policy({
+    name: "cite-every-claim",
+    description: "Every claim in a topic names its source.",
+    body: `Every claim in a topic names its source, as a link in the sentence or the paragraph, and the topic's \`sources\` property lists every source it cites. Never write a claim that a source does not make. When a source and a topic disagree, show both and set \`status: contested\`. Your own reasoning stays out of a topic.`,
+  });
+  readonly onePlan = this.policy({
+    name: "one-plan",
+    description: "Change the wiki only through one change plan.",
+    body: `Every change to \`${TOPICS}/\` and \`${SOURCES}/\` goes through \`wiki_change\`, as one plan of creates, modifies, and removes. Never write those notes yourself, never change the original that a source embeds or links, never change a \`## Notes\` section, and never edit the session document.`,
+  });
+  readonly oneTopic = this.policy({
+    name: "one-topic",
+    description: "One subject, one topic.",
+    body: `Before a new topic, call \`wiki_match\` with the subject's names. A hit means extend that topic. A near match means read the neighbors before you decide. Only a new subject gets a new topic, and its title is the name the sources use.`,
+  });
+  readonly changeApplied = this.promise({
+    name: "change-applied",
+    description: "At least one change plan of the session is applied.",
+    check: "property",
+    field: "changes",
+    property: "status",
+    value: "applied",
+    atLeast: 1,
+    body: "At least one change plan of this session is applied. `wiki_change` links each applied change from the session.",
+  });
+  readonly absorbed = this.promise({
+    name: "sources-absorbed",
+    description: "Every source of the session is absorbed.",
+    check: "property",
+    field: "sources",
+    property: "status",
+    value: "absorbed",
+    body: "Every source of this session has `status: absorbed`, set by a modify in the plan after its claims are in the topics and its description, tags, Summary, and Structure are filled.",
+  });
+  readonly clean = this.promise({
+    name: "clean-topics",
+    description: "The sources and the topics that cite them pass lint.",
+    check: "lint",
+    field: "sources",
+    body: "The sources of this session, and every topic that cites them, pass lint with no error: no dead link, and a description on each. `wiki_lint` shows what is left.",
+  });
   readonly ingestSkill = this.skill({
     name: "ingest",
     description:
@@ -231,9 +245,8 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
   });
 
   /** A session that absorbs its sources into the wiki. Read-only: the agent changes the wiki only through `wiki_change`. */
-  readonly ingest = this.template({
-    id: "ingest",
-    name: "Ingest",
+  readonly ingest = this.flow({
+    name: "ingest",
     description: "Absorb the session's sources into cited topics through one change plan.",
     access: "read-only",
     command: false,
@@ -248,7 +261,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       defineTool({
         name: "search",
         readOnly: true,
-        description: `Ranked search over every note of the vault. Returns notes with a score in [0, 1], a snippet, and why each ranks. Filter by types (topic, source, policy, …), tags (a note must hold every one, or a tag below it), and folder. With seeds and no text, it returns the notes related to the seeds through links. Algorithms: ${Object.keys(algorithms).join(", ")}. To answer a question: search, read the best notes with Read, follow a link one hop when needed, then answer with a [[link]] on each claim.`,
+        description: `Ranked search over every note of the vault. Returns notes with a score in [0, 1], a snippet, and why each ranks. Filter by types (topic, source, …), tags (a note must hold every one, or a tag below it), and folder. With seeds and no text, it returns the notes related to the seeds through links. Algorithms: ${Object.keys(algorithms).join(", ")}. To answer a question: search, read the best notes with Read, follow a link one hop when needed, then answer with a [[link]] on each claim.`,
         input: {
           text: z.string().optional().describe("The query. May be empty when seeds are given."),
           seeds: z.array(z.string()).optional().describe("Notes to start from, as paths or [[link]] names."),
@@ -282,7 +295,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       defineTool({
         name: "lint",
         readOnly: true,
-        description: "The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, and orphan topics. Each finding names its fix. Errors fail the Clean topics promise; warnings are worth a look. Reads only.",
+        description: "The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, and orphan topics. Each finding names its fix. Errors fail the clean-topics promise; warnings are worth a look. Reads only.",
         input: {
           paths: z.array(z.string()).optional().describe("Check only these notes, as paths or [[link]] names."),
           folder: z.string().optional().describe(`Check only this folder, for example ${TOPICS}.`),

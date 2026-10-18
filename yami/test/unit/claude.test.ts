@@ -1,9 +1,11 @@
-import { chmodSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { afterEach, describe, expect, it } from "vitest";
 import { startClaudeSession } from "../../src/agent/claude.js";
-import { type AgentEvent, type AgentSession, defineTool } from "../../src/agent/index.js";
+import { type AgentEvent, type AgentSession, defineTool, setAgents } from "../../src/agent/index.js";
 
 const FAKE = fileURLToPath(new URL("../fixtures/fake-claude.mjs", import.meta.url));
 chmodSync(FAKE, 0o755);
@@ -63,5 +65,24 @@ describe("claude adapter", () => {
     expect(result.error).toMatch(/^Yami could not read a message of Claude Code: TypeError: .+ \(at ClaudeSession\.finishTurn \(claude\.ts:\d+:\d+\)\)$/);
     expect(session.closed).toBe(true);
     expect(events).toContainEqual({ type: "closed", error: result.error });
+  });
+
+  it("lends a skill set's skills only: it denies each subagent that Claude Code would load from the set's agents folder", async () => {
+    const root = mkdtempSync(join(tmpdir(), "yami-set-"));
+    try {
+      const set = join(root, "notes");
+      mkdirSync(join(set, "agents/checker"), { recursive: true });
+      mkdirSync(join(set, "skills/sum"), { recursive: true });
+      writeFileSync(join(set, "agents/checker/AGENT.md"), "---\nname: checker\ndescription: Checks.\n---\nCheck.\n");
+      writeFileSync(join(set, "agents/flat.md"), "No front matter.\n");
+      writeFileSync(join(set, "skills/sum/SKILL.md"), "---\nname: sum\ndescription: Sums.\n---\nSum.\n");
+      expect(setAgents([set, join(root, "none")])).toEqual(["notes:checker:checker", "notes:flat"]);
+      session = await startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: [], skills: [set] });
+      const { text } = await session.send("args");
+      expect(text).toContain("--disallowedTools=Agent(notes:checker:checker),Agent(notes:flat) ");
+      expect(text).toContain(`--plugin-dir-no-mcp=${set} `);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

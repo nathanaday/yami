@@ -12,7 +12,7 @@ export interface Field {
 
 export type Schema = Record<string, Field>;
 
-export const DOCUMENT_TYPES = ["module", "template", "session", "policy", "promise", "skill", "conversation", "topic", "source", "snapshot", "change"] as const;
+export const DOCUMENT_TYPES = ["module", "session", "conversation", "topic", "source", "snapshot", "change"] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 export const SESSION_STATES = ["open", "running", "done", "failed", "needs-attention", "stopped"] as const;
@@ -20,6 +20,7 @@ export type SessionState = (typeof SESSION_STATES)[number];
 
 const typed = (type: DocumentType): Field => ({ type: "text", values: [type], required: true });
 const links: Field = { type: "links", default: [] };
+const ACCESS = ["edit", "read-only"] as const;
 
 export const MODULE: Schema = {
   type: typed("module"),
@@ -35,40 +36,74 @@ export const MODULE: Schema = {
   instructions: { type: "text" },
 };
 
-/** One kind of session of a vault module, in `internal/<id>/templates/`. Its body is the body of a new session. */
-export const TEMPLATE: Schema = {
-  type: typed("template"),
-  module: { type: "text" },
-  /** Default: the file name. */
-  name: { type: "text" },
-  description: { type: "text" },
-  /** The documents that a new session links. The first skill loads first. */
+/** The header of every form: `name`, the name of the document's folder, and `description`. */
+const form = (more: Schema = {}): Schema => ({ name: { type: "text", required: true }, description: { type: "text", required: true }, ...more });
+
+/** `POLICY.md`: rules that a session follows. The body is the rule text. */
+export const POLICY: Schema = form();
+
+/** `PROMISE.md`: a deliverable, and how Yami checks it. The check reads more properties of its own. */
+export const PROMISE: Schema = form({
+  /** The name of a check that Yami runs, for example `exists`. Without one, the review judges the promise. */
+  check: { type: "text" },
+  /** The vault path of the deliverable. `{{session}}` is the session name. */
+  path: { type: "text" },
+});
+
+/** `AGENT.md`: the brief of a worker that runs in a fresh context. The body is the brief. */
+export const AGENT: Schema = form({
+  /** `read-only`: the agent changes no file, and gets only the tools that change nothing. */
+  access: { type: "text", values: ACCESS, default: "read-only" },
+});
+
+/** `SKILL.md`: a skill in the standard form. */
+export const SKILL: Schema = form();
+
+/** `FLOW.md`: one kind of session, as a signature. It has no body. */
+export const FLOW: Schema = form({
+  /** The names of the documents that a new session links. The first skill loads first. */
   skills: links,
+  agents: links,
   policies: links,
   promises: links,
+  /** `[[links]]` to notes whose content is context for the agent. */
   articles: links,
-  /** Agent turns in one run. Default 3. */
-  maxIterations: { type: "number" },
-  access: { type: "text", values: ["edit", "read-only"] },
-  /** Text added to the first prompt of a run, after the module's instructions. */
-  instructions: { type: "text" },
   /** The session fields of a new session, each with its default. */
   fields: { type: "map" },
+  /** Agent turns in one run. Default 3. */
+  maxIterations: { type: "number" },
+  access: { type: "text", values: ACCESS },
+  /** Text added to the first prompt of a run, after the module's instructions. */
+  instructions: { type: "text" },
   /** Whether a host offers a command that creates a session. Default true. */
   command: { type: "boolean" },
-};
+});
+
+/**
+ * The forms of a module's documents. Each is a folder of `internal/<module>/<folder>/`, named by the
+ * document's name, with the one file in it. The folder can hold other files, which the document names by path.
+ */
+export const FORMS = {
+  agent: { folder: "agents", file: "AGENT.md", schema: AGENT },
+  policy: { folder: "policies", file: "POLICY.md", schema: POLICY },
+  promise: { folder: "promises", file: "PROMISE.md", schema: PROMISE },
+  skill: { folder: "skills", file: "SKILL.md", schema: SKILL },
+  flow: { folder: "flows", file: "FLOW.md", schema: FLOW },
+} as const;
+export type FormKind = keyof typeof FORMS;
 
 export const SESSION: Schema = {
   type: typed("session"),
   module: { type: "text", required: true },
-  /** The template of the module that the session came from. */
-  template: { type: "text" },
+  /** The flow of the module that the session came from. */
+  flow: { type: "text" },
   state: { type: "text", values: SESSION_STATES, default: "open" },
   created: { type: "date" },
   iteration: { type: "number", default: 0 },
   harness: { type: "text" },
   /** The conversation note that records the runs. */
   conversation: { type: "link" },
+  agents: links,
   articles: links,
   policies: links,
   promises: links,
@@ -90,27 +125,13 @@ export const CONVERSATION: Schema = {
   effort: { type: "text" },
   approval: { type: "text", values: ["ask", "accept-edits", "plan", "auto", "sandbox"] },
   /** `read-only`: the agent changes nothing except through its tools. */
-  access: { type: "text", values: ["edit", "read-only"] },
+  access: { type: "text", values: ACCESS },
   /** The harness session, for resuming. */
   session: { type: "text" },
   status: { type: "text", values: ["active", "ended"], default: "active" },
   created: { type: "date" },
   /** The module session document that this conversation runs. */
   module: { type: "link" },
-};
-
-export const POLICY: Schema = {
-  type: typed("policy"),
-  module: { type: "text" },
-};
-
-export const PROMISE: Schema = {
-  type: typed("promise"),
-  module: { type: "text" },
-  /** The name of a check that Yami runs, for example `exists`. Without one, a person decides. */
-  check: { type: "text" },
-  /** The vault path of the deliverable. `{{session}}` is the session name. */
-  path: { type: "text" },
 };
 
 export const TOPIC_STATUSES = ["draft", "stable", "contested", "deprecated"] as const;

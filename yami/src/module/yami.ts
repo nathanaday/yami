@@ -8,7 +8,8 @@ import { captureSource, captureSources, readSources } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
 import { installBaseSkill, YAMI_ID, YAMI_SKILLS } from "./base-skill.js";
 import { assignColors } from "./colors.js";
-import { checkName, ID, idFromName, INTERNAL, moduleSkills, safeName, SessionTemplate, type DocumentRef, type LinkedKind, type YamiModule } from "./module.js";
+import type { AgentCaller } from "./agent-run.js";
+import { checkName, FIELD_OF, Flow, ID, idFromName, INTERNAL, moduleSkills, safeName, type DocumentRef, type YamiModule } from "./module.js";
 import { Session, type NewSession, type SessionStatus, type SessionSummary } from "./session.js";
 import { writeStarter } from "./starter.js";
 import { moduleTools, TOOL_SET } from "./tools.js";
@@ -42,8 +43,6 @@ export interface IngestOptions {
   /** Policies on top of the wiki's own, for example how to treat the user's own writing. */
   policies?: DocumentRef<"policy">[];
 }
-
-const FIELD_OF: Record<Exclude<DocumentRef["kind"], "agent">, LinkedKind> = { article: "articles", policy: "policies", promise: "promises", skill: "skills" };
 
 /**
  * The agent workflows of one vault: its modules, its wiki, its agents, and the sessions they run. A host
@@ -85,9 +84,8 @@ export class Yami {
     for (const module of this.modules) module.attach(this, colors.get(module)!);
     this.#conversations = options.conversations ?? new FileConversations(this.vault);
     this.agents = options.agents ?? [];
-    const tools = this.tools();
     const skills = this.skills();
-    for (const agent of this.agents) agent.setPreferences({ cwd: this.vault.root, tools, skills });
+    for (const agent of this.agents) agent.setPreferences({ cwd: this.vault.root, tools: this.tools({ agent }), skills });
   }
 
   /** The modules: the built-in wiki module first, then the plugin's, then the vault modules that `discover` found. */
@@ -101,7 +99,7 @@ export class Yami {
 
   /**
    * What a person must fix or know, from the last `discover`: each problem with its module, its file, and
-   * what to do. A problem of a vault module or a template keeps it out. A problem of the module `yami` says
+   * what to do. A problem of a vault module or a flow keeps it out. A problem of the module `yami` says
    * that the base skill holds a person's edits, so it lacks this version's text. Code modules have none: a
    * code module that is not valid throws when it is built.
    */
@@ -110,17 +108,19 @@ export class Yami {
   }
 
   /**
-   * The tools of Yami and of every module as one tool set named `yami`, which Yami gives its agents: Yami's
-   * own, `yami_check`, and each module's tool as `<module id>_<tool name>`. A review gets only the tools
-   * whose `readOnly` is true, and its own `yami_review`, which no other agent has.
+   * The tools of Yami and of every module as one tool set named `yami`, for a caller: Yami's own,
+   * `yami_check` and `yami_agent`, then each module's tool as `<module id>_<tool name>`. `yami_agent` runs
+   * agents for `caller`: on its agent, with a bare name in its module. Yami gives each of its agents the
+   * set for that agent, and each run's worker the set for its session. A review gets only the tools whose
+   * `readOnly` is true, and its own `yami_review`, which no other agent has.
+   * @example
+   * const tools = yami.tools({ agent, module: "notes", session: "notes/Weekly.md", access: "edit" });
    */
-  tools(): ToolSet {
+  tools(caller: AgentCaller = {}): ToolSet {
     const modules = moduleTools(this.modules);
-    return {
-      name: TOOL_SET,
-      description: modules ? `Tools of Yami. ${modules.description}` : "Tools of Yami.",
-      tools: [...yamiTools(this), ...(modules?.tools ?? [])],
-    };
+    const set: ToolSet = { name: TOOL_SET, description: modules ? `Tools of Yami. ${modules.description}` : "Tools of Yami.", tools: [] };
+    set.tools.push(...yamiTools(this, caller, () => set), ...(modules?.tools ?? []));
+    return set;
   }
 
   /**
@@ -132,7 +132,7 @@ export class Yami {
   }
 
   /**
-   * Calls the listener when the modules change: `discover` found a vault module or a template that is new,
+   * Calls the listener when the modules change: `discover` found a vault module or a flow that is new,
    * changed, or gone, or a problem that is new or fixed. Returns the function that stops it.
    */
   onModulesChange(listener: () => void): () => void {
@@ -145,8 +145,8 @@ export class Yami {
    * modules again, and updates `modules` and `problems`. A module whose documents did not
    * change keeps its object. A new module gets its ledger, the agents get the skill sets of the modules as
    * they are now, and the listeners of `onModulesChange` hear of any change. A live run keeps the module and
-   * the template it started with. Calls run one after another. `enable` calls it, and `createYami` calls it
-   * when a module document, a template document, or the base skill changes, or a file is created, renamed,
+   * the flow it started with. Calls run one after another. `enable` calls it, and `createYami` calls it
+   * when a module document, a form of a module, or the base skill changes, or a file is created, renamed,
    * or removed.
    */
   discover(): Promise<void> {
@@ -196,7 +196,7 @@ export class Yami {
   }
 
   /**
-   * Creates a vault module from a starter: the module document, one template, one skill, one policy, and
+   * Creates a vault module from a starter: the module document, one flow, one skill, one agent, one policy, and
    * one promise with a core check, in `internal/<id>/`, where the id comes from the name by `idFromName`.
    * Then it discovers the modules, and returns the new one. It refuses a name that gives no id, Yami's own
    * id, or an id that a module or a folder of `internal/` has.
@@ -268,19 +268,19 @@ export class Yami {
     return session;
   }
 
-  /** The session documents of the vault, newest first, of one module or template when given. */
-  async sessions(of?: YamiModule | SessionTemplate): Promise<Session[]> {
+  /** The session documents of the vault, newest first, of one module or flow when given. */
+  async sessions(of?: YamiModule | Flow): Promise<Session[]> {
     return (await this.sessionDocuments(of)).map((doc) => this.session(doc.path));
   }
 
-  /** Each session of the vault at a glance, newest first, of one module or template when given. One read of each document. */
-  async summaries(of?: YamiModule | SessionTemplate): Promise<SessionSummary[]> {
+  /** Each session of the vault at a glance, newest first, of one module or flow when given. One read of each document. */
+  async summaries(of?: YamiModule | Flow): Promise<SessionSummary[]> {
     return (await this.sessionDocuments(of)).map((doc) => this.session(doc.path).summarize(doc));
   }
 
-  private async sessionDocuments(of?: YamiModule | SessionTemplate): Promise<Document[]> {
-    const template = of instanceof SessionTemplate ? of : undefined;
-    const modules = template ? [template.module] : of ? [of as YamiModule] : this.modules;
+  private async sessionDocuments(of?: YamiModule | Flow): Promise<Document[]> {
+    const flow = of instanceof Flow ? of : undefined;
+    const modules = flow ? [flow.module] : of ? [of as YamiModule] : this.modules;
     const found: Document[] = [];
     for (const module of modules.filter((m) => m.sessionsIn !== "none")) {
       const folder = module.layout.sessions;
@@ -289,7 +289,7 @@ export class Yami {
         // A document in the middle of an edit can hold properties that do not parse; it shows again once they do.
         const doc = await readDocument(this.vault, path).catch(() => undefined);
         if (!doc || doc.properties.type !== "session" || doc.properties.module !== module.id) continue;
-        if (template && module.templateOf(doc.properties.template) !== template) continue;
+        if (flow && module.flowOf(doc.properties.flow) !== flow) continue;
         found.push(doc);
       }
     }
@@ -325,11 +325,12 @@ export class Yami {
   }
 
   /**
-   * Creates a session document from a template: the template's links and the documents in `add` as the
-   * session's links, the template's fields and `fields` as its properties. Returns its handle.
+   * Creates a session document from a flow: the flow's links and the documents in `add` as the session's
+   * links, the flow's fields and `fields` as its properties, and `request` as its Request section. Returns
+   * its handle.
    */
-  async createSession(template: SessionTemplate, options: NewSession = {}): Promise<Session> {
-    const module = template.module;
+  async createSession(flow: Flow, options: NewSession = {}): Promise<Session> {
+    const module = flow.module;
     if (module.yami !== this) throw new Error(`The ${module.id} module is not part of this Yami.`);
     if (module.sessionsIn === "none") throw new Error(`The ${module.id} module has no sessions.`);
     const folder = module.layout.sessions;
@@ -339,26 +340,27 @@ export class Yami {
       checkName(name);
       if (await this.vault.exists(`${folder}/${name}.md`)) throw new Error(`A session named ${name} exists.`);
     } else {
-      name = safeName(options.name ?? `${template.name} ${timestamp().slice(0, 16).replace("T", " ").replace(":", "-")}`);
+      const title = flow.name.replaceAll("-", " ");
+      name = safeName(options.name ?? `${title.charAt(0).toUpperCase()}${title.slice(1)} ${timestamp().slice(0, 16).replace("T", " ").replace(":", "-")}`);
       const base = name;
       for (let n = 2; await this.vault.exists(`${folder}/${name}.md`); n++) name = `${base} (${n})`;
     }
-    const links = template.links();
+    const links = flow.links();
     for (const doc of options.add ?? []) {
-      if (doc.kind === "agent") throw new Error(`A session cannot link the agent ${doc.name}.`);
       const field = FIELD_OF[doc.kind];
       if (!links[field].some((linked) => linked.path === doc.path)) links[field] = [...links[field], doc];
     }
-    const given = { ...template.fields, ...options.fields };
+    const given = { ...flow.fields, ...options.fields };
     const core = Object.keys(given).filter((field) => field in SESSION);
-    if (core.length) throw new Error(`A session's ${core.join(", ")} ${core.length === 1 ? "is a core field" : "are core fields"}: the template's links and Yami set ${core.length === 1 ? "it" : "them"}.`);
+    if (core.length) throw new Error(`A session's ${core.join(", ")} ${core.length === 1 ? "is a core field" : "are core fields"}: the flow's links and Yami set ${core.length === 1 ? "it" : "them"}.`);
     const schema = { ...SESSION, ...module.schema };
     const properties = withDefaults(
       {
         type: "session",
         module: module.id,
-        template: template.id,
+        flow: flow.name,
         created: timestamp(),
+        agents: links.agents.map((d) => d.link),
         articles: links.articles.map((d) => d.link),
         policies: links.policies.map((d) => d.link),
         promises: links.promises.map((d) => d.link),
@@ -371,8 +373,8 @@ export class Yami {
     if (errors.length > 0) throw new Error(`The session is not valid: ${errors.join("; ")}.`);
     const path = `${folder}/${name}.md`;
     const deliverables = (properties.promises as string[]).map((target) => `- [ ] ${target}`).join("\n") || "- none";
-    const intro = template.body.trim() ? `${template.body.trim()}\n\n` : "";
-    await writeDocument(this.vault, { path, properties, body: `# ${name}\n\n${intro}## Deliverables\n${deliverables}\n\n## Progress\n` });
+    const request = options.request?.trim() ? `${options.request.trim()}\n` : "";
+    await writeDocument(this.vault, { path, properties, body: `# ${name}\n\n## Request\n${request}\n## Deliverables\n${deliverables}\n\n## Progress\n` });
     return this.session(path);
   }
 

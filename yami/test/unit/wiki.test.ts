@@ -19,7 +19,7 @@ afterEach(async () => {
   if (root) await rm(root, { recursive: true, force: true });
 });
 
-/** A Yami over the test vault, with the wiki module installed, and the wiki's ingest template. */
+/** A Yami over the test vault, with the wiki module installed, and the wiki's ingest flow. */
 async function enabled() {
   const yami = new Yami({ vault });
   await yami.enable();
@@ -316,7 +316,7 @@ describe("checks", () => {
     await note(`${SOURCES}/pending.md`, { type: "source", description: "Pending.", file: "[[x.pdf]]", status: "pending" }, "");
     await wiki.refresh();
     const context = (sources: string[]) => ({ vault, wiki, session: "s", path: "s.md", properties: { sources: sources.map(link) } });
-    const absorbed = { path: "p", properties: { check: "property", field: "sources", name: "status", value: "absorbed" }, body: "" };
+    const absorbed = { path: "p", properties: { check: "property", field: "sources", property: "status", value: "absorbed" }, body: "" };
     expect(await runCheck(absorbed, context([`${SOURCES}/codex-notes.md`]))).toMatchObject({ status: "met" });
     expect(await runCheck(absorbed, context([`${SOURCES}/codex-notes.md`, `${SOURCES}/pending.md`]))).toMatchObject({
       status: "unmet",
@@ -507,7 +507,7 @@ describe("the wiki module", () => {
   it("installs its documents and serves search, match, and lint as tools", async () => {
     await fixture();
     const { yami, ingest } = await enabled();
-    for (const file of ["internal/wiki/skills/ingest/SKILL.md", "internal/wiki/skills/ingest/extractor.md", "internal/wiki/skills/ingest/drafter.md", "internal/wiki/skills/ingest/page-forms.md", "internal/wiki/promises/Sources absorbed.md"]) {
+    for (const file of ["internal/wiki/skills/ingest/SKILL.md", "internal/wiki/skills/ingest/extractor.md", "internal/wiki/skills/ingest/drafter.md", "internal/wiki/skills/ingest/page-forms.md", "internal/wiki/promises/sources-absorbed/PROMISE.md"]) {
       expect(await vault.exists(file), file).toBe(true);
     }
     const { path } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`)] } });
@@ -656,9 +656,9 @@ describe("change", () => {
     // The checks of the module see the change through the session. The loop refreshes the wiki before the checks.
     await wiki.refresh();
     const context = { vault, wiki, session: "Ingest codex", path: sessionPath, properties: (await readDocument(vault, sessionPath)).properties };
-    const applied = { path: "p", properties: { check: "property", field: "changes", name: "status", value: "applied", atLeast: 1 }, body: "" };
+    const applied = { path: "p", properties: { check: "property", field: "changes", property: "status", value: "applied", atLeast: 1 }, body: "" };
     expect(await runCheck(applied, context)).toMatchObject({ status: "met" });
-    const absorbed = { path: "p", properties: { check: "property", field: "sources", name: "status", value: "absorbed" }, body: "" };
+    const absorbed = { path: "p", properties: { check: "property", field: "sources", property: "status", value: "absorbed" }, body: "" };
     expect(await runCheck(absorbed, context)).toMatchObject({ status: "met" });
   });
 
@@ -796,8 +796,22 @@ describe("what the index leaves out", () => {
     const paths = wiki.notes.map((n) => n.path);
     expect(paths.some((p) => p.startsWith("internal/wiki/changes/") || p.startsWith("internal/wiki/snapshots/") || p.startsWith("internal/wiki/skills/"))).toBe(false);
     expect((await wiki.search("codex app-server")).map((h) => h.path)).not.toContain(result.path);
-    const check = { path: "p", properties: { check: "property", field: "changes", name: "status", value: "applied", atLeast: 1 }, body: "" };
+    const check = { path: "p", properties: { check: "property", field: "changes", property: "status", value: "applied", atLeast: 1 }, body: "" };
     expect(await runCheck(check, { vault, wiki, session: "s", path: "s.md", properties: { changes: [link(result.path)] } })).toMatchObject({ status: "met" });
+  });
+});
+
+describe("the forms of the modules", () => {
+  it("are not knowledge: the index leaves out every form folder, and lint finds no duplicate name in them", async () => {
+    const wiki = await fixture();
+    for (const [folder, file] of [["agents", "AGENT"], ["flows", "FLOW"], ["policies", "POLICY"], ["promises", "PROMISE"], ["skills", "SKILL"]]) {
+      for (const module of ["one", "two"]) await vault.write(`internal/${module}/${folder}/same/${file}.md`, "---\nname: same\ndescription: The same name.\n---\nBody.\n");
+    }
+    await vault.write("internal/one/articles/Guide.md", "An article is knowledge.\n");
+    await wiki.refresh();
+    expect(wiki.notes.map((n) => n.path).filter((p) => p.startsWith("internal/"))).toEqual(["internal/one/articles/Guide.md"]);
+    expect(wiki.holds("internal/one/policies/same/POLICY.md")).toBe(false);
+    expect((await wiki.lint()).filter((f) => f.check === "duplicate-name" && f.path.startsWith("internal/"))).toEqual([]);
   });
 });
 
