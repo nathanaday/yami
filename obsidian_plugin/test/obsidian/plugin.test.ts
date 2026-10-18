@@ -576,6 +576,9 @@ describe("Yami in Obsidian", () => {
     await page().waitForSelector(".yami-panel .yami-state-label");
     expect(await page().textContent(".yami-panel .yami-panel-title")).toBe(name);
     expect(await page().$$eval(".yami-panel .yami-section-head h3", (els) => els.map((el) => el.textContent))).toEqual(["Promises", "Policies", "Skills", "Agents"]);
+    // The meta line names the flow by its title, and each document's row gives its description before any check.
+    expect(await page().$$eval(".yami-panel .yami-state .yami-row-meta span", (els) => els.map((el) => el.textContent))).toContain("Greeting");
+    expect(await page().textContent('.yami-panel .yami-row:has-text("proofreader") .yami-row-desc')).toBe("Reads one greeting note and says whether it is one line, the greeting, a comma, and a name.");
     await page().click('.yami-panel .yami-row:has-text("always-say-hello")');
     await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path === "internal/hello/policies/always-say-hello/POLICY.md");
 
@@ -751,10 +754,19 @@ describe("Yami in Obsidian", () => {
     expect(doc).toContain("[[internal/hello/agents/proofreader/AGENT|proofreader]]");
 
     // The agent ran in a conversation of its own, which links the session, with the brief and the task as its message.
-    const note = await obsidian.waitForNote("conversations/hello proofreader.md", (text) => text.includes("> [!user]"), 10_000);
+    const note = await obsidian.waitForNote(`conversations/hello ${name} proofreader.md`, (text) => text.includes("> [!user]"), 10_000);
     expect(note).toMatch(/^---\ntype: conversation\nagent: claude\n/);
     expect(note).toContain(`module: "[[${session.replace(/\.md$/, "")}]]"`);
     expect(note).toContain(`Read greetings/${name}.md and check it.`);
+
+    // The session document lists the run, and the panel shows it in the Conversation section.
+    const runs = await page().evaluate(async (path) => (await (window as any).app.plugins.plugins.yami.yami.session(path).details()).agentRuns, session);
+    expect(runs).toEqual([{ agent: "hello:proofreader", conversation: `conversations/hello ${name} proofreader.md`, status: "done" }]);
+    await run("yami:open-panel");
+    await page().evaluate((path) => (window as any).app.workspace.getLeavesOfType("yami-panel")[0].view.go({ level: "session", module: "hello", path }), session);
+    const agentRow = `.yami-panel [data-key="agent:conversations/hello ${name} proofreader.md"]`;
+    await page().waitForSelector(agentRow);
+    expect(await page().textContent(`${agentRow} .yami-row-note`)).toBe("Done");
   });
 
   it("kills a session's agent while it starts, and in the middle of a turn, and the session ends stopped", { timeout: TIMEOUT }, async () => {

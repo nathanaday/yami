@@ -227,7 +227,7 @@ export class YamiPanel extends ItemView {
     text.createDiv({ cls: "yami-row-name", text: summary.name, attr: { title: summary.name } });
     const meta = text.createDiv({ cls: "yami-row-meta" });
     meta.createSpan({ text: STATUS_LABELS[summary.status] });
-    if (showFlow && summary.flow) meta.createSpan({ text: summary.flow.name });
+    if (showFlow && summary.flow) meta.createSpan({ text: summary.flow.title });
     if (summary.created) meta.createSpan({ text: when(summary.created) });
     if (summary.iteration) meta.createSpan({ text: iterations(summary.iteration) });
 
@@ -249,7 +249,7 @@ export class YamiPanel extends ItemView {
     mark(state, details.status);
     state.createSpan({ cls: "yami-state-label", text: STATUS_LABELS[details.status] });
     const meta = state.createDiv({ cls: "yami-row-meta" });
-    if (details.flow) meta.createSpan({ text: details.flow.name });
+    if (details.flow) meta.createSpan({ text: details.flow.title });
     if (details.created) meta.createSpan({ text: when(details.created) });
     if (details.iteration) meta.createSpan({ text: iterations(details.iteration) });
     if (details.harness) meta.createSpan({ text: capitalize(details.harness) });
@@ -270,10 +270,11 @@ export class YamiPanel extends ItemView {
       for (const doc of documents) this.documentRow(group, doc, icon);
     }
 
-    if (details.conversation || details.review) {
+    if (details.conversation || details.review || details.agentRuns.length) {
       const group = ui.section(page, "Conversation");
       const notes: [string, string | undefined, string, string | undefined][] = [
         ["conversation", details.conversation, "message-square", undefined],
+        ...details.agentRuns.map((run): [string, string, string, string] => [`agent:${run.conversation}`, run.conversation, "bot", STATUS_LABELS[run.status]]),
         ["review", details.review, "scale", details.status === "reviewing" ? "Reviewing" : "Review"],
       ];
       for (const [key, note, icon, label] of notes) {
@@ -305,7 +306,8 @@ export class YamiPanel extends ItemView {
     if (passed !== undefined) glyph.addClass(passed ? "is-met" : "is-unmet");
     const text = row.createDiv({ cls: "yami-row-text" });
     text.createDiv({ cls: "yami-row-name", text: doc.name });
-    if (doc.reason) text.createDiv({ cls: "yami-row-desc", text: doc.reason, attr: { title: doc.reason } });
+    const desc = doc.reason ?? doc.description;
+    if (desc) text.createDiv({ cls: "yami-row-desc", text: desc, attr: { title: desc } });
     const note = !path
       ? "Missing"
       : doc.kind === "promises"

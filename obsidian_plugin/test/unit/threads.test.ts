@@ -386,7 +386,8 @@ describe("a thread session in the loop", () => {
     );
     expect(await t.yami.session(PATH).start()).toMatchObject({ state: "done", iterations: 1 });
 
-    expect(reply).toEqual({ agent: "threads:validator", conversation: "conversations/threads validator.md", message: JSON.stringify(round) });
+    expect(reply).toEqual({ agent: "threads:validator", conversation: "conversations/threads Divide validator.md", message: JSON.stringify(round) });
+    expect((await t.yami.session(PATH).details()).agentRuns).toEqual([{ agent: "threads:validator", conversation: reply.conversation, status: "done" }]);
     const [worker, validator] = t.agent.started;
     expect(validator).not.toBe(worker);
     expect(validator!.options).toMatchObject({ access: "read-only" });

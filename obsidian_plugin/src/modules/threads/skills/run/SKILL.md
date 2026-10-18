@@ -68,4 +68,4 @@ A passing round ends the work. Do not fix its findings: a fix would make the rou
 
 ## Small work
 
-A thread for small work takes the same path with short documents: one or two requirements, one or two tasks, one round. Do not skip the validator.
+A thread for small work takes the same path with short documents: one or two requirements, one or two tasks, one round. Write the spec with /threads:spec. Do not skip the review of the spec or the validator.

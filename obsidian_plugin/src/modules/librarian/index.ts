@@ -116,6 +116,8 @@ export class Librarian extends YamiModule {
     if (!order.documents?.length) throw new Error("A checkout needs one document or more.");
     if (order.documents.length > MAX_DOCUMENTS) throw new Error(`A checkout holds at most ${MAX_DOCUMENTS} documents; ask the user to narrow the request.`);
     if (!order.session && !order.name?.trim()) throw new Error("Give the session of the checkout, or a name for a new one.");
+    // library-loop: F2.2
+    for (const text of [order.request, order.notes ?? ""]) if (/^## /m.test(text)) throw new Error(`The request and the notes cannot hold a line that starts with "## ". Write it as plain text, or as a ### heading.`);
     const originals: string[] = [];
     for (const { path, why } of order.documents) {
       const found = wiki.resolve(path);

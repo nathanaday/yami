@@ -62,9 +62,14 @@ describe.runIf(process.env.YAMI_LIVE_THREAD)("a thread with a real agent", () =>
     expect(git("log", "--oneline").split("\n").length).toBeGreaterThan(2);
     expect(execFileSync("npm", ["test"], { cwd: repo, encoding: "utf8" })).toContain("pass");
     // The work was validated by the read-only agent of the module, through the agent tool, in a conversation of its own.
-    const notes = await vault.list("conversations");
-    const validations = notes.filter((note) => path.basename(note).startsWith("threads validator"));
+    const runs = (await yami.session("threads/Divide.md").details()).agentRuns;
+    expect(runs.some((run) => run.agent === "threads:reviewer" && run.status === "done")).toBe(true);
+    const validations = runs.filter((run) => run.agent === "threads:validator");
     expect(validations.length).toBeGreaterThan(0);
-    for (const note of validations) expect((await readDocument(vault, note)).properties).toMatchObject({ type: "conversation", module: "[[threads/Divide|Divide]]" });
+    expect(validations[0]!.conversation).toBe("conversations/threads Divide validator.md");
+    for (const run of validations) {
+      expect(run.status).toBe("done");
+      expect((await readDocument(vault, run.conversation)).properties).toMatchObject({ type: "conversation", module: "[[threads/Divide|Divide]]" });
+    }
   });
 });

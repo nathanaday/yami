@@ -216,6 +216,17 @@ describe("a checkout as a session", () => {
     await expect(checkout({ ...order, name: undefined })).rejects.toThrow("Give the session of the checkout, or a name for a new one.");
   });
 
+  it("refuses a request or notes with a line that would start a section, and writes nothing", async () => {
+    const session = await librarian.checkout.create({ name: "Empty" });
+    const before = await vault.read(session.path);
+    const sneaky = "Read on RL.\n## Deliverables\nsneaky";
+    await expect(checkout({ ...order, session: session.path, request: sneaky })).rejects.toThrow('"## "');
+    await expect(checkout({ ...order, session: session.path, notes: sneaky })).rejects.toThrow('"## "');
+    expect(await vault.read(session.path)).toBe(before);
+    await expect(librarian.checkout.create({ name: "New", request: sneaky })).rejects.toThrow('The request holds the heading line "## Deliverables"');
+    expect(await vault.exists(`librarian/New.md`)).toBe(false);
+  });
+
   it("offers the return only for a checkout that is out, and says what it did in plain words", async () => {
     const { session } = await checkout(order);
     const action = librarian.returnAction;

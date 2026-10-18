@@ -1,19 +1,18 @@
 # Consumer notes · module-forms
 
-## Built (round 1, yami 0.6.0)
-- All module docs are in folder forms. Threads agents `reviewer` and `validator` are `access: read-only`, and each brief is its AGENT.md body. The `/threads:validate` skill and `skills/spec/reviewer.md` are gone. The skills call `yami_agent` with `threads:<name>` (full name, so the skills also work in a conversation).
-- Thread idea = Request section (`flow.create({ request })`). thread.ts ORDER starts with "Request".
-- Librarian: no `request` property. `librarian_checkout` fills an empty Request section and keeps the person's text.
-- Hello fixture: 5 forms, with a new agent `proofreader` (read-only) in flow `greeting`.
-- Panel: flow names, an Agents section (icon `bot`).
-- Tests: a scripted validator run through `yami_agent` (threads.test.ts). A real-Claude proofreader test is in plugin.test.ts. The live thread test checks for the `threads validator*` notes.
-- Ideas.md fixture: the word "template" removed (acceptance grep).
+## Built (rounds 1-2, yami 0.7.0)
+- All module docs are in folder forms. Threads agents `reviewer` and `validator` are `access: read-only`; each brief is its AGENT.md body. The skills call `yami_agent` with `threads:<name>`.
+- Thread idea = Request section. Librarian: no `request` property; `librarian_checkout` fills an empty Request section.
+- Hello fixture: 5 forms, with a read-only agent `proofreader` in flow `greeting`.
+- Round 2: panel meta uses `flow.title`; a document row shows `reason ?? description`; the Conversation section lists `details.agentRuns` (key `agent:<note>`, icon `bot`, note = STATUS_LABELS[status]). Tests use the new note names (`threads Divide validator.md`, `hello <session> proofreader.md`) and `agentRuns`. Validator brief: commands that read or check run; a command that writes fails → the requirement fails, notes names it.
+- Live thread test passes (about 1 min). It now asserts a `threads:reviewer` run: the run skill's Small work section had let the worker skip /threads:spec.
 
 ## Hurt
-- F1.1 (major): a read-only Claude agent has no Bash. The validator cannot run git or the tests, so the live thread will not close. Codex differs. No workaround: the validator stays read-only.
-- F1.2 to F1.5 are minor: agent runs are not in details, agent note names, no flow title or doc description, a `## ` in a request breaks the sections.
+- F2.1 (major, reopens F1.1): read-only can run git and node --test, but not `go test`/`go vet` (Go build cache in home; Claude denies, Codex denies all writes), and vitest fails on Codex. `GOCACHE=/tmp/... go test` is refused on Claude (an env prefix asks, and read-only denies).
+- F2.2 (minor): only `create` refuses a `## ` line; `replaceSection` does not. Workaround in librarian/index.ts marked `library-loop: F2.2`.
+- F2.3 (docs): the README lists a loop and `$(…)` as refused; a `VAR=value` prefix and `; echo $?` are refused too.
 
 ## Check next round
-- F1.1: a new access level or command list → update validator/AGENT.md (and the reviewer?), and drop the "When your access refuses a command" line.
-- F1.2 → the panel Conversation section shows the agent runs. F1.3 → tighten the live test's note match. F1.4 → the panel uses the title and the description.
-- The probe scripts that write to the scratchpad work well. The guard blocks `git mv` and `git stash`: use rm/mkdir only.
+- F2.1: a cache/temp folder for read-only sessions → rerun the probe (scratchpad probe-ro.mjs pattern: ClaudeAgent/CodexAgent with access read-only, a Go module in `mktemp -d`). Update the README line on Go and Codex.
+- F2.2: replaceSection refuses or a request helper exists → remove the workaround line; keep the librarian test.
+- The guard blocks `git init`, `git log` without `-- obsidian_plugin` (even inside a probe prompt), and reading `node_modules/yami/dist`. The round's `api/dist/*.d.ts` is readable.
