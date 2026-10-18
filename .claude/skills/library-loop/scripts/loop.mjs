@@ -3,20 +3,25 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { DIR_KEY, inside, loadConfig, rel, SIDES } from "./config.mjs";
+import { activeSession, DIR_KEY, inside, loadConfig, projectRoot, rel, repoTop, SIDES } from "./config.mjs";
 import { listRounds, roundName, status } from "./protocol.mjs";
 
 const USAGE = `usage: loop.mjs <command>
   init <slug> [--first creator|consumer] [--rounds 5] [--terms a,b,c]
-                       make the session folder; the library and consumer must have no uncommitted changes
-  round <slug>         make the next round folder and record its base commit
+                       make the session folder and make it active; the library and consumer must have no uncommitted changes
+  activate <slug>      make a session active: the guard and check use its config
+  round <slug>         make the next round folder and record the base commit of each side
   snapshot <slug>      copy the library's docs into the latest round's api/
   status <slug>        the state of the session as JSON: next step, open items, escalations, errors
   audit <slug>         the barrier audit of the latest round as JSON
-  check <side>         run the checks of the library or the consumer`;
+  check <side> [slug]  run the checks of the library or the consumer, by the active session's config
 
-const config = loadConfig();
+A session takes its config from .library-loop/config.json, with the entries of "sessions": { "<slug>": { … } }
+in place of the defaults. Either side can be a folder of another git repository.`;
+
 const [command, ...args] = process.argv.slice(2);
+const root = projectRoot();
+const config = loadConfig(root, command === "check" ? (args[1] ?? activeSession(root)) : args[0]);
 const sessionDir = (slug) => {
   if (!slug || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) fail("a session slug is lower case words joined by hyphens.");
   return path.join(config.exchange, "sessions", slug);
@@ -25,7 +30,16 @@ const option = (name, fallback) => {
   const i = args.indexOf(`--${name}`);
   return i < 0 ? fallback : args[i + 1];
 };
-const git = (...a) => execFileSync("git", a, { cwd: config.root, encoding: "utf8" }).trim();
+/** Runs git in the repository of a side's folder, with the folder as the pathspec. */
+const repo = (dir) => {
+  const top = repoTop(dir);
+  if (!top) fail(`${rel(config, dir)} is in no git repository.`);
+  return { top, spec: path.relative(top, dir) || "." };
+};
+const gitIn = (dir, ...a) => execFileSync("git", a, { cwd: repo(dir).top, encoding: "utf8" }).trim();
+const activate = (slug) => writeFileSync(path.join(config.exchange, "active"), `${slug}\n`);
+/** A round's base commit of a side. A session before the per-side bases recorded one commit for both. */
+const baseOf = (round, side) => (typeof round.base === "string" ? round.base : round.base[side]);
 const readSession = (dir) => JSON.parse(readFileSync(path.join(dir, "session.json"), "utf8"));
 const writeSession = (dir, session) => writeFileSync(path.join(dir, "session.json"), JSON.stringify(session, null, 2) + "\n");
 
@@ -42,14 +56,22 @@ const commands = {
     if (!SIDES.includes(first)) fail("--first is creator or consumer.");
     const rounds = Number(option("rounds", 5));
     if (!Number.isInteger(rounds) || rounds < 1) fail("--rounds is a whole number of at least 1.");
-    const dirty = git("status", "--porcelain", "--", rel(config, config.dirs.creator), rel(config, config.dirs.consumer));
+    const dirty = SIDES.map((side) => gitIn(config.dirs[side], "status", "--porcelain", "--", repo(config.dirs[side]).spec)).filter(Boolean).join("\n");
     if (dirty) fail(`commit or stash these changes first, so each round has a clean base:\n${dirty}`);
     mkdirSync(path.join(dir, "notes"), { recursive: true });
     const ignore = path.join(config.exchange, ".gitignore");
-    if (!existsSync(ignore)) writeFileSync(ignore, "guard.log\nsessions/*/round-*/api/\n");
+    if (!existsSync(ignore)) writeFileSync(ignore, "guard.log\nactive\nsessions/*/round-*/api/\n");
     const terms = option("terms", "").split(",").map((t) => t.trim()).filter(Boolean);
     writeSession(dir, { slug: args[0], created: new Date().toISOString(), first, max_rounds: rounds, consumer_terms: terms, rounds: [] });
+    activate(args[0]);
     console.log(rel(config, dir));
+  },
+
+  activate() {
+    const dir = sessionDir(args[0]);
+    if (!existsSync(dir)) fail(`${rel(config, dir)} does not exist.`);
+    activate(args[0]);
+    console.log(`active: ${args[0]}: library ${rel(config, config.dirs.creator)}, consumer ${rel(config, config.dirs.consumer)}`);
   },
 
   round() {
@@ -59,8 +81,10 @@ const commands = {
     const n = last ? last.n + 1 : session.first === "consumer" ? 0 : 1;
     const roundDir = path.join(dir, roundName(n));
     mkdirSync(roundDir);
-    session.rounds.push({ n, base: git("rev-parse", "HEAD"), started: new Date().toISOString() });
+    const base = Object.fromEntries(SIDES.map((side) => [side, gitIn(config.dirs[side], "rev-parse", "HEAD")]));
+    session.rounds.push({ n, base, started: new Date().toISOString() });
     writeSession(dir, session);
+    activate(args[0]);
     console.log(rel(config, roundDir));
   },
 
@@ -95,13 +119,19 @@ const commands = {
     const library = rel(config, config.dirs.creator);
     const consumer = rel(config, config.dirs.consumer);
 
-    const untracked = git("ls-files", "--others", "--exclude-standard", "--", library, consumer).split("\n").filter(Boolean);
+    const newFiles = (side) =>
+      gitIn(config.dirs[side], "ls-files", "--others", "--exclude-standard", "--", repo(config.dirs[side]).spec)
+        .split("\n")
+        .filter(Boolean)
+        .map((f) => path.join(repo(config.dirs[side]).top, f));
+    const fresh = { creator: newFiles("creator"), consumer: newFiles("consumer") };
+    const untracked = [...fresh.creator, ...fresh.consumer].map((f) => rel(config, f)).sort();
     const added = [
-      ...git("diff", "--unified=0", round.base, "--", library)
+      ...gitIn(config.dirs.creator, "diff", "--unified=0", baseOf(round, "creator"), "--", repo(config.dirs.creator).spec)
         .split("\n")
         .filter((l) => l.startsWith("+") && !l.startsWith("+++"))
         .map((l) => l.slice(1)),
-      ...untracked.filter((f) => inside(path.join(config.root, f), config.dirs.creator)).flatMap((f) => readFileSync(path.join(config.root, f), "utf8").split("\n")),
+      ...fresh.creator.flatMap((f) => readFileSync(f, "utf8").split("\n")),
     ];
     const terms = session.consumer_terms
       .map((term) => ({ term, lines: added.filter((l) => l.toLowerCase().includes(term.toLowerCase())).map((l) => l.trim()) }))
@@ -139,7 +169,7 @@ const commands = {
         {
           round: round.n,
           base: round.base,
-          diff: { [library]: numstat(round.base, library), [consumer]: numstat(round.base, consumer) },
+          diff: { [library]: numstat(baseOf(round, "creator"), config.dirs.creator), [consumer]: numstat(baseOf(round, "consumer"), config.dirs.consumer) },
           untracked,
           consumer_terms_in_library: terms,
           internal_imports: internal,
@@ -187,10 +217,11 @@ function expandDocs(pattern) {
 }
 
 function sourceFiles(dir) {
-  return git("ls-files", "--cached", "--others", "--exclude-standard", "--", rel(config, dir))
+  const { top, spec } = repo(dir);
+  return gitIn(dir, "ls-files", "--cached", "--others", "--exclude-standard", "--", spec)
     .split("\n")
     .filter((f) => /\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(f))
-    .map((f) => path.join(config.root, f))
+    .map((f) => path.join(top, f))
     .filter((f) => existsSync(f));
 }
 
@@ -202,7 +233,7 @@ function libraryPackageName() {
 function numstat(base, dir) {
   let added = 0;
   let removed = 0;
-  for (const line of git("diff", "--numstat", base, "--", dir).split("\n").filter(Boolean)) {
+  for (const line of gitIn(dir, "diff", "--numstat", base, "--", repo(dir).spec).split("\n").filter(Boolean)) {
     const [a, r] = line.split("\t");
     added += Number(a) || 0;
     removed += Number(r) || 0;

@@ -27,15 +27,23 @@ export function projectRoot() {
   return real(process.env.CLAUDE_PROJECT_DIR || fromScript);
 }
 
-export function loadConfig(root = projectRoot()) {
+/** The session that `.library-loop/active` names: the one the guard and `check` serve. */
+export function activeSession(root = projectRoot()) {
+  const file = path.join(real(root), ".library-loop", "active");
+  return existsSync(file) ? readFileSync(file, "utf8").trim() || undefined : undefined;
+}
+
+/** The config of a session: `config.json`, with the entries of `sessions.<slug>` in place of the defaults. */
+export function loadConfig(root = projectRoot(), slug = activeSession(root)) {
   root = real(root);
   const exchange = path.join(root, ".library-loop");
   const file = path.join(exchange, "config.json");
   if (!existsSync(file)) throw new Error("there is no .library-loop/config.json. Run /library-loop to set it up.");
-  const raw = JSON.parse(readFileSync(file, "utf8"));
+  const base = JSON.parse(readFileSync(file, "utf8"));
+  const raw = { ...base, ...(slug ? base.sessions?.[slug] : undefined) };
   for (const key of ["library", "consumer"]) {
     if (typeof raw[key] !== "string" || !existsSync(path.resolve(root, raw[key]))) {
-      throw new Error(`.library-loop/config.json: "${key}" must name a folder of the repository.`);
+      throw new Error(`.library-loop/config.json: "${key}" must name a folder, relative to the repository root.`);
     }
   }
   const dirs = { creator: real(path.resolve(root, raw.library)), consumer: real(path.resolve(root, raw.consumer)) };
@@ -53,3 +61,11 @@ export function loadConfig(root = projectRoot()) {
 }
 
 export const rel = (config, p) => path.relative(config.root, p) || ".";
+
+/** The top folder of the git repository that holds `p`, or null when no repository holds it. */
+export function repoTop(p) {
+  for (let dir = real(p); ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, ".git"))) return dir;
+    if (path.dirname(dir) === dir) return null;
+  }
+}

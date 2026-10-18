@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -122,6 +122,31 @@ describe("creator", () => {
     denied(call("creator", "Write", { file_path: at(`${S}/round-01/feedback.md`) }), /writes only response\.md/);
     denied(bash("creator", "cd ../app && npm test", at("lib")), /is in the consumer app/);
     denied(bash("creator", "grep -rn foo .", root), /also covers app/);
+  });
+});
+
+describe("a consumer in another repository", () => {
+  test("runs read-only git there with no pathspec, and the guard follows the active session", () => {
+    const host = fixture();
+    const other = fixture();
+    after(() => [host.root, other.root].forEach((p) => rmSync(p, { recursive: true, force: true })));
+    mkdirSync(other.at("app/.git"), { recursive: true });
+    mkdirSync(host.at(".git"), { recursive: true });
+    const settings = JSON.parse(readFileSync(host.at(".library-loop/config.json"), "utf8"));
+    settings.sessions = { duo: { consumer: path.relative(host.root, other.at("app")) } };
+    writeFileSync(host.at(".library-loop/config.json"), JSON.stringify(settings));
+    writeFileSync(host.at(".library-loop/active"), "duo\n");
+    const duo = loadConfig(host.root);
+    assert.equal(duo.dirs.consumer, other.at("app"));
+    const judgeAs = (side, command, cwd) => judge(duo, side, { tool_name: "Bash", tool_input: { command }, cwd });
+    allowed(judgeAs("consumer", "git log --oneline", other.at("app")));
+    allowed(judgeAs("consumer", "git diff HEAD~1", other.at("app/src")));
+    denied(judgeAs("consumer", "git commit -m x", other.at("app")), /does not run `git commit`/);
+    denied(judgeAs("creator", "git log", host.at("lib")), /without a pathspec/);
+    allowed(judgeAs("creator", "git log -- .", host.at("lib")));
+    denied(judge(duo, "creator", { tool_name: "Read", tool_input: { file_path: other.at("app/src/b.ts") }, cwd: host.root }), /is in the consumer app/);
+    allowed(judge(duo, "consumer", { tool_name: "Write", tool_input: { file_path: other.at("app/src/c.ts") }, cwd: host.root }));
+    denied(judge(duo, "consumer", { tool_name: "Write", tool_input: { file_path: host.at("app/src/c.ts") }, cwd: host.root }), /writes only in/);
   });
 });
 

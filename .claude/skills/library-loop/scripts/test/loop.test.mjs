@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { real } from "../config.mjs";
 import { fixture } from "./fixture.mjs";
 
 const { root, at, file } = fixture({ git: true });
@@ -27,7 +29,7 @@ test("init refuses a dirty tree, then makes the session", () => {
   assert.equal(result.status, 0, result.stderr);
   const session = JSON.parse(readFileSync(at(".library-loop/sessions/sync/session.json"), "utf8"));
   assert.deepEqual([session.first, session.max_rounds, session.consumer_terms], ["consumer", 4, ["panel", "navigator"]]);
-  assert.equal(readFileSync(at(".library-loop/.gitignore"), "utf8"), "guard.log\nsessions/*/round-*/api/\n");
+  assert.equal(readFileSync(at(".library-loop/.gitignore"), "utf8"), "guard.log\nactive\nsessions/*/round-*/api/\n");
   assert.equal(run("init", "sync").status, 1);
 });
 
@@ -64,4 +66,35 @@ test("check runs each side's commands and shows a failure", () => {
   const consumer = run("check", "consumer");
   assert.equal(consumer.status, 1);
   assert.match(consumer.stdout, /FAIL {2}app: echo broken && false\nbroken/);
+});
+
+test("a session can take a consumer in another repository, with its own config", () => {
+  const other = mkdtempSync(path.join(os.tmpdir(), "library-loop-other-"));
+  after(() => rmSync(other, { recursive: true, force: true }));
+  const git = (...a) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: other, stdio: "pipe" });
+  writeFileSync(path.join(other, "main.ts"), 'import { a } from "lib";\n');
+  git("init", "-q");
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const config = JSON.parse(readFileSync(at(".library-loop/config.json"), "utf8"));
+  config.sessions = { duo: { consumer: path.relative(root, other), shared: [], checks: { consumer: ["echo other"] } } };
+  writeFileSync(at(".library-loop/config.json"), JSON.stringify(config));
+  commit("duo config");
+
+  assert.equal(run("init", "duo").status, 0);
+  assert.equal(readFileSync(at(".library-loop/active"), "utf8"), "duo\n");
+  assert.equal(run("round", "duo").status, 0);
+  const session = JSON.parse(readFileSync(at(".library-loop/sessions/duo/session.json"), "utf8"));
+  assert.equal(session.rounds[0].base.consumer, execFileSync("git", ["rev-parse", "HEAD"], { cwd: other, encoding: "utf8" }).trim());
+  assert.equal(session.rounds[0].base.creator, execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim());
+
+  writeFileSync(path.join(other, "new.ts"), "// library-loop: F1.1\n");
+  const audit = JSON.parse(run("audit", "duo").stdout);
+  assert.deepEqual(audit.workarounds, [`${path.relative(root, real(other))}/new.ts:1: // library-loop: F1.1`]);
+  assert.ok(audit.untracked.includes(`${path.relative(root, real(other))}/new.ts`));
+  assert.match(run("check", "consumer").stdout, /pass {2}.*: echo other/);
+  assert.match(run("check", "consumer", "sync").stdout, /FAIL {2}app: echo broken/);
+
+  assert.equal(run("activate", "sync").status, 0);
+  assert.match(run("check", "consumer").stdout, /FAIL {2}app/);
 });

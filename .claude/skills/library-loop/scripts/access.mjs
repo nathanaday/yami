@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { inside, NAME, other, real, rel } from "./config.mjs";
+import { inside, NAME, other, real, rel, repoTop } from "./config.mjs";
 
 const EXCHANGE_FILE = { creator: "response.md", consumer: "feedback.md" };
 const BRIEF = { creator: "requirements.md", consumer: "task.md" };
@@ -140,16 +140,19 @@ function git(config, side, args, cwd) {
   const usage = `Run git status, diff, log, show, or blame with \`-- ${own}\`. The overseer commits.`;
   if (!GIT_READ.has(sub)) return `the ${side} does not run \`git ${sub ?? ""}\`. ${usage}`;
 
+  // A repository that holds neither the other side nor the session files shows nothing the side may not see.
+  const top = repoTop(at);
+  const fenced = !top || [config.dirs[other(side)], config.exchange].some((dir) => inside(dir, top));
   for (const word of args.slice(i + 1)) {
     const spec = /^[^-:][^:]*:(.+)$/.exec(word)?.[1];
     if (!spec) continue;
-    const p = real(path.resolve(/^\.\.?\//.test(spec) ? at : config.root, spec));
+    const p = real(path.resolve(/^\.\.?\//.test(spec) ? at : (top ?? config.root), spec));
     const denied = read(config, side, p);
     if (denied) return denied;
   }
   const dash = args.indexOf("--", i);
   const specs = dash < 0 ? [] : args.slice(dash + 1);
-  if (!specs.length) return `\`git ${sub}\` without a pathspec also shows the ${NAME[other(side)]}. ${usage}`;
+  if (!specs.length) return fenced ? `\`git ${sub}\` without a pathspec also shows the ${NAME[other(side)]}. ${usage}` : null;
   for (const spec of specs) {
     const p = real(path.resolve(at, expand(spec, at)));
     if (!inside(p, config.dirs[side])) return `the pathspec ${spec} is outside ${own}/. ${usage}`;

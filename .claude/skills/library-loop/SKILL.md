@@ -17,7 +17,7 @@ The tool is `node .claude/skills/library-loop/scripts/loop.mjs`, written `loop` 
 
 ## Resume
 
-When the argument names a session in `.library-loop/sessions/`, run `loop status <slug>` and continue from its `next` step.
+When the argument names a session in `.library-loop/sessions/`, run `loop activate <slug>` and `loop status <slug>`, and continue from its `next` step. The guard and `loop check` serve the active session.
 
 ## Set up
 
@@ -29,6 +29,9 @@ When the argument names a session in `.library-loop/sessions/`, run `loop status
    | `shared` | Policy files that both sides read and neither changes, such as a design document. |
    | `docs` | What the consumer sees of the library, relative to the library folder: files, or `<dir>/**/*<suffix>` such as `dist/**/*.d.ts`. |
    | `checks.library`, `checks.consumer` | The commands that must pass, run in each folder. |
+   | `sessions.<slug>` | Entries of this table for one session, in place of the defaults: for example a consumer in another repository, `"consumer": "../other-app"`. |
+
+   Either side can be a folder of another git repository. The tool runs `git` in each side's own repository and records a base commit for each side.
 
 2. **Goal.** Take it from the argument, or ask for it.
 3. **Study.** Read the shared policy, the library's docs, and enough of the consumer's code to split the goal.
@@ -39,7 +42,7 @@ When the argument names a session in `.library-loop/sessions/`, run `loop status
    - The first side: `consumer` when the library already has an API in this area, so the first feedback holds real call sites; `creator` when the library has nothing there yet.
    - The round limit: 5, unless the goal is small or large.
 5. **Approve.** Show the user both briefs, the terms, the first side, and the limit. Wait for approval. This is the one stop before the loop.
-6. **Start.** Create the branch `library-loop/<slug>` from the current branch. Run `loop init <slug> --first <side> --rounds <n> --terms <a,b,c>`. Write the briefs into the session folder, and commit them.
+6. **Start.** Create the branch `library-loop/<slug>` from the current branch, in each repository that holds a side. Run `loop init <slug> --first <side> --rounds <n> --terms <a,b,c>`; it makes the session active. Write the briefs into the session folder, and commit them. When the sides are in two repositories, commit each side in its own repository, and the session files in this one.
 7. **Barrier check.** Send `library-consumer` this prompt: "Barrier check. Use the Read tool on `<library>/package.json`, and report exactly what the tool returned. Do nothing else." The read must fail with a `library-loop:` message. When it returns the file, stop and tell the user that the guard hook did not run. The usual causes are a workspace that is not trusted, and a Claude Code version without hooks in agent frontmatter.
 
 ## A round

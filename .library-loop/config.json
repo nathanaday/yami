@@ -1,10 +1,44 @@
 {
   "library": "yami",
   "consumer": "obsidian_plugin",
-  "shared": ["design.md"],
-  "docs": ["README.md", "CHANGELOG.md", "markdown.d.ts", "dist/**/*.d.ts"],
+  "shared": [
+    "design.md"
+  ],
+  "docs": [
+    "README.md",
+    "CHANGELOG.md",
+    "markdown.d.ts",
+    "dist/**/*.d.ts"
+  ],
   "checks": {
-    "library": ["npm run build", "npm test"],
-    "consumer": ["npm run build", "npm test"]
+    "library": [
+      "npm run build",
+      "npm test"
+    ],
+    "consumer": [
+      "npm run build",
+      "npm test"
+    ]
+  },
+  "sessions": {
+    "duet-runtime": {
+      "consumer": "../obsidian-duet",
+      "shared": [
+        "design.md",
+        "../obsidian-duet/docs/design.md"
+      ],
+      "checks": {
+        "library": [
+          "npm run build",
+          "npm test",
+          "cd ../obsidian_plugin && npm run build && npm test"
+        ],
+        "consumer": [
+          "npm run typecheck",
+          "npm test",
+          "npm run plugin:build"
+        ]
+      }
+    }
   }
 }
