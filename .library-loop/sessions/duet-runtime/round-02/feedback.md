@@ -12,7 +12,11 @@ Duet now runs on Yami 0.11.0 with no `library-loop:` workaround left. Each fix o
 
 `plugin/src` has 1,792 lines: 2,023 at the start, 1,934 after round 0, and 1,808 after round 1. This round changed 4 files, with 53 lines added and 69 lines removed.
 
-Checks: `npm run typecheck` passes. `npm test` passes, with 42 tests. `npm run plugin:build` passes. The acceptance grep finds nothing. I did not run `npm run test:obsidian`, because the overseer runs it. Its settings test (`offers a new agent as a command and a mention tag with no reload`) is in place from round 1. This round changed no command id and no status text that the test reads.
+Checks: `npm run typecheck` passes. `npm test` passes, with 42 tests. `npm run plugin:build` passes. The acceptance grep finds nothing. `npm run test:obsidian` passes, 21 of 21, with a real Claude Code and Codex, in 3 of 3 full runs of the final code (77 to 91 s each).
+
+**Why the overseer's `test:obsidian` runs failed, and the fixes.** Both causes were in Duet, not in Yami.
+- *Mentions and conversations (15 to 17 failures).* The helpers `mention` and `idle` read `plugin.mentions.working`. Round 1 deleted that getter, because Yami's status bar and `yami-stop` took over the mention work, but I did not update the test. The helpers now read `plugin.yami.works` (the work of `noteSessions`) and `plugin.yami.conversations.working`. I measured the gap from Enter to the first entry in `yami.works`: 605 ms for a new Claude session, 86 ms for a Codex session, and 3 ms for an open session. So `works` covers the mention almost from the start, and I file no item for the gap.
+- *Settings (`['claude', 'codex', 'w', 'agent2']`).* This is Duet's bug, and the second settings test only repeated the first one's failure. Duet's tab waits for the Tag field's `blur` before it renders again, so that the field keeps the focus while the user types. But the field also gets `blur` when the window loses the focus for a moment. Then the tab rendered again, the field was gone, and the next keys were lost. I reproduced it: type `w`, send `blur` to the field, then type `ork`: the tag stayed `w`. The fix renders again only when the field is no longer the active element of its document. The settings test now sends this `blur` in the middle of the tag. Before the fix, the failure showed in 1 of 16 full runs; it needs a real loss of focus, such as another app that takes it.
 
 **What a Duet user sees that they did not see before:** the same as in round 1, with one change. When a user removes every profile, the ribbon says `Duet has no agents. Add one in its settings.`
 
@@ -37,7 +41,7 @@ Checks: `npm run typecheck` passes. `npm test` passes, with 42 tests. `npm run p
 - *Note tools:* add "A read-only session asks for nothing, so a mention has no permission handler. A mention agent types its edits by `yami.animate`, the same rule as a conversation."
 - *API for other plugins:* `ConversationManager.start` → `yami.conversations.start`. Yami reads the conversation folder setting at each call, so the `folder` default needs no code of Duet's.
 - *Contribution ledger, "Exact while shared":* "The ledger follows each change of a shared note through `hub.observe`: `shared`, then `changed` with the note, the text before the change, and the agent, then the stop. So the ledger keeps no copy of the text and needs no comparison." In "What it records", replace the transaction-origin wording with: the source is the `agent` of each change.
-- *Settings:* "Every setting applies with no reload. `saveSettings` calls `yami.setAgents`. A profile whose options change, other than its tag and color, gets a new `Agent`, so Yami closes the old agent's sessions once their work ends. The conversation folder, the idle minutes, and Show agents typing are functions that Yami reads at each use."
+- *Settings:* "Every setting applies with no reload. `saveSettings` calls `yami.setAgents`. A profile whose options change, other than its tag and color, gets a new `Agent`, so Yami closes the old agent's sessions once their work ends. The conversation folder, the idle minutes, and Show agents typing are functions that Yami reads at each use. A changed tag renders the tab again only when the Tag field gives the focus to another element, not when the window loses the focus."
 - *Bundling:* replace the paragraph with "`scripts/plugin.mjs` bundles the plugin with `pluginBuild` from `yami/esbuild`, which holds the SDK fixes, and writes `styles.css` with `copyStyles`: Yami's stylesheet, then `plugin/styles.css`."
 - *Vault files:* a new section with the table above.
 - *Testing:* "The unit tests import the text operations from `yami/document`, which loads no Obsidian, so they mock no `obsidian` class."
@@ -80,3 +84,20 @@ setup: ({ file, agent }) => { const live = new LiveSession(profile, file, ...); 
 ```
 
 The response explains this choice: `NoteSessions` is keyed by path. It is two lines and a check. But each host whose state shares the note (`hub.acquire(file, holder)`) writes those lines, and it must decide what a missing file means. This is a matter of taste, so I file it as a nit.
+
+## F2.3 · nit · nit · `setAgents` writes every open composer again, also when its agent did not change
+
+**Tried** (an Obsidian probe: a conversation note with `claude` is open, and the user types `work` in the Tag field of a third profile)
+```ts
+new MutationObserver((m) => log(m.length)).observe(composer, { subtree: true, childList: true, attributes: true, attributeOldValue: true });
+// Each keystroke → setControlValue → saveSettings → yami.setAgents(...)
+// Each setAgents → 11 mutations in the claude composer, each with the same value as before:
+//   class, style "--yami-agent: #d97757;", placeholder "Message claude …", the send button's icon (2 childList), disabled, aria-label
+```
+
+**Wish**
+```ts
+yami.setAgents(entries);   // a composer whose agent's name and color did not change is not written
+```
+
+The user sees nothing, and 11 writes per keystroke cost little. But a host that calls `setAgents` at each keystroke, as the README's `saveSettings` example does, writes every open composer again for an agent that it did not touch. A view that compares the name and color first does no work. This is a nit.

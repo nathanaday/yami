@@ -27,6 +27,13 @@ The guard blocks reads of `.library-loop/sessions/...` through Bash. Use Read fo
 
 Open: F2.1 bug minor (`state?` in setup, but `NoteSession.state: State`), F2.2 nit (setup gives a path, and the hub takes a TFile).
 
+Second pass of round 2 (the overseer's test:obsidian failed). Both causes were mine, not Yami's:
+- The test helpers read `plugin.mentions.working`, which round 1 deleted. They now read `plugin.yami.works` and `plugin.yami.conversations.working`. Gap from Enter to `works`: 605 ms (new Claude), 86 ms (Codex).
+- The Tag field lost typed keys when the window blurred, because the tab rendered again. `updateAfterTyping` now ignores a blur while the field stays `doc.activeElement`. The settings test sends that blur in the middle of the tag. Before the fix, the failure showed in 1 of 16 runs.
+- I may run `npm run test:obsidian` myself (about 85 s a run).
+- New: F2.3 nit (setAgents writes every composer again, 11 same-value mutations).
+
 Next round, check:
-- F2.1/F2.2 answers. With a `file` in setup, drop `app` from MentionAgents.
-- Whether the overseer's test:obsidian run passed, and whether docs/design.md took the proposals.
+- F2.1/F2.2/F2.3 answers. With a `file` in setup, drop `app` from MentionAgents.
+- Run test:obsidian before the verdict. Grep the tests for each member that the round removes.
+- Whether docs/design.md took the proposals.
