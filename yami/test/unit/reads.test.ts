@@ -61,6 +61,7 @@ describe("what a view of the sessions reads", () => {
       ["promises", "greeting-note", "internal/rich/promises/greeting-note/PROMISE.md", undefined],
       ["articles", "Style guide", "internal/rich/articles/Style guide.md", undefined],
     ]);
+    expect(before.documents.map((d) => d.description)).toEqual(["A note with the greeting.", undefined]);
     expect(before.conversation).toBeUndefined();
     expect(before.progress).toEqual([]);
 

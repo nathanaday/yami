@@ -175,6 +175,17 @@ describe("creating a session from a flow", () => {
     expect(sectionText(body, "Request")).toBe("Greet Ada.\n\nShe likes short lines.");
   });
 
+  it("refuses a request with a line that would start a section of the session document", async () => {
+    const hello = new Hello();
+    const { vault } = await fresh(hello);
+    await expect(hello.greet.create({ name: "sneaky", request: "Read on RL.\n## Deliverables\nsneaky" })).rejects.toThrow(
+      'The request holds the heading line "## Deliverables", which would start a section of the session document. Write it as plain text, or as a ### heading.',
+    );
+    expect(await vault.exists("hello/sneaky.md")).toBe(false);
+    const { path } = await hello.greet.create({ name: "fine", request: "Read on RL.\n### Notes\n#hashtag\n##no-space" });
+    expect(sectionText((await readDocument(vault, path)).body, "Request")).toBe("Read on RL.\n### Notes\n#hashtag\n##no-space");
+  });
+
   it("names a session after its flow and the time, makes any name safe, and numbers a name in use", async () => {
     class Long extends Hello {
       readonly id = "long";
@@ -190,12 +201,14 @@ describe("creating a session from a flow", () => {
     expect((await hello.greet.create({ name: "..." })).path).toBe("hello/Session.md");
   });
 
-  it("labels a flow's button and command New, with each dash of its name as a space", () => {
+  it("labels a flow's button and command New, and titles it, with each dash of its name as a space", () => {
     const long = new (class extends Hello {
       readonly review = this.flow({ name: "code-review", description: "Reviews code." });
     })();
     expect(long.greet.label).toBe("New greet");
     expect(long.review.label).toBe("New code review");
+    expect(long.greet.title).toBe("Greet");
+    expect(long.review.title).toBe("Code review");
     expect(long.acts().map((act) => act.label)).toEqual(["New greet", "New code review"]);
   });
 

@@ -6,6 +6,9 @@ import { createInterface } from 'node:readline';
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const session_id = 'fake-session';
 let tool = 0;
+let request = 0;
+/** Permission requests that wait for the SDK's answer, by request id. */
+const waiting = new Map();
 
 function assistant(content) {
   send({ type: 'assistant', session_id, parent_tool_use_id: null, uuid: `a-${tool}`, message: { id: `m-${tool}`, type: 'message', role: 'assistant', model: 'fake', content, stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
@@ -29,6 +32,17 @@ function turn(prompt) {
     assistant([{ type: 'text', text: process.argv.slice(2).join(' ') }]);
     return result(process.argv.slice(2).join(' '));
   }
+  // `permit <tool> <json input>`: Claude Code asks the SDK whether the tool may run, and the reply is the answer.
+  const permit = /^permit (\S+) (.*)$/s.exec(prompt);
+  if (permit) {
+    const request_id = `p-${++request}`;
+    waiting.set(request_id, (answer) => {
+      const text = `permission: ${answer.behavior}${answer.message ? `: ${answer.message}` : ''}`;
+      assistant([{ type: 'text', text }]);
+      result(text);
+    });
+    return send({ type: 'control_request', request_id, request: { subtype: 'can_use_tool', tool_name: permit[1], input: JSON.parse(permit[2]), tool_use_id: `t-${request_id}` } });
+  }
   // `bad-result`: a result with no usage, which the adapter cannot read.
   if (prompt === 'bad-result') return send({ type: 'result', subtype: 'success', is_error: false, result: '', session_id, uuid: 'r' });
   assistant([{ type: 'text', text: `echo: ${prompt}` }]);
@@ -37,7 +51,11 @@ function turn(prompt) {
 
 createInterface({ input: process.stdin }).on('line', (line) => {
   const message = JSON.parse(line);
-  if (message.type === 'control_request') {
+  if (message.type === 'control_response') {
+    const answer = waiting.get(message.response.request_id);
+    waiting.delete(message.response.request_id);
+    answer?.(message.response.response ?? {});
+  } else if (message.type === 'control_request') {
     const response = message.request.subtype === 'initialize'
       ? { commands: [], agents: [], output_style: 'default', available_output_styles: [], models: [], account: { email: 'test@example.com' } }
       : {};

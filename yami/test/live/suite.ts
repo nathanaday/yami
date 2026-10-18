@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -118,7 +119,6 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
       await session.interrupt();
       expect((await turn).status).toBe("interrupted");
       await new Promise((resolve) => setTimeout(resolve, 3000));
-      const { execSync } = await import("node:child_process");
       expect(execSync("pgrep -fl '^sleep 45$' || true").toString().trim()).toBe("");
       expect(events.filter((event) => event.type === "closed")).toHaveLength(0);
     });
@@ -189,6 +189,28 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
       expect(result.text).toContain("PINEAPPLE");
     });
 
+    it("runs a read-only session's commands that only read or check, and writes nothing with a command or an edit tool", { timeout: TIMEOUT }, async () => {
+      const cwd = mkdtempSync(path.join(tmpdir(), `yami-${harness}-read-only-`));
+      writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ name: "probe", private: true, scripts: { test: "node --test" } }));
+      writeFileSync(path.join(cwd, "sum.test.mjs"), 'import test from "node:test";\nimport assert from "node:assert";\ntest("sums", () => assert.equal(1 + 1, 2));\n');
+      execSync('git init -q && git add . && git -c user.name=yami -c user.email=yami@example.com commit -qm "Add the sum test"', { cwd });
+      const requests: PermissionRequest[] = [];
+      const session = await makeAgent(cwd).startSession({ access: "read-only", onPermission: async (request) => (requests.push(request), "allow") });
+      sessions.push(session);
+      const outputs: string[] = [];
+      session.on((event) => event.type === "tool-end" && outputs.push(event.output ?? ""));
+      const result = await session.send(
+        "Run these shell commands, one call each, exactly as written: `git log --oneline`, then `npm test`, then `printf x > written.txt`. Then create the file edited.txt with the text hello, with your file-editing tool. Report what each step gave.",
+      );
+      expect(result.status).toBe("completed");
+      expect(outputs.join("\n")).toContain("Add the sum test");
+      expect(outputs.join("\n")).toMatch(/pass 1/);
+      expect(existsSync(path.join(cwd, "written.txt"))).toBe(false);
+      expect(existsSync(path.join(cwd, "edited.txt"))).toBe(false);
+      expect(execSync("git status --porcelain", { cwd }).toString().trim()).toBe("");
+      expect(requests).toEqual([]);
+    });
+
     it.runIf(harness === "claude")("keeps a read-only session's subagent from writing", { timeout: TIMEOUT }, async () => {
       const { cwd, root } = skillVault();
       const session = await makeAgent(cwd).startSession({ skills: [root], access: "read-only" });
@@ -215,7 +237,8 @@ export function liveSuite(makeAgent: (cwd: string) => Agent, writeRequest: strin
       try {
         const session = await live.ask.create({ name: "word", request: "Only the keeper agent knows the code word. Ask it with the tool yami_agent, then write the word it gives to answer.md." });
         expect(await session.start()).toMatchObject({ state: "done" });
-        const note = readFileSync(path.join(cwd, "conversations", "live keeper.md"), "utf8");
+        expect((await session.details()).agentRuns).toEqual([{ agent: "live:keeper", conversation: "conversations/live word keeper.md", status: "done" }]);
+        const note = readFileSync(path.join(cwd, "conversations", "live word keeper.md"), "utf8");
         expect(note).toContain("access: read-only");
         expect(note).toContain("MARIGOLD-7");
       } finally {

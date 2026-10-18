@@ -10,11 +10,10 @@ import {
   readDocument,
   replaceSection,
   resolveLink,
-  sectionText,
   updateDocument,
   type Document,
 } from "../document/document.js";
-import { timestamp, type SessionState } from "../document/schema.js";
+import type { SessionState } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
 import { AGENT_TOOL } from "./agent-run.js";
@@ -22,6 +21,7 @@ import { BASE_SKILL, BASE_SKILL_COMMAND, BASE_SKILL_TEXT, YAMI_SKILLS } from "./
 import { runCheck, type CheckResult } from "./checks.js";
 import { freshRun, stopOnAbort } from "./fresh-run.js";
 import { linkedDocuments, nameOf } from "./links.js";
+import { addProgress, oneLine } from "./progress.js";
 import { skillCommand, type Flow, type LinkedKind, type YamiModule } from "./module.js";
 import { isJudged, Review, reviewFeedback, reviewPrompt, type ReviewItem } from "./review.js";
 import type { Yami } from "./yami.js";
@@ -410,16 +410,8 @@ async function record(vault: Vault, path: string, promises: Document[], outcome:
       });
       doc.body = replaceSection(doc.body, "Review", verdicts.join("\n"));
     }
-    const progress = sectionText(doc.body, "Progress");
-    const line = `- ${timestamp().slice(11, 16)} ${oneLine(outcome.line)}`;
-    doc.body = replaceSection(doc.body, "Progress", progress ? `${progress}\n${line}` : line);
+    addProgress(doc, outcome.line);
   });
-}
-
-/** A text on one line of at most 300 characters, so a line of a section holds whatever the text holds. */
-function oneLine(text: string): string {
-  const flat = text.replace(/\s+/g, " ").trim();
-  return flat.length > 300 ? `${flat.slice(0, 299)}…` : flat;
 }
 
 /**

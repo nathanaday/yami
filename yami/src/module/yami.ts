@@ -327,21 +327,22 @@ export class Yami {
   /**
    * Creates a session document from a flow: the flow's links and the documents in `add` as the session's
    * links, the flow's fields and `fields` as its properties, and `request` as its Request section. Returns
-   * its handle.
+   * its handle. It refuses a request with a line that starts with `## `, which would start a section.
    */
   async createSession(flow: Flow, options: NewSession = {}): Promise<Session> {
     const module = flow.module;
     if (module.yami !== this) throw new Error(`The ${module.id} module is not part of this Yami.`);
     if (module.sessionsIn === "none") throw new Error(`The ${module.id} module has no sessions.`);
     const folder = module.layout.sessions;
+    const heading = options.request && /^## .*$/m.exec(options.request)?.[0];
+    if (heading) throw new Error(`The request holds the heading line "${heading.trim()}", which would start a section of the session document. Write it as plain text, or as a ### heading.`);
     let name: string;
     if (options.exact) {
       name = options.name ?? "";
       checkName(name);
       if (await this.vault.exists(`${folder}/${name}.md`)) throw new Error(`A session named ${name} exists.`);
     } else {
-      const title = flow.name.replaceAll("-", " ");
-      name = safeName(options.name ?? `${title.charAt(0).toUpperCase()}${title.slice(1)} ${timestamp().slice(0, 16).replace("T", " ").replace(":", "-")}`);
+      name = safeName(options.name ?? `${flow.title} ${timestamp().slice(0, 16).replace("T", " ").replace(":", "-")}`);
       const base = name;
       for (let n = 2; await this.vault.exists(`${folder}/${name}.md`); n++) name = `${base} (${n})`;
     }

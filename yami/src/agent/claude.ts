@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { clearTimeout, setTimeout } from "node:timers";
@@ -76,9 +77,12 @@ export interface ClaudeAgentOptions {
 }
 
 const STDERR_LIMIT = 4096;
-/** Built-in tools that only read. `access: 'read-only'` limits the session to these. */
-/** A read-only session's tools. A subagent inherits its parent's tools, so its workers are read-only too. */
-const READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Agent"];
+/**
+ * A read-only session's tools. Bash runs in the sandbox of `readOnlySandbox`, which writes only in `/tmp`.
+ * A subagent inherits its parent's tools and sandbox, so its workers are read-only too.
+ */
+const READ_ONLY_TOOLS = ["Read", "Glob", "Grep", "Bash", "WebSearch", "WebFetch", "Agent"];
+const READ_ONLY_DENIAL = "This session is read-only, so it asks for nothing. Run only commands that read or check, one at a time, such as git log or the tests.";
 const FILE_TOOLS = new Set(["Read", "Edit", "Write", "NotebookEdit"]);
 /** Built-in tools that change a file, matched by a PreToolUse hook. */
 const FILE_CHANGE_TOOLS = "Edit|MultiEdit|Write|NotebookEdit";
@@ -182,7 +186,8 @@ export class ClaudeSession extends BaseSession {
     for (const appTool of tools?.tools ?? []) this.appTools.set(`mcp__${tools!.name}__${appTool.name}`, appTool);
     const readOnly = options.access === "read-only";
     const settingSources = options.settingSources ?? ["user", "project", "local"];
-    const hidden = setAgents(options.skills ?? []).map((name) => `Agent(${name})`);
+    const unsandboxed = readOnly && settingSources.includes("user") ? unsandboxedCommands(env) : [];
+    const hidden = [...setAgents(options.skills ?? []).map((name) => `Agent(${name})`), ...unsandboxed.map((pattern) => `Bash(${pattern})`)];
     this.query = query({
       prompt: this.input,
       options: {
@@ -196,8 +201,6 @@ export class ClaudeSession extends BaseSession {
         settingSources,
         strictMcpConfig: readOnly || !settingSources.includes("user"),
         permissionMode: claudePermissionMode(options.approval ?? "ask"),
-        // The Skill tool is not a built-in tool of the list; the skills option turns it on.
-        ...(readOnly && { tools: READ_ONLY_TOOLS, skills: "all" as const }),
         ...(tools && { mcpServers: { [tools.name]: this.toolServer(tools) } }),
         ...(options.instructions && {
           systemPrompt: { type: "preset", preset: "claude_code", append: options.instructions },
@@ -209,6 +212,8 @@ export class ClaudeSession extends BaseSession {
         },
         ...(options.resume ? { resume: options.resume } : { sessionId: this.id }),
         ...options.sdkOptions,
+        // Read-only is a limit, so it comes after the host's options. The Skill tool is not a built-in tool of the list; the skills option turns it on.
+        ...(readOnly && { tools: READ_ONLY_TOOLS, skills: "all" as const, sandbox: readOnlySandbox(options.cwd ?? process.cwd()) }),
         ...(tools &&
           options.sdkOptions?.mcpServers && {
             mcpServers: { ...options.sdkOptions.mcpServers, [tools.name]: this.toolServer(tools) },
@@ -443,6 +448,8 @@ export class ClaudeSession extends BaseSession {
 
   private readonly canUseTool: CanUseTool = async (toolName, input, { signal, suggestions, toolUseID }) => {
     if (this.appTools.has(toolName)) return { behavior: "allow", updatedInput: input };
+    // Claude Code asks before some commands in its sandbox too, such as a loop, and before a command that its settings run outside it.
+    if (this.options.access === "read-only") return { behavior: "deny", message: READ_ONLY_DENIAL };
     if (toolName === "AskUserQuestion") return this.askQuestions(input, signal, toolUseID);
     // A new approval mode can approve this request. Claude Code decides again when the agent retries it.
     const retry = new AbortController();
@@ -524,6 +531,34 @@ export class ClaudeSession extends BaseSession {
     }
     if (name === "Read" || name === "Glob" || name === "Grep") return undefined;
     return JSON.stringify(input, null, 2);
+  }
+}
+
+/**
+ * Commands of a read-only session run in Claude Code's sandbox and may not leave it. A setting of the user
+ * or the project, such as an `Edit(…)` allow rule or `sandbox.filesystem.allowWrite`, can let the sandbox
+ * write a folder; a denial wins over it. So the sandbox denies every folder of the root but `/tmp` (where
+ * Claude Code keeps its own temporary folder) and `/dev` (for `/dev/null`), and the working directory and
+ * the home folder by name. Where Claude Code has no sandbox, the session does not start.
+ */
+function readOnlySandbox(cwd: string): Options["sandbox"] {
+  const children = (folder: string) => (existsSync(folder) ? readdirSync(folder).map((name) => join(folder, name)) : []);
+  const open = new Set(["/tmp", "/dev", "/private", "/private/tmp"]);
+  const denyWrite = [cwd, homedir(), ...[...children("/"), ...children("/private")].filter((folder) => !open.has(folder))];
+  return { enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false, filesystem: { denyWrite } };
+}
+
+/**
+ * The commands that the user's Claude Code settings run outside the sandbox, `sandbox.excludedCommands`,
+ * as Bash rule patterns. Claude Code runs one without asking when an allow rule matches, so a read-only
+ * session denies them. It ignores the project's list once the sandbox may not be left.
+ */
+function unsandboxedCommands(env: Record<string, string>): string[] {
+  try {
+    const listed = JSON.parse(readFileSync(join(env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "settings.json"), "utf8"))?.sandbox?.excludedCommands;
+    return Array.isArray(listed) ? listed.filter((pattern): pattern is string => typeof pattern === "string") : [];
+  } catch {
+    return [];
   }
 }
 

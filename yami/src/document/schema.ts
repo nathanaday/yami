@@ -52,7 +52,7 @@ export const PROMISE: Schema = form({
 
 /** `AGENT.md`: the brief of a worker that runs in a fresh context. The body is the brief. */
 export const AGENT: Schema = form({
-  /** `read-only`: the agent changes no file, and gets only the tools that change nothing. */
+  /** `read-only`: the agent changes no file, runs only commands that write nothing, and gets only the tools that change nothing. */
   access: { type: "text", values: ACCESS, default: "read-only" },
 });
 

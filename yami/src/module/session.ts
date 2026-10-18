@@ -3,8 +3,10 @@ import type { Harness } from "../agent/types.js";
 import { basename, linksOf, linkTarget, readDocument, resolveLink, sectionText, type Document } from "../document/document.js";
 import { SESSION_STATES, type SessionState } from "../document/schema.js";
 import type { Properties } from "../document/vault.js";
+import { AGENT_RUN_LINE, isLiveRun, type AgentRun, type AgentRunStatus } from "./agent-run.js";
 import { linkedDocuments, type LinkedDocument } from "./links.js";
 import type { ActionResult, DocumentRef, Flow, SessionAction, YamiModule } from "./module.js";
+import { readProgress, type ProgressLine } from "./progress.js";
 import { isJudged } from "./review.js";
 import { KILL } from "./fresh-run.js";
 import { checkSession, runSession, sessionParts, type RunControl, type RunResult, type SessionCheck } from "./run.js";
@@ -64,6 +66,8 @@ export interface SessionDocument extends LinkedDocument {
   reason?: string;
   /** For a promise: `true` when it has no check, so the review judges it, and `false` when Yami checks it. */
   judged?: boolean;
+  /** The document's `description`: every form has one, and an article can. Undefined when the link finds no note. */
+  description?: string;
 }
 
 /** All of a session: what a page about one session shows. */
@@ -74,10 +78,12 @@ export interface SessionDetails extends SessionSummary {
   conversation: string | undefined;
   /** The conversation note of the last review, when one exists. */
   review: string | undefined;
+  /** The runs of agents that the session called with `yami_agent`, oldest first, as its Progress section records them. */
+  agentRuns: AgentRun[];
   /** The harness of the last run. */
   harness: string | undefined;
   /** The lines of the Progress section, oldest first, each with its time. */
-  progress: { time: string; text: string }[];
+  progress: ProgressLine[];
 }
 
 /** Something a person can do with a session now. */
@@ -105,7 +111,11 @@ export interface NewSession {
   name?: string;
   /** Refuse a name that is in use or that a file cannot take, instead of changing it. */
   exact?: boolean;
-  /** The text of the Request section: what the session must do. Without one the section stays empty, for a person to write. */
+  /**
+   * The text of the Request section: what the session must do. Without one the section stays empty, for a
+   * person to write. A line that starts with `## ` would start a section, so `create` refuses it: write it
+   * as plain text, or as `###`.
+   */
   request?: string;
   /** The module's session fields. */
   fields?: Properties;
@@ -216,25 +226,33 @@ export class Session {
     };
     const checked = await reasons("Deliverables", /^- \[[ x]\] (\[\[[^\]]+\]\]) — (.*)$/);
     const reviewed = await reasons("Review", /^- (?:followed|broken): (\[\[[^\]]+\]\]) — (.*)$/);
-    const judged = (path: string) => readDocument(this.yami.vault, path).then(isJudged, () => undefined);
     const documents: SessionDocument[] = [];
     for (const d of await linkedDocuments(this.yami.vault, summary.module.id, doc.properties)) {
-      if (d.path && d.kind === "promises") documents.push({ ...d, met: met(d.path), reason: checked.get(d.path), judged: await judged(d.path) });
-      else if (d.path && d.kind === "policies") documents.push({ ...d, followed: followed(d.path), reason: reviewed.get(d.path) });
-      else documents.push(d);
+      const linked = d.path ? await readDocument(this.yami.vault, d.path).catch(() => undefined) : undefined;
+      const description = typeof linked?.properties.description === "string" ? linked.properties.description : undefined;
+      if (d.path && d.kind === "promises") documents.push({ ...d, met: met(d.path), reason: checked.get(d.path), judged: linked && isJudged(linked), description });
+      else if (d.path && d.kind === "policies") documents.push({ ...d, followed: followed(d.path), reason: reviewed.get(d.path), description });
+      else documents.push(d.path ? { ...d, description } : d);
     }
     const target = linksOf(doc.properties.conversation)[0];
     const review = linksOf(doc.properties.review)[0];
-    const progress = sectionText(doc.body, "Progress")
-      .split("\n")
-      .map((line) => /^- (\d\d:\d\d) (.*)$/.exec(line))
-      .filter((match) => match !== null)
-      .map(([, time, text]) => ({ time: time!, text: text! }));
+    const progress = readProgress(doc.body);
+    // The last line of each run's note says what the run is now; a run that is live here is working.
+    const runs = new Map<string, AgentRun>();
+    for (const { text } of progress) {
+      const match = AGENT_RUN_LINE.exec(text);
+      const conversation = match && (await resolveLink(this.yami.vault, linkTarget(match[3]!), []));
+      if (!conversation) continue;
+      const state = match![2]!;
+      const status: AgentRunStatus = state === "started" ? (isLiveRun(this.yami, conversation) ? "working" : "stopped") : (state as AgentRunStatus);
+      runs.set(conversation, { agent: match![1]!, conversation, status });
+    }
     return {
       ...summary,
       documents,
       conversation: target ? await resolveLink(this.yami.vault, target, []) : undefined,
       review: review ? await resolveLink(this.yami.vault, review, []) : undefined,
+      agentRuns: [...runs.values()],
       harness: typeof doc.properties.harness === "string" ? doc.properties.harness : undefined,
       progress,
     };

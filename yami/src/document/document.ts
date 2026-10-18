@@ -53,12 +53,26 @@ export function writeDocument(vault: Vault, doc: Document): Promise<void> {
   return vault.write(doc.path, serializeDocument(vault, doc));
 }
 
-/** Reads a document, applies `change` to it, and writes it back. */
-export async function updateDocument(vault: Vault, path: string, change: (doc: Document) => void): Promise<Document> {
-  const doc = await readDocument(vault, path);
-  change(doc);
-  await writeDocument(vault, doc);
-  return doc;
+/** The last update of each document of a vault, which the next one waits for. */
+const updates = new WeakMap<Vault, Map<string, Promise<unknown>>>();
+
+/**
+ * Reads a document, applies `change` to it, and writes it back. The updates of one document run one after
+ * another, so two that run at the same time, such as the progress of two agents, do not lose one.
+ */
+export function updateDocument(vault: Vault, path: string, change: (doc: Document) => void): Promise<Document> {
+  let queue = updates.get(vault);
+  if (!queue) updates.set(vault, (queue = new Map()));
+  const update = (queue.get(path) ?? Promise.resolve()).then(async () => {
+    const doc = await readDocument(vault, path);
+    change(doc);
+    await writeDocument(vault, doc);
+    return doc;
+  });
+  const settled = update.catch(() => undefined);
+  queue.set(path, settled);
+  void settled.then(() => queue.get(path) === settled && queue.delete(path));
+  return update;
 }
 
 /** The file name without its folder and `.md`. */

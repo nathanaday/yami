@@ -47,8 +47,10 @@ export interface SessionOptions {
    */
   skills?: string[];
   /**
-   * `read-only`: the agent can read files and search, but it cannot change files or run commands
-   * that change them, and it never asks for approval. It can still change things through `tools`.
+   * `read-only`: the agent can read files, search, and run commands that only read or check, such as
+   * `git log` or a test suite. It cannot change files, a command that writes fails, and it never asks for
+   * approval. It can still change things through `tools`. Claude Code runs the commands in its sandbox,
+   * and Codex in its read-only sandbox.
    */
   access?: "edit" | "read-only";
   /**

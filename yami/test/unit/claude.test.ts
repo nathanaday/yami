@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -65,6 +65,64 @@ describe("claude adapter", () => {
     expect(result.error).toMatch(/^Yami could not read a message of Claude Code: TypeError: .+ \(at ClaudeSession\.finishTurn \(claude\.ts:\d+:\d+\)\)$/);
     expect(session.closed).toBe(true);
     expect(events).toContainEqual({ type: "closed", error: result.error });
+  });
+
+  it("asks the host for a permission in an edit session", async () => {
+    const asked: string[] = [];
+    session = await startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: [], onPermission: async (r) => (asked.push(r.tool), "allow") });
+    expect((await session.send(`permit Bash {"command":"touch x"}`)).text).toBe("permission: allow");
+    expect(asked).toEqual(["Bash"]);
+  });
+
+  it("runs a read-only session's commands in a sandbox that writes neither in the working directory nor in the home folder, and denies each request without asking", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "yami-read-only-"));
+    try {
+      const asked: string[] = [];
+      session = await startClaudeSession({
+        cwd,
+        clientName: "test",
+        executablePath: FAKE,
+        settingSources: [],
+        access: "read-only",
+        // The sandbox is the read-only limit, so options of the host do not lift it.
+        sdkOptions: { tools: ["Read", "Write"], sandbox: { enabled: false } },
+        onPermission: async (r) => (asked.push(r.tool), "allow"),
+      });
+      const { text } = await session.send("args");
+      expect(text).toContain("--tools=Read,Glob,Grep,Bash,WebSearch,WebFetch,Agent ");
+      const settings = JSON.parse(/--settings (\{.*\})(?= --|$)/.exec(text)?.[1] ?? "{}");
+      const { filesystem, ...sandbox } = settings.sandbox;
+      expect(sandbox).toEqual({ enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: false });
+      // Every folder of the root is denied, so no setting of the user or the project lets a command write there: /tmp and /dev stay open.
+      const root = readdirSync("/").map((name) => `/${name}`);
+      expect(filesystem.denyWrite.slice(0, 2)).toEqual([cwd, homedir()]);
+      expect(filesystem.denyWrite).toEqual(expect.arrayContaining(root.filter((folder) => !["/tmp", "/dev", "/private"].includes(folder))));
+      expect(filesystem.denyWrite).not.toContain("/tmp");
+      expect(filesystem.denyWrite).not.toContain("/private/tmp");
+      expect(filesystem.denyWrite).not.toContain("/dev");
+      expect((await session.send(`permit Bash {"command":"for f in *; do wc -l $f; done"}`)).text).toBe(
+        "permission: deny: This session is read-only, so it asks for nothing. Run only commands that read or check, one at a time, such as git log or the tests.",
+      );
+      expect(asked).toEqual([]);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("denies a read-only session each command that the user's settings run outside the sandbox", async () => {
+    const config = mkdtempSync(join(tmpdir(), "yami-claude-config-"));
+    try {
+      writeFileSync(join(config, "settings.json"), JSON.stringify({ sandbox: { excludedCommands: ["docker *", "make:*"] } }));
+      const open = (access: "edit" | "read-only") =>
+        startClaudeSession({ cwd: process.cwd(), clientName: "test", executablePath: FAKE, settingSources: ["user"], env: { CLAUDE_CONFIG_DIR: config }, access });
+      session = await open("read-only");
+      expect((await session.send("args")).text).toContain("--disallowedTools=Bash(docker *),Bash(make:*) ");
+      await session.close();
+      session = await open("edit");
+      expect((await session.send("args")).text).not.toContain("--disallowedTools");
+    } finally {
+      rmSync(config, { recursive: true, force: true });
+    }
   });
 
   it("lends a skill set's skills only: it denies each subagent that Claude Code would load from the set's agents folder", async () => {

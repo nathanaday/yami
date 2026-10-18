@@ -61,6 +61,7 @@ describe("the review step", () => {
     const [prompt] = reviewer.prompts;
     expect(prompt).toMatch(/^You review the Yami session "all", a "greet" session of the module "Hello world"\./);
     expect(prompt).toContain("\nThe session document is judged/all.md. The conversation note conversations/judged all.md records the run");
+    expect(prompt).toContain("You can run commands that only read or check, such as git log or the tests.");
     expect(prompt).toContain("## Policies\n\n### always-say-hello\n\nPath: internal/judged/policies/always-say-hello/POLICY.md");
     expect(prompt).toContain("## The worker's last message\n\nI wrote greetings/all.md.");
     expect(prompt).not.toContain("## Promises");

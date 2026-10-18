@@ -1,16 +1,22 @@
 # Creator notes · module-forms
 
 ## Round 1 (0.6.0)
-- Built R1 to R13 in one pass. Forms in `FORMS` (schema.ts). One name resolver: `resolveForm` and `parseName` in `links.ts`. Shared fresh run: `freshRun` in `fresh-run.ts`, used by the review and by `runAgent` (`agent-run.ts`). `yami.tools(caller)` binds `yami_agent` to its caller. Yami gives each agent its own set, and each worker the set for its session.
-- Stop and kill go through one `RunControl.signal`. Kill aborts with the reason `KILL`, so conversations close and nothing is interrupted, because a Codex interrupt starts a new server. Removed `RunControl.conversation`.
-- A code module installs no FLOW.md. I proposed this under Policy. Watch whether the overseer or the consumer reads R1 ("installs the same layout") as a demand for a FLOW.md.
-- Claude Code loads `agents/**/*.md` of a plugin as subagents (I probed 2.1.302). The adapter denies them with `disallowedTools`. A live test covers it.
-- Renamed the `property` check's `name` key to `property`, because it collides with the form's `name`.
-- Fixed a race: two notes that open at the same time got the same path (FileConversations, Obsidian manager).
-- Live tests: the agent tool passed on Claude and on Codex. The Claude "no subagent" test passed. I did not run the full live suite.
-- Rejected ideas: a bare name in a conversation does not fall back to a unique match in another module (it is an error that lists full names). A read-only caller refuses an edit agent; it does not downgrade the agent to read-only.
+- Built R1 to R13. Forms in `FORMS` (schema.ts). One name resolver: `resolveForm`/`parseName` (links.ts). Shared fresh run: `freshRun` (fresh-run.ts), used by the review and `runAgent` (agent-run.ts). `yami.tools(caller)` binds `yami_agent` to its caller.
+- Stop and kill share one `RunControl.signal`; kill aborts with `KILL`.
+- A code module installs no FLOW.md (now in design.md).
+- Claude adapter denies the subagents of a skill set's `agents/` (`setAgents`).
+
+## Round 2 (0.7.0)
+- F1.1 (ruling): read-only Claude sessions get Bash in Claude Code's sandbox: `allowUnsandboxedCommands: false`, `failIfUnavailable: true`, denyWrite = cwd, home, and every root folder except /tmp and /dev (a deny beats an allow from any setting). Denying "/" breaks every command: Claude writes /tmp/claude-<uid>/cwd-* after each one. A read-only session denies every permission request itself. The user's `sandbox.excludedCommands` become `Bash(...)` deny rules (I proved they escape with an allow rule). Codex read-only writes nowhere, not even TMPDIR. Live test on both passed; the full live suite passed (36).
+- F1.2: agent runs go to the session's Progress section (start line + end line). `details().agentRuns` parses them; "started" + not live = stopped. I did not add a core field, because Entities 4 lists the core fields. `updateDocument` now runs the updates of one document one after another (per vault+path), because parallel agents raced.
+- F1.3: note `<module> <session> <agent>`; a conversation keeps `<module> <agent>`.
+- F1.4: `flow.title`; `SessionDocument.description`.
+- F1.5: refuse a `## ` line in a request (no escaping).
+- New file `src/module/progress.ts` (addProgress, readProgress, oneLine).
+- Probes need a scratch folder inside yami/ (the guard blocks writes elsewhere): I used node_modules/.probe and deleted it. The guard also blocks the text "git log" in a Bash command.
 
 ## Watch next round
-- Consumer ergonomics of `this.policy({ name, description, body })` against markdown imports.
-- Whether the name aliases `<module>:<name>` read well in session documents (Yami writes full-path links).
-- Out of scope, and to decline: the ingest workers as agents, agents that call agents, and checks on an agent's output.
+- Whether the consumer's threads tools write the session document with `updateDocument` (they should, to not race the agent lines).
+- Policy proposals 1–4 in round-02/response.md.
+- Residual: Claude read-only commands may write under /tmp. This is documented, and it is the one difference from Codex.
+- Out of scope, to decline: ingest workers as agents, agents that call agents, checks on an agent's output.

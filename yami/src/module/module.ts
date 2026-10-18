@@ -140,7 +140,7 @@ export interface FlowOptions {
   fields?: Properties;
   /** Agent turns in one run. Default 3. */
   maxIterations?: number;
-  /** `read-only`: the agent changes no file except through the tools. Default `edit`. */
+  /** `read-only`: the agent changes no file except through the tools, and runs only commands that write nothing. Default `edit`. */
   access?: "edit" | "read-only";
   /** Text added to the first prompt of a run, after the module's own instructions. */
   instructions?: string;
@@ -190,6 +190,12 @@ export class Flow {
   /** What a button or a command that creates a session from the flow says: `New code review` for the flow `code-review`. */
   get label(): string {
     return `New ${this.name.replaceAll("-", " ")}`;
+  }
+
+  /** What a view calls the flow, and how a session's default name begins: `Code review` for the flow `code-review`. */
+  get title(): string {
+    const words = this.name.replaceAll("-", " ");
+    return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
   }
 
   /** The documents that a new session links, by the session field that holds them. */

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 · library-loop module-forms round 2
+
+A read-only agent on Claude Code now runs commands that only read or check, as on Codex, so a validator can run `git log` and the tests. A session's details list the runs of its agents, and each run's note names the session.
+
+### Breaking
+- **A read-only Claude Code session runs Bash in Claude Code's sandbox.** It runs commands that only read or check; a command writes only in `/tmp`, where Claude Code keeps its own temporary folder, and in no other folder, also when a setting of the user or the project would let the sandbox write there. Where the sandbox cannot start (Linux without `bubblewrap`, or a platform with no sandbox), a read-only session does not start. Migrate: on Linux, install `bubblewrap`. Remove any text in a brief that says a read-only agent cannot run commands.
+- **A read-only Claude Code session asks for nothing.** It denies each permission request itself, and no longer calls `onPermission`, as a Codex read-only session never asks. A command that the user's settings run outside the sandbox (`sandbox.excludedCommands` in `~/.claude/settings.json`) is denied. Migrate: a host that answered a read-only session's requests needs no handler for it.
+- **`sdkOptions` cannot lift read-only.** For a read-only session, the adapter's `tools` and `sandbox` now come after `sdkOptions`. Migrate: a host that widened a read-only session with `sdkOptions.tools` gives the session `access: "edit"`.
+- **An agent run's note names the session.** For a session, it is `<module> <session> <agent>`, not `<module> <agent>`; a second run gets ` 2`. For a conversation it stays `<module> <agent>`. Migrate: `conversations/threads validator.md` → `conversations/threads Divide validator.md`, or read `session.details().agentRuns`.
+- **The Progress section records each agent run** with a line at its start and at its end: `agent notes:checker started: [[conversations/notes Weekly checker|notes Weekly checker]]`, then `done`, `failed: … — <reason>`, or `stopped`. Migrate: a test that compares every Progress line keeps the loop's lines: `progress.filter((p) => !p.text.startsWith("agent "))`.
+- **`flow.create` refuses a request with a line that starts with `## `,** which broke the session's sections: two `## Deliverables`, and the loop wrote into the wrong one. It throws `The request holds the heading line "## Deliverables", which would start a section of the session document. Write it as plain text, or as a ### heading.` Migrate: demote such a line to `###`, or let a tool return the error to the agent.
+
+### Added
+- `session.details().agentRuns`: each run of an agent that the session called, oldest first, as `{ agent, conversation, status }`, with `status` `working` while it is live in this Yami, then `done`, `failed`, or `stopped`. A run that recorded its start and no end, and is not live, reads as `stopped`. `AgentRun`, `AgentRunStatus`, and `ProgressLine` from `yami`.
+- `flow.title`: what a view calls the flow, by the rule of `label` with a capital: the flow `code-review` gives `Code review`. A session's default name begins with it.
+- `SessionDocument.description`: each linked document's `description`, from `session.details().documents`.
+
+### Changed
+- `updateDocument` runs the updates of one document one after another, so two at the same time do not lose one. The loop, the review, and the agent runs write the session document through it.
+- The first message of a read-only agent, and the review's prompt, say that it can run commands that only read or check, such as `git log` or the tests.
+- The README's examples use a generic module, `notes`, in place of the librarian.
+
 ## 0.6.0 · library-loop module-forms round 1
 
 Every document of a module now has the form of a skill, a kind of session is a flow, and an agent is a worker that any session or conversation runs in a fresh context with the tool `yami_agent`. Claude Code is the favored and better-supported harness; Codex runs agents through the same tool. Yami reads no old form, and migrates no vault: move the documents as the items below say.

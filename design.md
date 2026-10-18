@@ -232,14 +232,14 @@ The session ends `done` when every check passes and the review finds every polic
 
 ## Agents
 
-1. **An agent is a fresh context.** A session or a conversation calls an agent through one Yami tool, with the agent's name and a task. Yami starts a new conversation on the caller's harness, with the agent's brief and the task, and returns the agent's final message and its conversation note. An agent returns its message only; the caller decides what to do with it.
+1. **An agent is a fresh context.** A session or a conversation calls an agent through one Yami tool, with the agent's name and a task. Yami starts a new conversation on the caller's harness, with the agent's brief and the task, and returns the agent's final message and its conversation note. A run for a session adds a line to its Progress section at its start and at its end, so the session document lists its agent runs, and `session.details().agentRuns` reads them. An agent returns its message only; the caller decides what to do with it.
 2. **One mechanism on both harnesses.** Yami runs agents in the host, not as harness subagents, so a module's agents work the same on Claude Code and Codex. Claude Code is the favored and better-supported harness. The `yami/agent` README holds the differences.
 3. **Access is the agent's.** A `read-only` agent gets only the tools that declare `readOnly`. An agent does not get the agent tool, so agents do not nest. A stop of the caller stops its agents.
 4. **The review is an agent run.** The review and the agent tool share one implementation of a fresh-context run.
 
 ## Approval and permissions
 
-1. `approval` sets what the agent does without asking: `ask`, `accept-edits`, `plan`, `auto`, or `sandbox`. Everything else is a permission request. `access: read-only` is a hard limit: no changes, no commands that change files, and no requests. A read-only agent still runs the commands that only read or check, such as `git log` and a test suite, so it can see evidence; each harness enforces the limit with its own sandbox.
+1. `approval` sets what the agent does without asking: `ask`, `accept-edits`, `plan`, `auto`, or `sandbox`. Everything else is a permission request. `access: read-only` is a hard limit: no changes, no commands that change files, and no requests. A read-only agent still runs the commands that only read or check, such as `git log` and a test suite, so it can see evidence; each harness enforces the limit with its own sandbox. Claude Code runs the commands of a read-only session in its sandbox, which may not be left and writes only in `/tmp`, where Claude Code keeps its temporary folder; where the sandbox cannot start, the session does not start. Codex's read-only sandbox writes nowhere. A read-only session denies every permission request itself.
 2. Each harness maps the setting in its own way, and the differences are in the `yami/agent` README. Code outside `yami/agent` does not depend on them.
 3. A session without a permission handler denies every request. The host decides whether to prompt, and how.
 4. Approvals go to the user, never to an automatic reviewer that a harness configuration selects. The one exception is a Codex command that only reads files of the session's skill sets, which the adapter allows, because loading a skill is part of using it (see Layers, item 4). An `allow-session` decision applies to the session only, never to the user's settings files.
@@ -257,6 +257,7 @@ These facts cost days to learn. Keep them true, and read the `yami/agent` README
 5. Both harnesses ignore an interrupt that arrives before the turn starts on their side. The adapters wait for the start, then interrupt.
 6. The Claude Agent SDK expects Node's timers, `AbortController`, and `import.meta`, and the MCP SDK compiles schemas with `new Function`. In Obsidian's renderer the globals are Chromium's, and Obsidian's review rejects generated code. `pluginBuild` in `yami/esbuild` fixes all four, for the SDKs' own files only.
 7. Claude Code loads each `.md` under a plugin's `agents/` folder as a subagent, `agents/<name>/AGENT.md` too. A module's skill set is a plugin, so the Claude adapter denies each of those subagents with `Agent(<name>)` rules. A skill set lends its skills only; agents run through the agent tool.
+8. Claude Code runs a command that the user's `sandbox.excludedCommands` lists outside the sandbox, and without asking when an allow rule matches. An `Edit(…)` allow rule or `sandbox.filesystem.allowWrite` also lets the sandbox write that folder. So under `read-only` the adapter denies the listed commands, and denies writes to every folder of the root but `/tmp` and `/dev`. The first sandboxed command creates an empty `.claude/.cc-writes` folder in the vault, which Obsidian hides.
 
 ## Testing
 

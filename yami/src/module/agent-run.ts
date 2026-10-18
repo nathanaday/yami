@@ -1,10 +1,11 @@
 import type { Agent } from "../agent/agent.js";
-import type { ApprovalSetting, ToolSet } from "../agent/types.js";
-import { parseDocument, PropertiesError } from "../document/document.js";
+import { errorText, type ApprovalSetting, type ToolSet } from "../agent/types.js";
+import { basename, link, parseDocument, PropertiesError, updateDocument } from "../document/document.js";
 import { AGENT, FORMS, validate, withDefaults } from "../document/schema.js";
 import { freshRun } from "./fresh-run.js";
 import { nameOf, parseName } from "./links.js";
 import { formPath, INTERNAL } from "./module.js";
+import { addProgress } from "./progress.js";
 import type { Yami } from "./yami.js";
 
 /** The name of the tool that runs an agent. */
@@ -33,6 +34,33 @@ export interface AgentReply {
   /** The agent's final message. */
   message: string;
 }
+
+/**
+ * What a run of an agent for a session is now: `working` while it is live in this Yami, then `done`,
+ * `failed`, or `stopped`. A run that recorded its start and no end, and is not live, reads as `stopped`:
+ * it ended without recording its end, for example when the app quit.
+ */
+export type AgentRunStatus = "working" | "done" | "failed" | "stopped";
+
+/** One run of an agent that a session called, as `session.details()` lists it. */
+export interface AgentRun {
+  /** The agent, as `<module>:<name>`. */
+  agent: string;
+  /** The conversation note that records the run. */
+  conversation: string;
+  status: AgentRunStatus;
+}
+
+/** The conversation notes of the runs that are live in each Yami. */
+const live = new WeakMap<Yami, Set<string>>();
+
+/** Whether the run of an agent that a conversation note records is live in this Yami. */
+export function isLiveRun(yami: Yami, note: string): boolean {
+  return live.get(yami)?.has(note) ?? false;
+}
+
+/** A Progress line of a session that records a run of an agent: `agent <module>:<name> <state>: <note link>`, and ` — <reason>` for a failure. */
+export const AGENT_RUN_LINE = /^agent (\S+) (started|done|failed|stopped): (\[\[[^\]]+\]\])/;
 
 /** An error of the agent tool, for the caller to read and act on. */
 export class AgentError extends Error {
@@ -84,22 +112,51 @@ export async function runAgent(yami: Yami, caller: AgentCaller, name: string, ta
   const full = `${named!.module}:${named!.name}`;
   const prompt = [
     `You are the agent "${full}" of Yami: ${String(properties.description)}`,
-    `A caller gave you the task below. You work in a fresh context: you know only this message and what you read. The working directory is the vault, and paths are relative to it.${access === "read-only" ? " You are read-only: change no file." : ""} When you are done, end your turn. Your last message is your answer: the caller gets it, and nothing else.`,
+    `A caller gave you the task below. You work in a fresh context: you know only this message and what you read. The working directory is the vault, and paths are relative to it.${access === "read-only" ? " You are read-only: change no file. You can run commands that only read or check, such as git log or the tests." : ""} When you are done, end your turn. Your last message is your answer: the caller gets it, and nothing else.`,
     `## Brief\n\n${doc.body.trim()}`,
     `## Task\n\n${task.trim()}`,
   ].join("\n\n");
   const own = { ...tools, tools: tools.tools.filter((tool) => tool.name !== AGENT_TOOL && (access === "edit" || tool.readOnly)) };
-  const { note, result } = await freshRun(yami, {
-    agent,
-    name: `${named!.module} ${named!.name}`,
-    session: caller.session,
-    approval: caller.approval ?? agent.preferences.approval,
-    access,
-    tools: own,
-    prompt,
-    signal,
-  });
-  if (result.status === "interrupted") throw new AgentError(`The agent ${full} was stopped. Its conversation note: ${note}.`);
-  if (result.status === "failed") throw new AgentError(`The agent ${full} failed: ${result.error ?? "no details"}. Its conversation note: ${note}.`);
-  return { agent: full, conversation: note, message: result.text };
+  const { session } = caller;
+  // A session's progress records each run, so its document lists them while they work and after. A
+  // document that cannot take the line, such as one a person removed, does not cost the caller its answer.
+  const progress = async (state: string, note: string, reason?: string) => {
+    if (session) await updateDocument(yami.vault, session, (doc) => addProgress(doc, `agent ${full} ${state}: ${link(note)}${reason ? ` — ${reason}` : ""}`)).catch(() => undefined);
+  };
+  const runs = live.get(yami) ?? new Set<string>();
+  live.set(yami, runs);
+  let opened: string | undefined;
+  try {
+    const { note, result } = await freshRun(yami, {
+      agent,
+      name: session ? `${caller.module ?? named!.module} ${basename(session)} ${nameOf(path, caller.module)}` : `${named!.module} ${named!.name}`,
+      session,
+      approval: caller.approval ?? agent.preferences.approval,
+      access,
+      tools: own,
+      prompt,
+      signal,
+      opened: async (conversation) => {
+        opened = conversation.path;
+        runs.add(opened);
+        await progress("started", opened);
+      },
+    });
+    if (result.status === "interrupted") {
+      await progress("stopped", note);
+      throw new AgentError(`The agent ${full} was stopped. Its conversation note: ${note}.`);
+    }
+    if (result.status === "failed") {
+      await progress("failed", note, result.error ?? "no details");
+      throw new AgentError(`The agent ${full} failed: ${result.error ?? "no details"}. Its conversation note: ${note}.`);
+    }
+    await progress("done", note);
+    return { agent: full, conversation: note, message: result.text };
+  } catch (error) {
+    if (opened && !(error instanceof AgentError)) await progress("failed", opened, errorText(error));
+    throw error;
+  } finally {
+    // The run is live until its end is recorded, so a view never reads a run as stopped in between.
+    if (opened) runs.delete(opened);
+  }
 }

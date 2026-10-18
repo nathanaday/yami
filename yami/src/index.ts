@@ -29,7 +29,8 @@ export {
   type PlainAction,
   type SessionAction,
 } from "./module/module.js";
-export { AGENT_TOOL, type AgentCaller, type AgentReply } from "./module/agent-run.js";
+export { AGENT_TOOL, type AgentCaller, type AgentReply, type AgentRun, type AgentRunStatus } from "./module/agent-run.js";
+export type { ProgressLine } from "./module/progress.js";
 export {
   Session,
   STATUS_LABELS,

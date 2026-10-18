@@ -55,7 +55,7 @@ describe("the agent tool", () => {
 
     const [worker, child] = agent.started;
     expect(agent.started).toHaveLength(2);
-    expect(reply(results[0]!)).toEqual({ agent: "team:reader", conversation: "conversations/team reader.md", message: "The note says hello." });
+    expect(reply(results[0]!)).toEqual({ agent: "team:reader", conversation: "conversations/team read reader.md", message: "The note says hello." });
     expect(worker!.prompts[0]).toContain(
       "## Agents\n\nThe agents of this session. Each works in a fresh context, with its own brief, and returns its final message. To run one, call the tool `yami_agent` with its name and a task that holds everything it needs. Several can run at the same time.\n\n- `reader`: Reads the greeting and reports it. It is read-only.\n- `writer`: Writes the greeting note. It can edit files.",
     );
@@ -67,9 +67,9 @@ describe("the agent tool", () => {
     expect(names(child!)).toEqual(["yami_check", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks"]);
     const [prompt] = child!.prompts;
     expect(prompt).toMatch(/^You are the agent "team:reader" of Yami: Reads the greeting and reports it\.\n\nA caller gave you the task below\. You work in a fresh context/);
-    expect(prompt).toContain("You are read-only: change no file.");
+    expect(prompt).toContain("You are read-only: change no file. You can run commands that only read or check, such as git log or the tests.");
     expect(prompt).toContain("## Brief\n\nRead the note that the task names, and report what it says.\n\n## Task\n\nReport what greetings/read.md says.");
-    const note = await readDocument(vault, "conversations/team reader.md");
+    const note = await readDocument(vault, "conversations/team read reader.md");
     expect(note.properties).toMatchObject({ type: "conversation", agent: "claude", access: "read-only", module: "[[team/read|read]]" });
     expect(note.body).toContain("The note says hello.");
   });
@@ -119,7 +119,7 @@ describe("the agent tool", () => {
       meet("two"),
     );
     expect(await session.start()).toMatchObject({ state: "done" });
-    expect(replies.map((r) => r.conversation).sort()).toEqual(["conversations/team reader 2.md", "conversations/team reader.md"]);
+    expect(replies.map((r) => r.conversation).sort()).toEqual(["conversations/team both reader 2.md", "conversations/team both reader.md"]);
     expect(replies.map((r) => r.message).sort()).toEqual(["one", "two"]);
   });
 
@@ -143,12 +143,47 @@ describe("the agent tool", () => {
       await begun;
       await session[end]();
       expect(await run).toMatchObject({ state: "stopped" });
-      expect(await answer).toEqual({ isError: true, text: `The agent team:reader was stopped. Its conversation note: conversations/team reader.md.` });
+      expect(await answer).toEqual({ isError: true, text: `The agent team:reader was stopped. Its conversation note: conversations/team ${end} reader.md.` });
+      expect((await session.details()).agentRuns).toEqual([{ agent: "team:reader", conversation: `conversations/team ${end} reader.md`, status: "stopped" }]);
       const child = agent.started[1]!;
       expect(child.closed).toBe(true);
       await t!.dispose();
       t = undefined;
     }
+  });
+
+  it("records each run of a session in its Progress section, and lists the runs in its details with their agent, note, and status", async () => {
+    const { session, agent, vault } = await fresh("runs");
+    const during: unknown[] = [];
+    agent.queue(
+      async (_prompt, worker) => {
+        reply(await call(worker, "reader", "First."));
+        await call(worker, "reader", "Second.");
+        await greet("runs");
+      },
+      () => ({ text: "One." }),
+      async () => {
+        during.push((await session.details()).agentRuns);
+        return { status: "failed", error: "boom" };
+      },
+    );
+    expect(await session.start()).toMatchObject({ state: "done" });
+    const first = { agent: "team:reader", conversation: "conversations/team runs reader.md" };
+    const second = { agent: "team:reader", conversation: "conversations/team runs reader 2.md" };
+    expect(during).toEqual([[{ ...first, status: "done" }, { ...second, status: "working" }]]);
+    const details = await session.details();
+    expect(details.agentRuns).toEqual([{ ...first, status: "done" }, { ...second, status: "failed" }]);
+    expect(details.progress.map((p) => p.text)).toEqual([
+      "agent team:reader started: [[conversations/team runs reader|team runs reader]]",
+      "agent team:reader done: [[conversations/team runs reader|team runs reader]]",
+      "agent team:reader started: [[conversations/team runs reader 2|team runs reader 2]]",
+      "agent team:reader failed: [[conversations/team runs reader 2|team runs reader 2]] — boom",
+      "iteration 1: 1 met, 0 unmet",
+    ]);
+
+    // A run that started and recorded no end, for example when the app quit, reads as stopped.
+    await vault.write(session.path, (await vault.read(session.path)).replace(/\n- \d\d:\d\d agent team:reader failed: .*\n/, "\n"));
+    expect((await session.details()).agentRuns).toEqual([{ ...first, status: "done" }, { ...second, status: "stopped" }]);
   });
 
   it("returns the agents the caller can name for a name that finds none", async () => {
@@ -179,7 +214,7 @@ describe("the agent tool", () => {
       () => ({ text: "Helped." }),
     );
     expect(await session.start()).toMatchObject({ state: "done" });
-    expect(reply(results[0]!)).toMatchObject({ agent: "other:helper", conversation: "conversations/other helper.md", message: "Helped." });
+    expect(reply(results[0]!)).toMatchObject({ agent: "other:helper", conversation: "conversations/team across other helper.md", message: "Helped." });
 
     // A conversation's agent has the tools that the Yami gave it.
     const conversation = await agent.startSession();
@@ -191,7 +226,7 @@ describe("the agent tool", () => {
     );
     await conversation.send("Ask the reader.");
     expect(results[1]).toEqual({ isError: true, text: 'No agent is named "helper". A conversation has no module, so name an agent as <module>:<name>. The agents: other:helper, team:reader, team:writer.' });
-    expect(reply(results[2]!)).toMatchObject({ agent: "team:reader", message: "Read." });
+    expect(reply(results[2]!)).toMatchObject({ agent: "team:reader", conversation: "conversations/team reader.md", message: "Read." });
     const note = await readDocument(t!.vault, reply(results[2]!).conversation);
     expect(note.properties.module).toBeUndefined();
   });
@@ -210,7 +245,7 @@ describe("the agent tool", () => {
     expect(results).toEqual([
       { isError: true, text: "The agent writer edits files, and its caller is read-only. Call a read-only agent." },
       { isError: true, text: "The agent broken cannot run: in internal/team/agents/broken/AGENT.md, access must be one of edit, read-only." },
-      { isError: true, text: "The agent team:reader failed: boom. Its conversation note: conversations/team reader.md." },
+      { isError: true, text: "The agent team:reader failed: boom. Its conversation note: conversations/team limits reader.md." },
     ]);
   });
 });
