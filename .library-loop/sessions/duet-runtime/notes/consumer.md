@@ -55,3 +55,7 @@ F3.1 closed. Only the tests changed: every conversation test scopes to `.workspa
 - The guard blocks Bash in `.library-loop/sessions/...` (also `cd` there) and any read of `../yami/yami`. Use Read.
 
 Next round: F4.1/F4.2 answers; move the question and caret selectors to the documented names.
+
+## Round 5 (library 0.14.0, last round)
+
+F4.1, F4.2 closed. Only the Obsidian test changed: caret by `.yami-caret-name`, `.yami-fresh` scoped to the active leaf, the question form by the new table (`:not([hidden])`, label `:text-is`, progress `:text-is("2 of 2")`, `input.yami-question-other`, `data-action="back"`). test:obsidian 22/22 in 2 of 2 runs. `plugin/src` 1,792 lines. docs/design.md took the API-guarantees sentence. Open: F5.1 docs nit (the `asks you` heading text and Back keeping the answer are not stated). Verdict done.
