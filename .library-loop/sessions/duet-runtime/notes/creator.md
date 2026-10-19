@@ -54,3 +54,14 @@ Decided (F3.1 accepted, per the ruling):
 Watch next round:
 - The consumer should move to the documented selectors and test Send disabled with no agents. A row that is wrong in real Obsidian is a bug in the table.
 - Retired agents still never prune.
+
+## Round 5 (0.14.0, last round)
+Decided (F4.1 and F4.2 accepted, per the ruling):
+- F4.1: README tables "The agent's questions" (after the message box) and "The agent's presence" (Shared documents). Added `data-action="back|skip"` on the question form's buttons; Next/Answer stays `button[type="submit"]`. The PermissionPrompts dialog stays internal. Kept `is-near-top`, `is-near-right`, `has-status`, `.yami-presence` internal.
+- Tests: `test/unit/obsidian/dom.ts` (`installDom`, shared by composer and presence tests). `presence.test.ts` runs a real EditorView over happy-dom with stubbed rects (no layout in happy-dom; `Window` must be a global for CodeMirror's measure).
+- F4.2: README `start` bullet lists the guarantees; doc comments in manager.ts. Tests in `manager.test.ts` "the guarantees of start, status, and onTurnEnd".
+- Known wart, documented, not fixed: a `title` in the placeholder form `New conversation <YYYY-MM-DD HHmm>` is renamed by its first message (`isUnnamed` checks the name only). No second program wants such a title.
+
+Open after the session:
+- Retired agents still never prune.
+- Policy items for the user: the Duet design.md sentence (F4.2), and the earlier showcase items.

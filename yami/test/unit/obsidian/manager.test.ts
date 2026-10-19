@@ -327,37 +327,6 @@ describe("ConversationManager", () => {
     expect(manager.status("conversations/Missing.md")).toBe("none");
   });
 
-  it("shows a queued message as working when listeners hear of the end", async () => {
-    const { file } = await start({ message: "First", open: false });
-    await manager.controller(file)!.send("Second");
-    const seen: string[] = [];
-    manager.onTurnEnd(file.path, () => seen.push(manager.status(file.path)));
-    session.endTurn();
-    await flush();
-    expect(seen).toEqual(["working"]);
-    expect(session.sent.at(-1)).toBe("Second");
-  });
-
-  it("follows a renamed note, isolates a failing listener, and stops calling after unsubscribe", async () => {
-    const { file } = await start({ message: "Hello", title: "Named", open: false });
-    const turns: TurnEnd[] = [];
-    manager.onTurnEnd(file.path, () => {
-      throw new Error("listener bug");
-    });
-    const stop = manager.onTurnEnd(file.path, (turn) => turns.push(turn));
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    await fake.app.fileManager.renameFile(file, "conversations/Renamed.md");
-    session.endTurn("interrupted");
-    await flush();
-    expect(turns).toEqual([{ path: "conversations/Renamed.md", status: "interrupted", text: "Done." }]);
-    expect(error).toHaveBeenCalledOnce();
-    error.mockRestore();
-    stop();
-    session.endTurn();
-    await flush();
-    expect(turns).toHaveLength(1);
-  });
-
   it("ends the turn as failed when the agent cannot start", async () => {
     agents[0] = { ...agents[0]!, agent: new FakeAgent("claude", () => Promise.reject(new Error("claude not found"))) };
     const turns: TurnEnd[] = [];
@@ -389,6 +358,78 @@ describe("ConversationManager", () => {
     await flush();
     expect(claude.started).toHaveLength(2);
     expect(claude.started.at(-1)?.tools).toBeUndefined();
+  });
+
+  // The guarantees that the README gives under Conversation notes. Another plugin depends on each one.
+  describe("the guarantees of start, status, and onTurnEnd", () => {
+    it("gives the note its final path when start resolves, so no message renames it", async () => {
+      const named = await manager.start({ message: "Plan the week", open: false });
+      const titled = await manager.start({ message: "Hello", title: "Weekly plan", open: false });
+      const paths = [named.path, titled.path];
+      expect(paths[0]).toMatch(/^conversations\/\d{4}-\d{2}-\d{2} Plan the week\.md$/);
+      expect(paths[1]).toBe("conversations/Weekly plan.md");
+      await flush();
+      session.endTurn();
+      await flush();
+      void manager.controller(named)!.send("And the next one");
+      await flush();
+      expect(session.sent.at(-1)).toMatch(/^And the next one/);
+      session.endTurn();
+      await flush();
+      expect([named.path, titled.path]).toEqual(paths);
+      expect(fake.app.fileManager.renameFile).not.toHaveBeenCalled();
+    });
+
+    it("is working when start resolves, before the agent has started", async () => {
+      const file = await manager.start({ message: "Hello", open: false });
+      expect(manager.status(file.path)).toBe("working");
+      await flush();
+      expect(manager.status(file.path)).toBe("working");
+    });
+
+    it("starts the turn of a queued message before the listeners hear of the end, so they see working", async () => {
+      const { file } = await start({ message: "First", open: false });
+      await manager.controller(file)!.send("Second");
+      const seen: string[] = [];
+      manager.onTurnEnd(file.path, () => seen.push(manager.status(file.path)));
+      session.endTurn();
+      await flush();
+      expect(seen).toEqual(["working"]);
+      expect(session.sent.at(-1)).toBe("Second");
+    });
+
+    it("follows a renamed note, and stops calling after unsubscribe", async () => {
+      const { file } = await start({ message: "Hello", title: "Named", open: false });
+      const turns: TurnEnd[] = [];
+      const stop = manager.onTurnEnd(file.path, (turn) => turns.push(turn));
+      await fake.app.fileManager.renameFile(file, "conversations/Renamed.md");
+      session.endTurn("interrupted");
+      await flush();
+      expect(turns).toEqual([{ path: "conversations/Renamed.md", status: "interrupted", text: "Done." }]);
+      stop();
+      session.endTurn();
+      await flush();
+      expect(turns).toHaveLength(1);
+    });
+
+    it("logs an error of a listener, and the other listeners and the next turn go on", async () => {
+      const { file } = await start({ message: "First", open: false });
+      await manager.controller(file)!.send("Second");
+      const failure = new Error("listener bug");
+      manager.onTurnEnd(file.path, () => {
+        throw failure;
+      });
+      const turns: TurnEnd[] = [];
+      manager.onTurnEnd(file.path, (turn) => turns.push(turn));
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      session.endTurn();
+      await flush();
+      expect(error).toHaveBeenCalledWith("Yami: a turn-end listener failed", failure);
+      error.mockRestore();
+      expect(turns).toHaveLength(1);
+      expect(session.sent.at(-1)).toBe("Second");
+      expect(manager.status(file.path)).toBe("working");
+    });
   });
 
   describe("a turn that a run waits for", () => {

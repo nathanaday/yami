@@ -135,7 +135,14 @@ export class ConversationManager {
     return path;
   }
 
-  /** Creates a conversation note and sends its first message. */
+  /**
+   * Creates a conversation note and sends its first message. When it resolves, the note has its final path,
+   * from `title` or from the message, and `status(path)` is `working`.
+   *
+   * @throws `A new conversation needs a message.`, `Yami has no agents.`, `Yami has no agent named <name>. Agents: …`,
+   *   and `Yami is turned off.` after `destroy`.
+   * @example const file = await conversations.start({ message: "Summarize [[Ideas]]", open: false });
+   */
   async start(options: NewConversationOptions): Promise<TFile> {
     if (this.destroyed) throw new Error("Yami is turned off.");
     const message = typeof options.message === "string" ? options.message.trim() : "";
@@ -155,6 +162,10 @@ export class ConversationManager {
     return file;
   }
 
+  /**
+   * The state of the conversation note at `path`, read at each call. A turn of a queued message starts before
+   * the turn-end listeners run, so a listener sees `working`.
+   */
   status(path: string): ConversationStatus {
     const file = this.app.vault.getFileByPath(normalizePath(path));
     if (!this.isConversation(file)) return "none";
@@ -164,7 +175,11 @@ export class ConversationManager {
     return ended ? "ended" : "active";
   }
 
-  /** Follows the note, not the path, so a rename keeps the listener. */
+  /**
+   * Calls `listener` when a turn of the note ends, and returns a function that stops it. Follows the note, not
+   * the path, so a rename keeps the listener. An error in a listener goes to the console; the turn, the next
+   * turn, and the other listeners go on. A path with no note gives a function that does nothing.
+   */
   onTurnEnd(path: string, listener: (turn: TurnEnd) => void): () => void {
     const file = this.app.vault.getFileByPath(normalizePath(path));
     if (!file) return () => undefined;

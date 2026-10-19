@@ -1,4 +1,3 @@
-import { Window } from "happy-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => {
@@ -51,10 +50,12 @@ vi.mock("../../../src/obsidian/collab/region.js", () => ({
 
 import { Notice, type App, type MarkdownView, type TFile } from "obsidian";
 import { applyOps, type TextOp } from "../../../src/document/text-ops.js";
+import type { QuestionAnswers } from "../../../src/agent/index.js";
 import type { ConversationAgent } from "../../../src/obsidian/agents.js";
 import { Composer } from "../../../src/obsidian/conversation/composer.js";
 import { ConversationController } from "../../../src/obsidian/conversation/controller.js";
 import { ScriptedAgent } from "../../../src/testing/index.js";
+import { installDom } from "./dom.js";
 
 const NO_AGENTS = "Test Plugin has no agents. Add one in its settings.";
 const notices = () => (Notice as unknown as { messages: string[] }).messages;
@@ -62,53 +63,7 @@ const flush = async () => {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
-/** A DOM, with the helpers that Obsidian adds to every element, as Obsidian writes them. */
-beforeAll(() => {
-  const dom = new Window();
-  Object.assign(globalThis, {
-    window: globalThis,
-    document: dom.document,
-    HTMLElement: dom.HTMLElement,
-    MutationObserver: dom.MutationObserver,
-    ResizeObserver: dom.ResizeObserver,
-    Event: dom.Event,
-    KeyboardEvent: dom.KeyboardEvent,
-  });
-  const proto = HTMLElement.prototype;
-  proto.createEl = function <K extends keyof HTMLElementTagNameMap>(this: HTMLElement, tag: K, o?: DomElementInfo | string) {
-    const info = typeof o === "string" ? { cls: o } : (o ?? {});
-    const el = document.createElement(tag);
-    if (info.cls) el.className = Array.isArray(info.cls) ? info.cls.join(" ") : info.cls;
-    if (info.text) el.textContent = String(info.text);
-    for (const [key, value] of Object.entries(info.attr ?? {})) el.setAttribute(key, String(value));
-    this.appendChild(el);
-    return el;
-  } as never;
-  proto.createDiv = function (this: HTMLElement, o?: DomElementInfo | string) {
-    return this.createEl("div", o);
-  };
-  proto.createSpan = function (this: HTMLElement, o?: DomElementInfo | string) {
-    return this.createEl("span", o);
-  };
-  proto.empty = function (this: HTMLElement) {
-    while (this.firstChild) this.removeChild(this.firstChild);
-  };
-  proto.setText = function (this: HTMLElement, text: string | DocumentFragment) {
-    this.textContent = String(text);
-  };
-  proto.addClass = function (this: HTMLElement, ...classes: string[]) {
-    this.classList.add(...classes);
-  };
-  proto.removeClass = function (this: HTMLElement, ...classes: string[]) {
-    this.classList.remove(...classes);
-  };
-  proto.toggleClass = function (this: HTMLElement, classes: string | string[], value: boolean) {
-    for (const each of [classes].flat()) value ? this.classList.add(each) : this.classList.remove(each);
-  };
-  proto.setCssProps = function (this: HTMLElement, props: Record<string, string>) {
-    for (const [key, value] of Object.entries(props)) this.style.setProperty(key, value);
-  };
-});
+beforeAll(installDom);
 
 afterEach(() => {
   notices().length = 0;
@@ -235,6 +190,72 @@ describe("Composer", () => {
     expect(root.classList.contains("is-ended")).toBe(false);
     composer.destroy();
     expect(composer.view.containerEl.classList.contains("yami-has-composer")).toBe(false);
+  });
+
+  // The names of the README table "The agent's questions".
+  it("gives the form of the agent's questions its documented names, from the first question to the answers", async () => {
+    const { claude, controller, root, composer } = await open();
+    const questions = [
+      { question: "Which fruit?", header: "Fruit", multiSelect: false, options: [{ label: "Apple", description: "" }, { label: "Pear", description: "Green" }] },
+      { question: "Which colors?", header: "Colors", multiSelect: true, options: [{ label: "Red", description: "" }, { label: "Green", description: "" }] },
+    ];
+    const answers: (QuestionAnswers | undefined)[] = [];
+    claude.queue(async (_prompt, session) => {
+      answers.push(await session.options.onQuestion!({ questions, signal: new AbortController().signal }));
+      answers.push(await session.options.onQuestion!({ questions: questions.slice(0, 1), signal: new AbortController().signal }));
+    });
+    void controller.send("Ask me");
+    await vi.waitFor(() => expect(root.querySelector(".yami-composer.has-approval .yami-approval .yami-questions")).not.toBeNull());
+    const form = root.querySelector<HTMLFormElement>(".yami-approval .yami-questions")!;
+    const shown = () => {
+      const steps = [...form.querySelectorAll<HTMLElement>(".yami-question:not([hidden])")];
+      expect(steps).toHaveLength(1);
+      return steps[0]!;
+    };
+    const option = (label: string) => [...shown().querySelectorAll<HTMLElement>(".yami-question-option")].find((row) => row.querySelector(".yami-question-label")?.textContent === label)!;
+    const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    const back = form.querySelector<HTMLButtonElement>('button[data-action="back"]')!;
+    const skip = form.querySelector<HTMLButtonElement>('button[data-action="skip"]')!;
+    const progress = () => form.querySelector(".yami-question-progress")!.textContent;
+
+    expect(form.querySelectorAll(".yami-question")).toHaveLength(2);
+    expect(shown().querySelector(".yami-question-text")!.textContent).toBe("FruitWhich fruit?");
+    expect(shown().querySelector(".yami-question-header")!.textContent).toBe("Fruit");
+    expect(option("Pear").querySelector(".yami-question-description")!.textContent).toBe("Green");
+    expect(progress()).toBe("1 of 2");
+    expect(submit.textContent).toBe("Next↵");
+    expect(submit.disabled).toBe(true);
+    expect(back.hidden).toBe(true);
+    expect(skip.hidden).toBe(false);
+
+    option("Pear").querySelector("input")!.click();
+    expect(submit.disabled).toBe(false);
+    await vi.waitFor(() => expect(progress()).toBe("2 of 2"));
+    expect(shown().querySelector(".yami-question-text")!.textContent).toBe("ColorsWhich colors?");
+    expect(submit.textContent).toBe("Answer↵");
+    expect(submit.disabled).toBe(true);
+    expect(back.hidden).toBe(false);
+
+    option("Green").querySelector("input")!.click();
+    const other = shown().querySelector<HTMLInputElement>(".yami-question-option.is-other input.yami-question-other")!;
+    other.dispatchEvent(new Event("focus"));
+    other.value = "Plum";
+    other.dispatchEvent(new Event("input", { bubbles: true }));
+    back.click();
+    expect(progress()).toBe("1 of 2");
+    submit.click();
+    expect(progress()).toBe("2 of 2");
+    submit.click();
+    await vi.waitFor(() => expect(answers).toEqual([{ "Which fruit?": "Pear", "Which colors?": "Green, Plum" }]));
+
+    await vi.waitFor(() => expect(root.querySelector(".yami-approval .yami-questions")).not.toBe(form));
+    expect(form.isConnected).toBe(false);
+    expect(root.querySelector(".yami-questions .yami-question-progress")!.textContent).toBe("");
+    root.querySelector<HTMLButtonElement>('.yami-questions button[data-action="skip"]')!.click();
+    await vi.waitFor(() => expect(answers).toHaveLength(2));
+    expect(answers[1]).toBeUndefined();
+    expect(root.classList.contains("has-approval")).toBe(false);
+    composer.destroy();
   });
 
   it("writes nothing when the agents change and the note's agent did not", async () => {

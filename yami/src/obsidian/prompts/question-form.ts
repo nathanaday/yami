@@ -33,8 +33,8 @@ export function renderQuestions(
   const primary = choices.createEl("button", { cls: "mod-cta", attr: { type: "submit" } });
   const primaryLabel = primary.createSpan();
   primary.createEl("kbd", { text: "↵" });
-  const back = choices.createEl("button", { text: "Back", attr: { type: "button" } });
-  const skip = choices.createEl("button", { text: "Skip", attr: { type: "button" } });
+  const back = choices.createEl("button", { text: "Back", attr: { type: "button", "data-action": "back" } });
+  const skip = choices.createEl("button", { text: "Skip", attr: { type: "button", "data-action": "skip" } });
   const progress = choices.createSpan({ cls: "yami-question-progress" });
 
   const last = () => current === steps.length - 1;

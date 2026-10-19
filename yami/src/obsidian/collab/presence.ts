@@ -313,4 +313,9 @@ const freshTimer = ViewPlugin.fromClass(
   },
 );
 
+/**
+ * Draws each agent of the editor's shared note: its caret and name flag, its selection, the text that it just
+ * wrote, and the edge pill. `installCollab` adds them to each editor. The README table "The agent's presence"
+ * gives the names of the parts.
+ */
 export const presenceExtensions: Extension = [presenceLayer, edgeIndicator, freshField, freshTimer];

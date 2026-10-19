@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.14.0 · library-loop runtime agents and options round 5
+
+The form of the agent's questions and the agent's presence in a note have documented names, as the message box has since 0.13.0. The README states what another plugin can depend on in `start`, `status`, and `onTurnEnd` of the conversations, and a test holds each fact. No change breaks a host.
+
+### Added
+- The README table "The agent's questions", after the table of the message box: the form `.yami-questions` in `.yami-approval`, each `.yami-question` and the shown one, the text and header, the options with their label and description, the person's own answer `input.yami-question-other`, the step text `.yami-question-progress`, and the buttons. A change to one of these names is a breaking change from this version on.
+- `data-action` on the Back and Skip buttons of the question form: `back` or `skip`. Before, a host found them by their text. Migrate a workaround: `button:has-text("Skip")` → `.yami-questions button[data-action="skip"]`. Next and Answer stay `button[type="submit"]`.
+- The README table "The agent's presence", in Shared documents: the caret `.yami-caret`, its flag `.yami-caret-flag` with `.yami-caret-name` and `.yami-caret-status`, the selection `.yami-agent-selection`, the fresh text `.yami-fresh` and its `is-fading`, and the edge pill `button.yami-edge` with `is-shown` and `data-edge`. Each part holds `--yami-agent`.
+- The facts of `conversations.start`, `status`, and `onTurnEnd`, in the README under Conversation notes and in their doc comments. When `start` resolves, the note has its final path and `status(path)` is `working`. A queued message starts its turn before the turn-end listeners run, so a listener sees `working`. A listener follows the note through a rename. An error in a listener goes to the console, and the turn, the next turn, and the other listeners go on. These held before; now a change to one is a breaking change.
+- Unit tests walk the question form in a message box and the presence in a CodeMirror editor, over happy-dom, and a test in `manager.test.ts` holds each fact of `start`, `status`, and `onTurnEnd`.
+
 ## 0.13.0 · library-loop runtime agents and options round 4
 
 The message box of a conversation note has a documented set of names, for a host's styles and its Obsidian tests. A change to one of them is a breaking change from this version on. No change breaks a host.

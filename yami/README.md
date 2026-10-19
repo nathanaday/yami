@@ -980,12 +980,41 @@ While an agent works with a note, the note is a shared document: a Yjs `Y.Doc` w
 - `LiveRegion` is a range that an agent writes as its own output, such as a reply. Appended text is typed a few characters at a time.
 - `presenceExtensions` draw the agent's caret, name flag, selection, fresh-text highlight, and the edge pill that scrolls to the agent.
 
+**The agent's presence.** `installCollab` adds `presenceExtensions` to each editor. They draw each agent that works in the note that the editor shows. A host's styles and its Obsidian tests can use these names. They are public API: a change to one is a breaking change, and the CHANGELOG says how to migrate. Each part holds the agent's color in `--yami-agent`. Every other class of the presence is internal.
+
+| Selector | Part | When |
+| --- | --- | --- |
+| `.yami-caret` | the agent's cursor | while the agent has a cursor in the visible part of the note |
+| `.yami-caret-flag` | the name flag on the cursor | with `.yami-caret`. Its text is the name, then the status. |
+| `.yami-caret-name` | the agent's name in the flag, such as `claude` | with `.yami-caret` |
+| `.yami-caret-status` | what the agent does, such as `Reading Note.md` | with `.yami-caret`. Empty when the agent gives no status. |
+| `.yami-agent-selection` | one rectangle of the range that the agent selects, such as the text that it replaces next | while the agent selects a range |
+| `.yami-fresh` | text that the agent wrote a moment ago | for about 1.2 s. Then it has `is-fading` for 1 s, and then it goes. |
+| `button.yami-edge` | the edge pill | It has `is-shown` while the agent works outside the visible part of the note, and `data-edge` is `top` or `bottom`. Its text is the agent's name, its status or `is editing`, and an arrow, such as `claude · Reading Note.md ↑`. A click scrolls to the agent. |
+
+```ts
+// A host's Obsidian test: the agent's cursor shows its name while the agent writes in the note.
+await page.waitForSelector(".workspace-leaf.mod-active .yami-caret");
+expect(await page.textContent(".workspace-leaf.mod-active .yami-caret-name")).toBe("claude");
+```
+
 ### Conversation notes (`obsidian/conversation/`)
 
 A conversation note is a document with `type: conversation`; the format is in `yami/conversation`. `ConversationManager` gives each open conversation note a `Composer`, the message box at the bottom of the note, and creates new conversations in the `folder`. `ConversationController` runs one note: its agent session, the transcript in the note, queued messages, approval requests, and the agent's questions.
 
 - `create(agent)` makes a note with a placeholder name and opens it. The first message names the note.
-- `start({ message, agent?, title?, folder?, open?, module? })` creates a note and sends the first message, for a module or another plugin. `status(path)` and `onTurnEnd(path, listener)` follow it.
+- `start({ message, agent?, title?, folder?, open?, module? })` creates a note and sends the first message, for a module or another plugin. It resolves with the note's `TFile`. `status(path)` gives `working`, `active`, `ended`, or `none`, and `onTurnEnd(path, listener)` calls the listener with a `TurnEnd` when a turn of the note ends. It returns a function that stops the listener. Another plugin can depend on these facts, and a change to one is a breaking change:
+  - When `start` resolves, the note has its final path. `start` names the note from `title`, or else from the date and the first words of the message. A message renames only a note that has the placeholder name of `create`, `New conversation <YYYY-MM-DD HHmm>`, and only when it is the note's first message.
+  - When `start` resolves, `status(path)` is `working`, also while the agent process starts.
+  - When a turn ends and a message waits in the queue, the next turn starts before the `onTurnEnd` listeners run. So a listener that reads `status(path)` sees `working`.
+  - A listener follows the note, not the path. After a rename, it hears the note's turns, and `TurnEnd.path` is the new path.
+  - An error in a listener goes to the console. The turn, the next turn, and the other listeners go on.
+
+  ```ts
+  const file = await yami.conversations.start({ message: "Summarize [[Ideas]]", title: "Ideas summary", open: false });
+  yami.conversations.status(file.path);   // "working"
+  const stop = yami.conversations.onTurnEnd(file.path, ({ path, status, text }) => record(path, status, text));
+  ```
 - The composer shows approval requests and questions above the message box, with `Y`, `A`, and `N` keys. With no composer open, `PermissionPrompts` shows a dialog.
 - `/model`, `/effort`, `/mode`, `/new`, and `/end` are local commands. Other `/` commands come from the harness. `[[` suggests notes.
 - The agent process closes after `idleMinutes` without a composer; the next message resumes the session from the `session` property.
@@ -1009,7 +1038,7 @@ A conversation note is a document with `type: conversation`; the format is in `y
 | `button.yami-send` | the Send button | always. It has `is-stop` and the `aria-label` `Stop (Esc)` while a turn runs and the field is empty: a click stops the turn. Otherwise its `aria-label` is `Send (Enter)`. It is `disabled` when the field is empty and no turn runs, and when the field has text and no agent is left. |
 | `.yami-unavailable` | the text when no agent is left | It holds the `noAgents` text, and is empty otherwise. |
 | `.yami-ended` | the text when the conversation ended | It holds a button, Continue it, that resumes the conversation, and is empty otherwise. |
-| `.yami-approval` | the request that waits | with `has-approval`. For an approval request, `button[data-decision="allow"]`, `"allow-session"`, and `"deny"` answer it, as the keys `Y`, `A`, and `N` do when the field is empty. For a question, it holds the form of the agent's questions. |
+| `.yami-approval` | the request that waits | with `has-approval`. For an approval request, `button[data-decision="allow"]`, `"allow-session"`, and `"deny"` answer it, as the keys `Y`, `A`, and `N` do when the field is empty. For a question, it holds the form of the agent's questions: see the next table. |
 | `.yami-suggest.is-shown` | the suggestions after `/` and `[[` | while there are suggestions. Each one is a `.yami-suggest-item`; the one that Enter or Tab takes has `is-selected`. |
 
 ```ts
@@ -1018,6 +1047,31 @@ await page.waitForSelector(".workspace-leaf.mod-active .yami-composer.is-unavail
 await page.fill(".workspace-leaf.mod-active textarea.yami-input", "Are you there?");
 expect(await page.isDisabled(".workspace-leaf.mod-active button.yami-send")).toBe(true);
 await page.click('.workspace-leaf.mod-active button.yami-chip[data-setting="approval"]');   // opens the menu of approval settings
+```
+
+**The agent's questions.** When the agent asks questions, `.yami-approval` holds a form that shows one question at a time. These names are public API, as the names of the message box are. Every other class in the form is internal. With no message box open, `PermissionPrompts` shows the questions in a dialog, and the names of the dialog are internal.
+
+| Selector | Part | When |
+| --- | --- | --- |
+| `.yami-approval .yami-questions` | the form | while the agent's questions wait, with `has-approval` on `.yami-composer` |
+| `.yami-question` | one question | one for each question. The question on screen is `.yami-question:not([hidden])`. |
+| `.yami-question-text` | the text of the question, after its `.yami-question-header`, such as `Fruit` | |
+| `.yami-question-option` | one option: a radio button, or a checkbox when the question takes more than one answer | Its `.yami-question-label` is the option's label, and its `.yami-question-description` is the description, when the option has one. A click picks the option. A pick in a question with one answer shows the next question after 150 ms, unless the question is the last. |
+| `.yami-question-option.is-other` | the last option: the person's own answer | Its `input.yami-question-other` is the text field. A focus in the field picks the option. |
+| `.yami-question-progress` | the step text, such as `1 of 2` | Empty when there is one question. |
+| `.yami-questions button[type="submit"]` | Next, and Answer on the last question | `disabled` until the question on screen has an answer. Enter does the same as a click. |
+| `.yami-questions button[data-action="back"]` | Back: shows the question before | `hidden` on the first question |
+| `.yami-questions button[data-action="skip"]` | Skip: sends the agent no answers | always |
+
+```ts
+// A host's Obsidian test: answer two questions, the second one with an answer of the person's own.
+const question = ".workspace-leaf.mod-active .yami-question:not([hidden])";
+await page.waitForSelector(".workspace-leaf.mod-active .yami-composer.has-approval .yami-questions");
+expect(await page.textContent(".workspace-leaf.mod-active .yami-question-progress")).toBe("1 of 2");
+await page.click(`${question} .yami-question-option:has(.yami-question-label:text-is("Pear"))`);
+await page.waitForSelector('.workspace-leaf.mod-active .yami-question-progress:text-is("2 of 2")');   // the pick shows the next question
+await page.fill(`${question} input.yami-question-other`, "Plum");
+await page.click('.workspace-leaf.mod-active .yami-questions button[type="submit"]');
 ```
 
 ### The wiki in Obsidian (`obsidian/wiki/`)
@@ -1088,7 +1142,7 @@ await copyStyles(["styles.css", `${testVault}/.obsidian/plugins/my-plugin/styles
 ## Build and tests
 
 - `npm run build` first type-checks every module except `yami/obsidian` with `tsconfig.core.json`. That check has no DOM types, and it maps `obsidian` and `@codemirror/*` to an empty module, so a core file that uses them, or imports a file of `yami/obsidian`, fails the build. Then `tsc` builds the whole library.
-- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules and their forms, the vault modules and their problems, the loop, the review, the agent tool, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, the agents and options that change while Yami runs, the text operations with no Obsidian, and in `test/unit/obsidian/` the shared documents and their change feed, the conversation manager with agents that change while a conversation runs, the sessions of a note, `createYami` with its commands, status bar, and agent work, the modules' commands, and the discovery trigger over a fake Obsidian app.
+- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules and their forms, the vault modules and their problems, the loop, the review, the agent tool, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, the agents and options that change while Yami runs, the text operations with no Obsidian, and in `test/unit/obsidian/` the shared documents and their change feed, the conversation manager with agents that change while a conversation runs, the sessions of a note, `createYami` with its commands, status bar, and agent work, the modules' commands, and the discovery trigger over a fake Obsidian app. The tests of the message box, the question form, and the agent's presence in an editor run over happy-dom (`test/unit/obsidian/dom.ts` adds the DOM helpers of Obsidian), and each name of the README tables has a test.
 - `npm run bench` runs the retrieval benchmark against the vault in `YAMI_BENCH_VAULT`; see [The benchmark](#the-benchmark).
 - `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, skills, the agent tool in a session, a read-only session's commands (tests in a repository outside the vault, writes that fail, and no network), and resume; for Claude Code also that a skill set's `agents/` gives no subagent.
 - The plugin's `npm run test:obsidian` drives the real Obsidian app with `yami/obsidian`.
