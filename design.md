@@ -274,7 +274,7 @@ A change is done when these pass, and the report says which ran:
 ## Documentation
 
 1. This document holds the policy. The `yami` README holds the APIs and the harness facts. The plugin README holds how to run the showcase, and what its modules do.
-2. A class, an attribute, or a text that the README names for a host is public API. A change to one is a break, and the CHANGELOG lists it.
+2. A class, an attribute, or a text that the README names for a host is public API. This includes the names that a host's tests need to drive a view, such as the form of the agent's questions. A change to one is a break, and the CHANGELOG lists it.
 3. Code comments say what a reader cannot see in the code: a constraint, a harness quirk, a reason that is not obvious. They do not repeat the code.
 4. Prose follows ASD-STE100: short sentences, one term for one thing, active verbs.
 

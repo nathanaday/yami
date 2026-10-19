@@ -47,3 +47,11 @@ F2.1 (probe now fails to compile, as wished), F2.2 (`setup({ file, agent })`, `a
 - `plugin/src` 1,792 lines. Open: F3.1 docs minor (composer classes undocumented).
 
 Next round: F3.1 answer; whether docs/design.md took the proposals.
+
+## Round 4 (library 0.13.0)
+
+F3.1 closed. Only the tests changed: every conversation test scopes to `.workspace-leaf.mod-active .yami-composer`, `textarea.yami-input`, the approval chip by `data-setting`, one Allow by `data-decision`, and Send `disabled` with no agents (enabled again after Add agent). test:obsidian 22/22 in 2 of 2 runs. `plugin/src` 1,792 lines. docs/design.md took the proposals; only the API guarantees section credits Duet for what Yami does.
+- Open: F4.1 docs minor (question form and presence classes not documented), F4.2 docs minor (start/status/onTurnEnd guarantees not documented).
+- The guard blocks Bash in `.library-loop/sessions/...` (also `cd` there) and any read of `../yami/yami`. Use Read.
+
+Next round: F4.1/F4.2 answers; move the question and caret selectors to the documented names.
