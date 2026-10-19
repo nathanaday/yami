@@ -37,3 +37,13 @@ Next round, check:
 - F2.1/F2.2/F2.3 answers. With a `file` in setup, drop `app` from MentionAgents.
 - Run test:obsidian before the verdict. Grep the tests for each member that the round removes.
 - Whether docs/design.md took the proposals.
+
+## Round 3 (library 0.12.0)
+
+F2.1 (probe now fails to compile, as wished), F2.2 (`setup({ file, agent })`, `app` dropped from MentionAgents), F2.3 (no call site) closed. No-agents: Duet needed no code. New Obsidian test (last in `settings`): Remove both profiles in the settings window, the active note shows `.yami-unavailable`, Enter sends nothing, Add agent → `agent2` continues the note's session. 22/22 pass.
+- Own bug found: Obsidian keeps a group's `extraButtons` callbacks from the first render, so Remove by index removed nothing after an earlier removal. `removeAgent(profile)` now.
+- Composer selectors must scope to `.workspace-leaf.mod-active`; earlier conversation notes stay open in tabs.
+- `console.log` in Obsidian tests is not shown; write a probe's output to a file. No `git stash` (guard).
+- `plugin/src` 1,792 lines. Open: F3.1 docs minor (composer classes undocumented).
+
+Next round: F3.1 answer; whether docs/design.md took the proposals.
