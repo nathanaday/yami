@@ -21,6 +21,9 @@ interface Suggestion {
  * The message box at the bottom of a conversation note. It sends messages, shows what the agent does,
  * answers approval requests and the agent's questions, and changes the model, effort and approval mode. It suggests slash commands
  * after "/" and notes after "[[".
+ *
+ * Its classes and attributes for a host's styles and tests, such as `.yami-composer.is-working` and
+ * `button.yami-chip[data-setting="approval"]`, are public API: the README table "The message box" lists them.
  */
 export class Composer {
   private readonly root: HTMLElement;
@@ -61,9 +64,9 @@ export class Composer {
     this.card = this.root.createDiv({ cls: "yami-composer-card" });
     this.input = this.card.createEl("textarea", { cls: "yami-input", attr: { rows: "1", spellcheck: "true" } });
     const bar = this.card.createDiv({ cls: "yami-composer-bar" });
-    this.modelButton = this.chip(bar, "cpu", "Model", (event) => this.modelMenu(event));
-    this.effortButton = this.chip(bar, "gauge", "Effort", (event) => this.effortMenu(event));
-    this.modeButton = this.chip(bar, "shield-check", "When the agent asks first", (event) => this.modeMenu(event));
+    this.modelButton = this.chip(bar, "model", "cpu", "Model", (event) => this.modelMenu(event));
+    this.effortButton = this.chip(bar, "effort", "gauge", "Effort", (event) => this.effortMenu(event));
+    this.modeButton = this.chip(bar, "approval", "shield-check", "When the agent asks first", (event) => this.modeMenu(event));
     const link = bar.createEl("button", { cls: "yami-icon-button clickable-icon", attr: { "aria-label": "Link a note" } });
     setIcon(link, "link");
     link.addEventListener("click", () => this.insertAtCursor("[["));
@@ -111,8 +114,8 @@ export class Composer {
     this.view.containerEl.style.removeProperty("--yami-composer-height");
   }
 
-  private chip(parent: HTMLElement, icon: string, tooltip: string, onClick: (event: MouseEvent) => void): HTMLButtonElement {
-    const button = parent.createEl("button", { cls: "yami-chip" });
+  private chip(parent: HTMLElement, setting: "model" | "effort" | "approval", icon: string, tooltip: string, onClick: (event: MouseEvent) => void): HTMLButtonElement {
+    const button = parent.createEl("button", { cls: "yami-chip", attr: { "data-setting": setting } });
     setIcon(button.createSpan({ cls: "yami-chip-icon" }), icon);
     button.createSpan({ cls: "yami-chip-label" });
     setTooltip(button, tooltip, { placement: "top" });
@@ -217,7 +220,7 @@ export class Composer {
     }
     const choices = this.approvalEl.createDiv({ cls: "yami-approval-choices" });
     const choice = (label: string, key: string, decision: PermissionDecision, primary = false) => {
-      const button = choices.createEl("button", { cls: primary ? "mod-cta" : "" });
+      const button = choices.createEl("button", { cls: primary ? "mod-cta" : "", attr: { "data-decision": decision } });
       button.createSpan({ text: label });
       button.createEl("kbd", { text: key });
       button.addEventListener("click", () => approval.decide(decision));

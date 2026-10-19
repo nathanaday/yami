@@ -172,6 +172,71 @@ function watch(el: HTMLElement) {
 }
 
 describe("Composer", () => {
+  // The names of the README table "The message box": a host's styles and tests use them, so a change is a break.
+  it("gives each part that a host uses its documented name, in each state", async () => {
+    const { claude, controller, composer, root, input, send, type, setAgents, agents } = await open();
+    const one = (selector: string) => {
+      const el = root.querySelector<HTMLElement>(selector);
+      expect(el, selector).not.toBeNull();
+      return el!;
+    };
+    const label = (setting: string) => one(`button.yami-chip[data-setting="${setting}"] .yami-chip-label`).textContent;
+    expect(composer.view.containerEl.classList.contains("yami-has-composer")).toBe(true);
+    expect(input.matches("textarea.yami-input")).toBe(true);
+    expect(label("model")).toBe("Default model");
+    expect(label("effort")).toBe("Default effort");
+    expect(one('[data-setting="effort"]').classList.contains("is-hidden")).toBe(true);
+    expect(label("approval")).toBe("Ask first");
+    expect(send.matches("button.yami-send")).toBe(true);
+    expect(send.disabled).toBe(true);
+    expect(send.getAttribute("aria-label")).toBe("Send (Enter)");
+    expect([...root.classList]).toEqual(["yami-composer"]);
+
+    type("/");
+    expect(one(".yami-suggest").classList.contains("is-shown")).toBe(true);
+    expect(one(".yami-suggest-item.is-selected").textContent).toMatch(/^\/model/);
+    type("");
+    expect(one(".yami-suggest").classList.contains("is-shown")).toBe(false);
+
+    let release!: () => void;
+    let decision: string | undefined;
+    claude.queue(async (_prompt, session) => {
+      const request = { tool: "Bash", kind: "command" as const, title: "ls", raw: null, signal: new AbortController().signal };
+      decision = await session.options.onPermission!(request);
+      await new Promise<void>((resolve) => (release = resolve));
+    });
+    void controller.send("Look around");
+    await vi.waitFor(() => expect(root.classList.contains("has-approval")).toBe(true));
+    expect(root.classList.contains("is-working")).toBe(true);
+    expect(one(".yami-composer-status").textContent).not.toBe("");
+    expect(send.classList.contains("is-stop")).toBe(true);
+    expect(send.disabled).toBe(false);
+    expect(send.getAttribute("aria-label")).toBe("Stop (Esc)");
+    expect(one('.yami-approval button[data-decision="allow"]').textContent).toBe("Allow onceY");
+    expect(one('.yami-approval button[data-decision="allow-session"]').textContent).toBe("Allow for this conversationA");
+    one('.yami-approval button[data-decision="deny"]').click();
+    await vi.waitFor(() => expect(decision).toBe("deny"));
+    expect(root.classList.contains("has-approval")).toBe(false);
+    release();
+    await flush();
+    expect(root.classList.contains("is-working")).toBe(false);
+
+    const entries = agents();
+    setAgents([]);
+    expect(root.classList.contains("is-unavailable")).toBe(true);
+    expect(one(".yami-unavailable").textContent).toBe(NO_AGENTS);
+    setAgents(entries);
+    expect(root.classList.contains("is-unavailable")).toBe(false);
+
+    await controller.end();
+    expect(root.classList.contains("is-ended")).toBe(true);
+    one(".yami-ended button").click();
+    await flush();
+    expect(root.classList.contains("is-ended")).toBe(false);
+    composer.destroy();
+    expect(composer.view.containerEl.classList.contains("yami-has-composer")).toBe(false);
+  });
+
   it("writes nothing when the agents change and the note's agent did not", async () => {
     const { root, setAgents, agents, composer } = await open();
     expect(root.style.getPropertyValue("--yami-agent")).toBe("#d97757");

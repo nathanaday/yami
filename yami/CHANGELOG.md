@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.13.0 · library-loop runtime agents and options round 4
+
+The message box of a conversation note has a documented set of names, for a host's styles and its Obsidian tests. A change to one of them is a breaking change from this version on. No change breaks a host.
+
+### Added
+- The README table "The message box" in Conversation notes: the classes of the message box and its states (`yami-composer`, `is-working`, `is-ended`, `is-unavailable`, `has-approval`), the text field `textarea.yami-input`, the chips, the status text, the Send button with `is-stop`, its `aria-label`, and when it is `disabled`, the texts when no agent is left and when the conversation ended, the request that waits, and the suggestions. Every other class in `.yami-composer` is internal.
+- `data-setting` on each chip: `model`, `effort`, or `approval`. Before, the chips had the same class, and a host found one by its text. Migrate a workaround: `.yami-chip-label:text-is("Accept edits")` → `button.yami-chip[data-setting="approval"] .yami-chip-label`, whose text is `Accept edits`.
+- `data-decision` on each button of an approval request: `allow`, `allow-session`, or `deny`, the `PermissionDecision` that it gives. Migrate a workaround: `button:has-text("Allow once")` → `.yami-approval button[data-decision="allow"]`.
+- A unit test walks the message box through each state of the table, so a rename fails a test.
+
 ## 0.12.0 · library-loop runtime agents and options round 3
 
 A conversation note does not break when the host removes its last agent: it says what to do, and takes messages again when an agent comes back. `setup` of `noteSessions` gets the note's `TFile`, and the type of a session's `state` says what `setup` gives. A composer writes only what changed, so `setAgents` writes nothing in a note whose agent kept its name and color. `npm test` type-checks the tests.

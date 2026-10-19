@@ -43,3 +43,14 @@ Decided (all three accepted, per the ruling, and the overseer's no-agents item):
 Watch next round:
 - The new CSS for `.yami-unavailable` and the no-agents flow are not run in real Obsidian by me. The consumer's test:obsidian may show it.
 - Retired agents still never prune. The showcase has no use of noteSessions or animate (Policy item, for the user at the end).
+
+## Round 4 (0.13.0)
+Decided (F3.1 accepted, per the ruling):
+- README table "The message box" under Conversation notes: the root and its states, input, chips, status, Send (`is-stop`, aria-label, disabled rule = `!stop && (!text || unavailable)`), the unavailable and ended texts, `.yami-approval`, suggestions. All other classes in `.yami-composer` are internal.
+- Added `data-setting` (`model|effort|approval`, typed) on chips and `data-decision` (a `PermissionDecision`) on approval buttons. Chose attributes over modifier classes: they name a value, and `yami-approval` was already the request panel.
+- Contract test in `composer.test.ts` walks every row. Nothing breaks.
+- Policy proposal: names that the README gives a host are public API (Documentation item 4).
+
+Watch next round:
+- The consumer should move to the documented selectors and test Send disabled with no agents. A row that is wrong in real Obsidian is a bug in the table.
+- Retired agents still never prune.

@@ -991,6 +991,35 @@ A conversation note is a document with `type: conversation`; the format is in `y
 - The agent process closes after `idleMinutes` without a composer; the next message resumes the session from the `session` property.
 - `controller.registered` is the agent of the note: while its session is open, the agent that the session runs, also one that the host removed; otherwise the agent that the next message starts. It is `undefined` when no agent is left and no session is open. `controller.unavailable` is then the `noAgents` text of the options, and the composer shows it, with the class `is-unavailable` on `.yami-composer`, and sends nothing. `controller.agentName` falls back to the note's `agent` property, so the name stays in the message box.
 
+**The message box.** A host's styles and its Obsidian tests can use these names. They are public API: a change to one is a breaking change, and the CHANGELOG says how to migrate. Every other class in `.yami-composer` is internal and can change in any version.
+
+| Selector | Part | When |
+| --- | --- | --- |
+| `.yami-has-composer` | the view's `containerEl` | while the note has a message box. It also holds `--yami-composer-height`, the height of the box. |
+| `.yami-composer` | the message box, in the view's `contentEl` | always. `--yami-agent` holds the color of the note's agent. |
+| `.yami-composer.is-working` | | a turn runs, also while its agent starts |
+| `.yami-composer.is-ended` | | the conversation ended (`status: ended`) |
+| `.yami-composer.is-unavailable` | | no agent is left: the box sends nothing |
+| `.yami-composer.has-approval` | | an approval request or a question of the agent waits |
+| `textarea.yami-input` | the text field | always. Its text stays in the field until an agent can take it. |
+| `button.yami-chip[data-setting="model"]` | the model chip | always. Its `.yami-chip-label` is the model's name, or `Default model`. |
+| `button.yami-chip[data-setting="effort"]` | the effort chip | always. It has `is-hidden` when the model has no effort levels. Its label is the effort, such as `High`, or `Default effort`. |
+| `button.yami-chip[data-setting="approval"]` | the approval chip | always. Its label is `Ask first`, `Accept edits`, `Plan only`, `Auto`, or `Sandbox`. |
+| `.yami-composer-status` | the status text | while a turn runs: what the agent does, such as `Working`, and `· 2 queued` when messages wait. Empty otherwise. |
+| `button.yami-send` | the Send button | always. It has `is-stop` and the `aria-label` `Stop (Esc)` while a turn runs and the field is empty: a click stops the turn. Otherwise its `aria-label` is `Send (Enter)`. It is `disabled` when the field is empty and no turn runs, and when the field has text and no agent is left. |
+| `.yami-unavailable` | the text when no agent is left | It holds the `noAgents` text, and is empty otherwise. |
+| `.yami-ended` | the text when the conversation ended | It holds a button, Continue it, that resumes the conversation, and is empty otherwise. |
+| `.yami-approval` | the request that waits | with `has-approval`. For an approval request, `button[data-decision="allow"]`, `"allow-session"`, and `"deny"` answer it, as the keys `Y`, `A`, and `N` do when the field is empty. For a question, it holds the form of the agent's questions. |
+| `.yami-suggest.is-shown` | the suggestions after `/` and `[[` | while there are suggestions. Each one is a `.yami-suggest-item`; the one that Enter or Tab takes has `is-selected`. |
+
+```ts
+// A host's Obsidian test: no agent is left, so the box keeps the text and Send is disabled.
+await page.waitForSelector(".workspace-leaf.mod-active .yami-composer.is-unavailable");
+await page.fill(".workspace-leaf.mod-active textarea.yami-input", "Are you there?");
+expect(await page.isDisabled(".workspace-leaf.mod-active button.yami-send")).toBe(true);
+await page.click('.workspace-leaf.mod-active button.yami-chip[data-setting="approval"]');   // opens the menu of approval settings
+```
+
 ### The wiki in Obsidian (`obsidian/wiki/`)
 
 The views that let a person use the vault's `Wiki` directly. They call the wiki's own methods and hold no ranking of their own. `createYami` adds a command for each; a host that builds its own `Wiki` uses them directly:
