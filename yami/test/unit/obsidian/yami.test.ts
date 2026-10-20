@@ -178,6 +178,16 @@ describe("createYami", () => {
     );
   });
 
+  it("holds the threads module and its commands, unless the plugin leaves it out", async () => {
+    const yami = await build();
+    expect(yami.modules.map((m) => m.id)).toEqual(["wiki", "threads"]);
+    expect([...fake!.commands.keys()]).toContain("yami-threads-create-flow");
+    await fake!.unload();
+    const without = await build({ threads: false });
+    expect(without.modules.map((m) => m.id)).toEqual(["wiki"]);
+    expect([...fake!.commands.keys()].filter((id) => id.startsWith("yami-threads-"))).toEqual([]);
+  });
+
   it("builds with no agents, and the ribbon says so", async () => {
     const yami = await build();
     expect(yami.registered).toEqual([]);

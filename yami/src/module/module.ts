@@ -314,11 +314,18 @@ export abstract class YamiModule {
    * one that the plugin adds with `addIcon`. Default `MODULE_ICON`.
    */
   readonly icon: string = MODULE_ICON;
+  /**
+   * Whether the module also takes flows and forms from the vault: each valid `internal/<id>/flows/<name>/FLOW.md`
+   * is a flow of the module, after the flows of its code, and each skill a person adds under
+   * `internal/<id>/skills/` reaches the agents as `/<id>:<skill>`. Yami reads them at each `discover`.
+   * Default false: a `FLOW.md` in the module's folder is then a problem.
+   */
+  readonly vaultFlows: boolean = false;
 
   /** Every document of the module, in the order the builders made them. */
   readonly documents: ModuleDocument[] = [];
-  readonly flows: Flow[] = [];
   readonly actions: ModuleAction[] = [];
+  readonly #flows: Flow[] = [];
   #yami: Yami | undefined;
   #color: string | undefined;
 
@@ -347,6 +354,11 @@ export abstract class YamiModule {
     return moduleLayout(this.id, this.sessionsIn, this.ledgerIn);
   }
 
+  /** The module's flows: those of its code, then, for a module that takes `vaultFlows`, those of the vault that the last `discover` found. */
+  get flows(): Flow[] {
+    return [...this.#flows, ...(fromVault.get(this)?.flows ?? [])];
+  }
+
   /** What a person can do with the module itself: a new session from each flow that offers one, then each action on no session. */
   acts(): ModuleAct[] {
     const flows = this.sessionsIn === "none" ? [] : this.flows.filter((f) => f.command);
@@ -358,7 +370,7 @@ export abstract class YamiModule {
 
   /** Whether the module's internal folder holds skills, so that Yami gives it to the agents as a skill set. */
   get hasSkills(): boolean {
-    return this.documents.some((doc) => doc.kind === "skill");
+    return this.documents.some((doc) => doc.kind === "skill") || (fromVault.get(this)?.skills ?? false);
   }
 
   /** The tools that every agent of the vault gets, named `<module id>_<tool name>`. They run in the host. */
@@ -444,7 +456,7 @@ export abstract class YamiModule {
   protected flow(options: FlowOptions): Flow {
     if (this.flows.some((f) => f.name === options.name)) throw new Error(`The flow ${options.name} is in the module twice.`);
     const flow = new Flow(this, options);
-    this.flows.push(flow);
+    this.#flows.push(flow);
     return flow;
   }
 
@@ -481,6 +493,24 @@ export abstract class YamiModule {
     this.documents.push(doc);
     return doc;
   }
+}
+
+/** What the vault adds to a code module that takes `vaultFlows`: its flows, and whether its folder holds skills of its own. */
+interface FromVault {
+  flows: Flow[];
+  skills: boolean;
+}
+
+const fromVault = new WeakMap<YamiModule, FromVault>();
+
+/** Gives a code module that takes `vaultFlows` what the last `discover` found in the vault. Yami calls it. */
+export function setFromVault(module: YamiModule, found: FromVault): void {
+  fromVault.set(module, found);
+}
+
+/** Whether a flow of a code module came from the vault. */
+export function isVaultFlow(flow: Flow): boolean {
+  return fromVault.get(flow.module)?.flows.includes(flow) ?? false;
 }
 
 /** The vault paths of a module with an id, from where it keeps its sessions and its ledger. */

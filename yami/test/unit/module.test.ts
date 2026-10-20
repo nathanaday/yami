@@ -138,9 +138,9 @@ describe("a module's files", () => {
     expect(() => new Yami({ vault, modules: [hello] })).toThrow("already added to another Yami");
   });
 
-  it("gives a module its own icon, the default when it names none, and the wiki a book", () => {
+  it("gives a module its own icon, the default when it names none, the wiki a book, and threads a spool", () => {
     const yami = new Yami({ vault: new FsVault("/tmp/none"), modules: [new Hello(), new (class extends Hello { readonly id = "shelf"; readonly icon = "library"; })()] });
-    expect(Object.fromEntries(yami.modules.map((m) => [m.id, m.icon]))).toEqual({ wiki: "book-open", hello: MODULE_ICON, shelf: "library" });
+    expect(Object.fromEntries(yami.modules.map((m) => [m.id, m.icon]))).toEqual({ wiki: "book-open", threads: "spool", hello: MODULE_ICON, shelf: "library" });
     expect(MODULE_ICON).toBe("box");
   });
 });
@@ -290,12 +290,12 @@ describe("the tools and skills of the modules", () => {
     const { yami, agent, root } = await fresh(new Hello(), new Two(), new None());
     const set = yami.tools();
     expect(set.name).toBe("yami");
-    expect(set.description).toBe("Tools of Yami. Tools of the Yami modules in this vault: Wiki, Hello world, Two.");
-    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_agent", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "hello_greet_user", "hello_two_greet_user"]);
+    expect(set.description).toBe("Tools of Yami. Tools of the Yami modules in this vault: Wiki, Threads, Hello world, Two.");
+    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_agent", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_checkout", "threads_stub", "threads_spec", "threads_plan", "threads_round", "threads_close", "threads_status", "hello_greet_user", "hello_two_greet_user"]);
     expect(await runTool(set.tools.find((tool: AgentTool) => tool.name === "hello_greet_user")!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
     expect(agent.preferences.cwd).toBe(root);
     expect(agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(set.tools.map((tool) => tool.name));
-    expect(agent.preferences.skills).toEqual([`${root}/internal/yami`, `${root}/internal/wiki`, `${root}/internal/hello`, `${root}/internal/hello-two`]);
+    expect(agent.preferences.skills).toEqual([`${root}/internal/yami`, `${root}/internal/wiki`, `${root}/internal/threads`, `${root}/internal/hello`, `${root}/internal/hello-two`]);
   });
 
   it("names each module's internal folder as a skill set, and each skill by /<module>:<skill>", async () => {

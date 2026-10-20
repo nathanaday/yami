@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runTool } from "yami/agent";
-import { readDocument, sectionText, updateDocument } from "yami/document";
-import { testYami, type FsVault, type TestYami } from "yami/testing";
-import type { Wiki } from "yami/wiki";
-import { Librarian, type Order } from "../../src/modules/librarian/index.js";
+import { runTool } from "../../src/agent/index.js";
+import { readDocument, sectionText, updateDocument } from "../../src/document/index.js";
+import type { CheckoutOrder, WikiModule } from "../../src/index.js";
+import { testYami, type FsVault, type TestYami } from "../../src/testing/index.js";
+import type { Wiki } from "../../src/wiki/index.js";
 
 let t: TestYami;
 let vault: FsVault;
 let wiki: Wiki;
-let librarian: Librarian;
-const checkout = (order: Order) => librarian.makeCheckout(order);
-const returnCheckout = (session: string) => librarian.returnCheckout(session);
-const checkoutTool = () => t.yami.tools()!.tools.find((tool) => tool.name === "librarian_checkout")!;
+let module: WikiModule;
+const checkout = (order: CheckoutOrder) => module.makeCheckout(order);
+const returnCheckout = (session: string) => module.returnCheckout(session);
+const checkoutTool = () => t.yami.tools()!.tools.find((tool) => tool.name === "wiki_checkout")!;
 
 const note = (path: string, properties: Record<string, unknown>, body: string) => vault.write(path, `---\n${vault.stringifyProperties(properties)}---\n${body}`);
 
@@ -19,8 +19,8 @@ beforeEach(async () => {
   // A fixed day, so a run that crosses midnight names the same reading list as the test does.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 9, 6, 12));
-  librarian = new Librarian();
-  t = await testYami({ modules: [librarian] });
+  t = await testYami();
+  module = t.yami.module("wiki") as WikiModule;
   ({ vault } = t);
   wiki = t.yami.wiki;
   await note("wiki/topics/Reinforcement learning.md", { type: "topic", description: "Learning by reward." }, "An agent learns from reward. See [[Q-learning]] and [[SSL]].\n");
@@ -43,7 +43,8 @@ const order = {
   notes: "Left out deep RL: the wiki has no topic yet.",
 };
 const DATE = "2026-10-06";
-const FOLDER = `librarian/${DATE} Reinforcement learning`;
+const SESSIONS = "internal/wiki/sessions";
+const FOLDER = `${SESSIONS}/${DATE} Reinforcement learning`;
 const SESSION = `${FOLDER}.md`;
 const COPY = `${FOLDER}/Reinforcement learning (checkout).md`;
 
@@ -52,7 +53,7 @@ describe("checkout", () => {
     const made = await checkout(order);
     expect(made).toEqual({ session: SESSION, copies: [COPY, `${FOLDER}/Q-learning (checkout).md`] });
     const session = await readDocument(vault, SESSION);
-    expect(session.properties).toMatchObject({ type: "session", module: "librarian", flow: "checkout", status: "out", state: "done" });
+    expect(session.properties).toMatchObject({ type: "session", module: "wiki", flow: "checkout", status: "out", state: "done" });
     expect(sectionText(session.body, "Request")).toBe("the material on reinforcement learning");
     expect(sectionText(session.body, "Reading list")).toBe(
       `1. [[${FOLDER}/Reinforcement learning (checkout)|Reinforcement learning (checkout)]] · the overview\n2. [[${FOLDER}/Q-learning (checkout)|Q-learning (checkout)]] · the first method`,
@@ -84,7 +85,7 @@ describe("checkout", () => {
     expect(wiki.resolve("Reinforcement learning")).toBe("wiki/topics/Reinforcement learning.md");
   });
 
-  it("is a tool of the librarian module, which a plain conversation can call", async () => {
+  it("is a tool of the wiki module, which a plain conversation can call", async () => {
     const tool = checkoutTool();
     const result = await runTool(tool, order, new AbortController().signal);
     expect(JSON.parse(result.text).session).toBe(SESSION);
@@ -182,17 +183,17 @@ describe("the checkout tool", () => {
     const result = await runTool(tool, { ...order, documents: many }, new AbortController().signal);
     expect(result).toMatchObject({ isError: true });
     expect(result.text).toContain("The input is not valid");
-    expect(await vault.list("librarian")).toEqual([]);
+    expect(await vault.list(SESSIONS)).toEqual([]);
   });
 });
 
 describe("a checkout as a session", () => {
   it("makes the reading list in the session a run is on, and the run ends done", async () => {
-    const session = await librarian.checkout.create({ name: "RL", request: "Reinforcement learning, from the basics." });
-    expect(await vault.read(session.path)).toContain("## Request\nReinforcement learning, from the basics.\n\n## Deliverables\n- [ ] [[internal/librarian/promises/reading-list-made/PROMISE|reading-list-made]]");
+    const session = await module.checkout.create({ name: "RL", request: "Reinforcement learning, from the basics." });
+    expect(await vault.read(session.path)).toContain("## Request\nReinforcement learning, from the basics.\n\n## Deliverables\n- [ ] [[internal/wiki/promises/reading-list-made/PROMISE|reading-list-made]]");
     t.agent.queue(async (prompt) => {
       expect(prompt).toMatch(/^\/yami:run This is the Yami session "RL"/);
-      expect(prompt).toContain("`librarian:checkout`");
+      expect(prompt).toContain("`wiki:checkout`");
       const result = await runTool(checkoutTool(), { ...order, name: undefined, session: session.path }, new AbortController().signal);
       if (result.isError) throw new Error(result.text);
     });
@@ -201,42 +202,42 @@ describe("a checkout as a session", () => {
     expect(doc.properties).toMatchObject({ status: "out", state: "done", flow: "checkout" });
     // The person's words in the Request section stay; the tool's request does not replace them.
     expect(sectionText(doc.body, "Request")).toBe("Reinforcement learning, from the basics.");
-    expect(sectionText(doc.body, "Reading list")).toContain("1. [[librarian/RL/Reinforcement learning (checkout)|Reinforcement learning (checkout)]] · the overview");
-    expect(await vault.exists("librarian/RL/Q-learning (checkout).md")).toBe(true);
+    expect(sectionText(doc.body, "Reading list")).toContain(`1. [[${SESSIONS}/RL/Reinforcement learning (checkout)|Reinforcement learning (checkout)]] · the overview`);
+    expect(await vault.exists(`${SESSIONS}/RL/Q-learning (checkout).md`)).toBe(true);
   });
 
   it("refuses a second checkout into one session, and a session of another module", async () => {
-    const session = await librarian.checkout.create({ name: "RL" });
+    const session = await module.checkout.create({ name: "RL" });
     await checkout({ ...order, session: session.path });
     // The person left the Request section empty, so the checkout's request fills it.
     expect(sectionText((await readDocument(vault, session.path)).body, "Request")).toBe(order.request);
     await expect(checkout({ ...order, session: session.path })).rejects.toThrow("RL holds a checkout already.");
     await vault.write("notes/Fake.md", "---\ntype: session\nmodule: threads\n---\n");
-    await expect(checkout({ ...order, session: "notes/Fake.md" })).rejects.toThrow("is not a session of the librarian module");
+    await expect(checkout({ ...order, session: "notes/Fake.md" })).rejects.toThrow("is not a checkout session of the wiki module");
     await expect(checkout({ ...order, name: undefined })).rejects.toThrow("Give the session of the checkout, or a name for a new one.");
   });
 
   it("refuses a request or notes with a line that would start a section, and writes nothing", async () => {
-    const session = await librarian.checkout.create({ name: "Empty" });
+    const session = await module.checkout.create({ name: "Empty" });
     const before = await vault.read(session.path);
     const sneaky = "Read on RL.\n## Deliverables\nsneaky";
     await expect(checkout({ ...order, session: session.path, request: sneaky })).rejects.toThrow('The text for the Request section holds the heading line "## Deliverables"');
     await expect(checkout({ ...order, session: session.path, notes: sneaky })).rejects.toThrow('The text for the Notes section holds the heading line "## Deliverables"');
     expect(await vault.read(session.path)).toBe(before);
     expect(await vault.list(session.path.slice(0, -3))).toEqual([]);
-    await expect(librarian.checkout.create({ name: "New", request: sneaky })).rejects.toThrow('The text for the Request section holds the heading line "## Deliverables"');
-    expect(await vault.exists(`librarian/New.md`)).toBe(false);
+    await expect(module.checkout.create({ name: "New", request: sneaky })).rejects.toThrow('The text for the Request section holds the heading line "## Deliverables"');
+    expect(await vault.exists(`${SESSIONS}/New.md`)).toBe(false);
   });
 
   it("offers the return only for a checkout that is out, and says what it did in plain words", async () => {
     const { session } = await checkout(order);
-    const action = librarian.returnAction;
-    expect(action.on).toBe(librarian.checkout);
+    const action = module.returnAction;
+    expect(action.on).toBe(module.checkout);
     expect(action.when!({ status: "out" })).toBe(true);
     expect(action.when!({ status: "returned" })).toBe(false);
     expect(await action.run(t.yami.session(session))).toBe("No copy held an edit.");
     await expect(returnCheckout(session)).rejects.toThrow("it was returned already");
-    const empty = await librarian.checkout.create({ name: "Empty" });
+    const empty = await module.checkout.create({ name: "Empty" });
     await expect(returnCheckout(empty.path)).rejects.toThrow("it holds no checkout");
   });
 });

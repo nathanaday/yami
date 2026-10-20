@@ -4,7 +4,7 @@ import type { Properties, Vault } from "../document/vault.js";
 import { YAMI_ID } from "./base-skill.js";
 import { hexColor } from "./colors.js";
 import { parseName, resolveForm } from "./links.js";
-import { formPath, ID, idFromName, INTERNAL, KIND_OF, MODULE_ICON, moduleLayout, YamiModule, type DocumentRef, type FlowOptions, type Layout, type LinkedKind } from "./module.js";
+import { formPath, ID, idFromName, INTERNAL, isVaultFlow, KIND_OF, MODULE_ICON, moduleLayout, YamiModule, type DocumentRef, type FlowOptions, type Layout, type LinkedKind } from "./module.js";
 
 /**
  * Something wrong with a vault module's documents, which keeps a module or a flow out until a person fixes
@@ -36,6 +36,15 @@ export interface VaultModuleDefinition {
   /** Whether `internal/<id>/skills/` holds a skill. */
   skills: boolean;
   flows: FlowOptions[];
+}
+
+/** What the vault adds to a code module that takes `vaultFlows`. It is plain data, so two reads compare as text. */
+export interface VaultFlows {
+  id: string;
+  /** The valid flows of `internal/<id>/flows/`, by name. */
+  flows: FlowOptions[];
+  /** Whether `internal/<id>/skills/` holds a skill. */
+  skills: boolean;
 }
 
 /**
@@ -89,10 +98,14 @@ interface Folder {
 
 /**
  * Reads the vault modules: each folder `internal/<id>/` with a module document and at least one flow, whose
- * id no module in `taken` has. A module, a flow, or a form with a problem stays out, and the problem says
- * why and how to fix it; a bad color only falls back to the default.
+ * id no module of `code` has. For a code module that takes `vaultFlows`, it reads the flows and forms of its
+ * folder instead. A module, a flow, or a form with a problem stays out, and the problem says why and how to
+ * fix it; a bad color only falls back to the default.
  */
-export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>): Promise<{ definitions: VaultModuleDefinition[]; problems: ModuleProblem[] }> {
+export async function readVaultModules(
+  vault: Vault,
+  code: readonly YamiModule[],
+): Promise<{ definitions: VaultModuleDefinition[]; extended: VaultFlows[]; problems: ModuleProblem[] }> {
   const files = await vault.list(INTERNAL);
   const folders = new Map<string, Folder>();
   for (const path of [...files].sort()) {
@@ -105,11 +118,17 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
   }
   const problems: ModuleProblem[] = [];
   const modules: { id: string; folder: Folder; doc: Document; problem: Problem }[] = [];
+  const open: { module: YamiModule; folder: Folder; problem: Problem }[] = [];
   for (const [id, folder] of [...folders].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    if (![...folder.forms, ...folder.flat].some((form) => form.kind === "flow")) continue;
     const root = `${INTERNAL}/${id}`;
     const problem: Problem = (path, message) => problems.push({ module: id, path, ...(path !== root && { document: path }), message });
-    if (taken.has(id)) {
+    const owner = code.find((module) => module.id === id);
+    if (owner?.vaultFlows) {
+      open.push({ module: owner, folder, problem });
+      continue;
+    }
+    if (![...folder.forms, ...folder.flat].some((form) => form.kind === "flow")) continue;
+    if (owner) {
       problem(root, `The plugin's code has a module with the id ${id}, and it wins. Rename the folder ${root}/ to give the vault module an id of its own.`);
       continue;
     }
@@ -139,7 +158,7 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
   // Every form of every vault module first, so that a flow of one module can name a form of another.
   const broken = new Set<string>();
   const docs = new Map<string, Document>();
-  for (const { folder, problem } of modules) {
+  for (const { folder, problem } of [...modules, ...open]) {
     for (const { kind, path } of folder.flat) {
       const name = idFromName(basename(path)) || "name";
       problem(path, `A ${kind} is a folder with a ${FORMS[kind].file} in it. Move this file to ${path.slice(0, path.lastIndexOf("/"))}/${name}/${FORMS[kind].file}, and set name: ${name}.`);
@@ -202,9 +221,34 @@ export async function readVaultModules(vault: Vault, taken: ReadonlySet<string>)
       flows,
     });
   }
+  const extended: VaultFlows[] = [];
+  for (const { module, folder, problem } of open) {
+    const layout = moduleLayout(module.id);
+    const own = module.flows.filter((flow) => !isVaultFlow(flow)).map((flow) => flow.name);
+    const flows: FlowOptions[] = [];
+    for (const { kind, path } of folder.forms) {
+      const flowDoc = docs.get(path);
+      if (kind !== "flow" || !flowDoc) continue;
+      const name = flowDoc.properties.name as string;
+      if (own.includes(name)) {
+        problem(path, `The ${module.name} module's code has a flow named ${name}, and it wins. Rename this flow's folder and its name.`);
+        continue;
+      }
+      const before = problems.length;
+      const flow = await readFlow(vault, flowDoc, module.id, layout, broken, problem);
+      if (!flow) continue;
+      for (const [field, value] of Object.entries(flow.fields ?? {})) {
+        const declared = module.schema?.[field];
+        const [error] = declared ? validate({ [field]: value }, { [field]: { ...declared, required: false } }) : [];
+        if (error) problem(path, `The field ${error}, as the ${module.name} module's schema declares it. Give it such a default, or rename the field.`);
+      }
+      if (problems.length === before) flows.push(flow);
+    }
+    extended.push({ id: module.id, flows, skills: folder.forms.some((form) => form.kind === "skill") });
+  }
   // By module and by document, so a person reads the problems of one document together.
   const order = (a: ModuleProblem, b: ModuleProblem) => (a.module === b.module ? (a.path === b.path ? 0 : a.path < b.path ? -1 : 1) : a.module < b.module ? -1 : 1);
-  return { definitions, problems: problems.sort(order) };
+  return { definitions, extended, problems: problems.sort(order) };
 }
 
 /**

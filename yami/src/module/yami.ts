@@ -2,27 +2,30 @@ import type { Agent } from "../agent/agent.js";
 import type { Harness, ToolSet } from "../agent/types.js";
 import { CONVERSATION_FOLDER, FileConversations, type Conversation, type Conversations, type OpenConversation } from "../conversation/conversations.js";
 import { basename, checkSection, link, readDocument, writeDocument, type Document } from "../document/document.js";
-import { SESSION, timestamp, validate, withDefaults } from "../document/schema.js";
+import { SESSION, timestamp, validate, withDefaults, type FormKind } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import { captureSource, captureSources, readSources } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
 import { installBaseSkill, YAMI_ID, YAMI_SKILLS } from "./base-skill.js";
 import { assignColors } from "./colors.js";
 import type { AgentCaller } from "./agent-run.js";
-import { checkName, FIELD_OF, Flow, ID, idFromName, INTERNAL, moduleSkills, safeName, type DocumentRef, type YamiModule } from "./module.js";
+import { checkName, FIELD_OF, Flow, formPath, ID, idFromName, INTERNAL, moduleSkills, safeName, setFromVault, type DocumentRef, type YamiModule } from "./module.js";
 import { Session, type NewSession, type SessionStatus, type SessionSummary } from "./session.js";
-import { writeStarter } from "./starter.js";
+import { starterForm, writeStarter } from "./starter.js";
+import { ThreadsModule } from "./threads/index.js";
 import { moduleTools, TOOL_SET } from "./tools.js";
 import { readVaultModules, VaultModule, type ModuleProblem } from "./vault-module.js";
-import { WikiModule } from "./wiki.js";
+import { WikiModule } from "./wiki/index.js";
 import { yamiTools } from "./yami-tools.js";
 
 export interface YamiOptions {
   vault: Vault;
   /** The agents that run sessions; the first is the default. Yami sets the working directory, the tools, and the skills of each. */
   agents?: Agent[];
-  /** The plugin's modules. The wiki module is built in, and comes first. The vault modules come after these. */
+  /** The plugin's modules. The built-in modules come first: the wiki, then threads. The vault modules come after these. */
   modules?: YamiModule[];
+  /** Whether the Yami holds the built-in threads module. Default true. With false, a module of the host can take the id `threads`. */
+  threads?: boolean;
   /** Options of the vault's wiki. The conversation folder always stays out of its index. */
   wiki?: WikiOptions;
   /** How the conversation notes of runs are kept. Default: notes written straight to the vault, with every approval denied. */
@@ -30,6 +33,9 @@ export interface YamiOptions {
   /** The folder of conversation notes. Default `conversations`. A function is read at each use, so the folder can follow a setting. */
   conversationFolder?: string | (() => string);
 }
+
+/** The id of the built-in threads module. */
+const THREADS = "threads";
 
 export type SessionListener = (session: Session, status: SessionStatus) => void;
 
@@ -62,6 +68,8 @@ export class Yami {
   #vault: VaultModule[] = [];
   #problems: ModuleProblem[] = [];
   readonly #definitions = new Map<string, string>();
+  /** What the last `discover` found for each code module that takes vault flows, as text. */
+  readonly #extended = new Map<string, string>();
   #discovery: Promise<void> = Promise.resolve();
   readonly #sessions = new Map<string, Session>();
   readonly #listeners = new Set<SessionListener>();
@@ -72,7 +80,10 @@ export class Yami {
     this.#conversationFolder = options.conversationFolder ?? CONVERSATION_FOLDER;
     const exclude = options.wiki?.exclude;
     this.wiki = new Wiki(this.vault, { ...options.wiki, exclude: () => [this.conversationFolder, ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] });
-    this.#code = [this.#wikiModule, ...(options.modules ?? [])];
+    const threads = options.threads ?? true;
+    const own = options.modules ?? [];
+    if (threads && own.some((module) => module.id === THREADS)) throw new Error(`The id ${THREADS} is the built-in threads module's. Give the module another id, or leave the built-in module out with the option threads: false.`);
+    this.#code = [this.#wikiModule, ...(threads ? [new ThreadsModule()] : []), ...own];
     const ids = new Set<string>();
     for (const module of this.#code) {
       if (module.id === YAMI_ID) throw new Error(`The id ${YAMI_ID} is Yami's own: give the module another id.`);
@@ -121,7 +132,7 @@ export class Yami {
     return typeof folder === "function" ? folder() : folder;
   }
 
-  /** The modules: the built-in wiki module first, then the plugin's, then the vault modules that `discover` found. */
+  /** The modules: the built-in modules first (the wiki, then threads), then the plugin's, then the vault modules that `discover` found. */
   get modules(): YamiModule[] {
     return [...this.#code, ...this.#vault];
   }
@@ -190,9 +201,18 @@ export class Yami {
 
   async #discover(): Promise<void> {
     const skill = await installBaseSkill(this.vault);
-    const { definitions, problems: found } = await readVaultModules(this.vault, new Set(this.#code.map((m) => m.id)));
+    const { definitions, extended, problems: found } = await readVaultModules(this.vault, this.#code);
     const problems = skill ? [skill, ...found] : found;
     let changed = JSON.stringify(problems) !== JSON.stringify(this.#problems) || definitions.length !== this.#vault.length;
+    for (const module of this.#code.filter((m) => m.vaultFlows)) {
+      const none = { id: module.id, flows: [], skills: false };
+      const text = JSON.stringify(extended.find((e) => e.id === module.id) ?? none);
+      if ((this.#extended.get(module.id) ?? JSON.stringify(none)) === text) continue;
+      this.#extended.set(module.id, text);
+      const found = extended.find((e) => e.id === module.id) ?? none;
+      setFromVault(module, { flows: found.flows.map((flow) => new Flow(module, flow)), skills: found.skills });
+      changed = true;
+    }
     const added: VaultModule[] = [];
     const modules = definitions.map((definition) => {
       const text = JSON.stringify(definition);
@@ -247,6 +267,27 @@ export class Yami {
       throw new Error(`Yami wrote the module ${id}, but could not read it${problem ? `: ${problem.message}` : "."}`);
     }
     return module;
+  }
+
+  /**
+   * Writes a starter form of a kind into a code module that takes `vaultFlows`, at
+   * `internal/<module>/<folder>/<id>/<FILE>.md`, where the id comes from the name by `idFromName`. The starter
+   * is valid as written, and its text says how to fill it; a starter flow has no body, and its comments say
+   * it. Then it discovers the modules, so a new flow is a flow of the module, and returns the form's path.
+   * It refuses a module that takes no vault flows, a name that gives no id, and a form of that kind and id
+   * that the module has.
+   * @example
+   * const path = await yami.createForm(yami.module("threads")!, "flow", "Daily review"); // internal/threads/flows/daily-review/FLOW.md
+   */
+  async createForm(module: YamiModule, kind: FormKind, name: string): Promise<string> {
+    if (!this.#code.includes(module) || !module.vaultFlows) throw new Error(`The ${module.name} module takes no forms from the vault.`);
+    const id = idFromName(name);
+    if (!ID.test(id)) throw new Error(`"${name}" gives no ${kind} name. Give a name with letters or digits.`);
+    const path = formPath(module.layout, kind, id);
+    if ((await this.vault.exists(path)) || (kind === "flow" && module.flowOf(id))) throw new Error(`The ${module.name} module has a ${kind} named ${id}. Give the ${kind} another name.`);
+    await this.vault.write(path, starterForm(kind, id, name.trim(), module));
+    await this.discover();
+    return path;
   }
 
   /** An agent of this Yami: the one given, the first of a harness, or the first. */

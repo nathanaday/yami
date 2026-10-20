@@ -131,9 +131,14 @@ describe("what a view of the sessions reads", () => {
     const { rich, agent } = await fresh();
     const session = await rich.greet.create({ name: "odd" });
     let release!: () => void;
-    agent.queue(() => new Promise<void>((resolve) => (release = resolve)));
+    let begun!: () => void;
+    const started = new Promise<void>((resolve) => (begun = resolve));
+    agent.queue(() => {
+      begun();
+      return new Promise<void>((resolve) => (release = resolve));
+    });
     const run = session.start({ maxIterations: 1 });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await started;
     expect(kinds(session, { ...(await session.read()).properties, flow: "gone" })).toEqual(["stop:Stop", "kill:Kill the agent"]);
     release();
     await run;

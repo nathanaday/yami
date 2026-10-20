@@ -18,7 +18,7 @@ import { ObsidianConversations } from "./conversation/obsidian-conversations.js"
 import { NoteSessions, type AgentWork, type NoteEvents, type NoteSessionsOptions } from "./note-sessions.js";
 import { PermissionPrompts } from "./prompts/permission-modal.js";
 import { ObsidianVault } from "./vault.js";
-import { ignoredPaths, openNote, pickOne, watchWiki, type OpenMode } from "./wiki/open.js";
+import { askText, ignoredPaths, openNote, pickOne, watchWiki, type OpenMode } from "./wiki/open.js";
 
 /** The color of each harness's cursor and name in a note, unless the host gives one. */
 export const HARNESS_COLORS: Record<Harness, string> = { claude: "#d97757", codex: "#4f8cf7" };
@@ -43,8 +43,10 @@ export interface YamiPluginOptions {
    * Each needs a name of its own. `yami.setAgents` changes them while the plugin runs. None is allowed.
    */
   agents: (Agent | AgentEntry)[];
-  /** The plugin's modules. The wiki module is built in. */
+  /** The plugin's modules. The wiki and threads modules are built in. */
   modules?: YamiModule[];
+  /** Whether the Yami holds the built-in threads module. Default true. With false, a module of the plugin can take the id `threads`. */
+  threads?: boolean;
   /** Options of the wiki. The conversation folder and Obsidian's Excluded files always stay out of its index. */
   wiki?: WikiOptions;
   /** The folder of conversation notes. Default `conversations`. A function is read at each use. */
@@ -123,6 +125,7 @@ export class ObsidianYami extends Yami {
       vault: new ObsidianVault(app, vaultRoot(app)),
       agents: registered.map((r) => r.agent),
       modules: options.modules,
+      threads: options.threads,
       wiki: { ...options.wiki, exclude: () => [...ignoredPaths(app), ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] },
       conversations: { open: (open) => runs!.open(open) },
       conversationFolder: options.conversationFolder,
@@ -394,6 +397,16 @@ export class ObsidianYami extends Yami {
   /** Opens a note: in this tab, in a new tab, or as a link at the cursor of the active editor. */
   open(path: string, mode: OpenMode = "open"): Promise<void> {
     return openNote(this.app, path, mode);
+  }
+
+  /**
+   * Asks the person for a text in a prompt with one field: Enter gives the text, trimmed, and Escape gives
+   * nothing. The commands that create a module or a form ask for its name so.
+   * @example
+   * const name = await yami.ask("The name of the new flow, such as Daily review", "Create the flow");
+   */
+  ask(placeholder: string, hint: string): Promise<string | undefined> {
+    return askText(this.app, placeholder, hint);
   }
 
   /** Lets the person pick one item by typing. Resolves with nothing when the person closes the list. */

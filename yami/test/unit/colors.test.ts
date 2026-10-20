@@ -40,14 +40,18 @@ describe("module colors", () => {
     expect(colorsOf(named("alpha"), named("beta"), named("gamma"))).toEqual(first);
     expect(colorsOf(named("gamma"))).toMatchObject({ gamma: first.gamma });
     for (const id of ["alpha", "beta", "gamma"]) expect(MODULE_COLORS).toContain(first[id]);
-    expect(new Set(Object.values(first)).size).toBe(4);
+    // The wiki and threads have colors of their own, outside the basic ones, so they take none from a host's module.
+    expect(new Set(Object.values(first)).size).toBe(5);
+    const alone = new Yami({ vault, modules: [named("alpha"), named("beta"), named("gamma")], threads: false });
+    expect(Object.fromEntries(alone.modules.map((m) => [m.id, m.colors.folder]))).toEqual({ wiki: first.wiki, alpha: first.alpha, beta: first.beta, gamma: first.gamma });
+    expect(MODULE_COLORS).not.toContain(first.threads);
 
     const taken = colorsOf(named("owner", first.alpha), named("alpha"));
     expect(taken.owner).toBe(first.alpha);
     expect(taken.alpha).not.toBe(first.alpha);
 
     const many = colorsOf(...Array.from({ length: MODULE_COLORS.length + 2 }, (_, i) => named(`m${i}`)));
-    expect(new Set(Object.values(many)).size).toBe(MODULE_COLORS.length + 1);
+    expect(new Set(Object.values(many)).size).toBe(MODULE_COLORS.length + 2);
   });
 
   it("refuses a color that is no hex code, and knows no color before a Yami has the module", () => {
@@ -62,6 +66,7 @@ describe("module colors", () => {
     expect(rules).toContain(`.nav-folder-title[data-path="internal/wiki"] {\n  --nav-item-color: #4596a9;`);
     expect(rules).toContain('.nav-folder-title[data-path="mine"] {\n  --nav-item-color: #e5484d;');
     expect(rules).toContain('.nav-folder-title[data-path="internal/mine"] {\n  --nav-item-color: #b8696c;');
-    expect(rules.match(/\{/g)).toHaveLength(5);
+    expect(rules).toContain('.nav-folder-title[data-path="threads"] {\n  --nav-item-color: #6e56cf;');
+    expect(rules.match(/\{/g)).toHaveLength(7);
   });
 });

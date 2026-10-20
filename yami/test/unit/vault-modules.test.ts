@@ -63,7 +63,7 @@ describe("a vault module", () => {
     const { yami, vault, root, agent } = await fresh();
     await codeReview();
     await yami.enable();
-    expect(ids()).toEqual(["wiki", "hello", "code-review"]);
+    expect(ids()).toEqual(["wiki", "threads", "hello", "code-review"]);
     expect(yami.problems).toEqual([]);
     const module = yami.module("code-review")!;
     expect(module).toBeInstanceOf(VaultModule);
@@ -166,7 +166,7 @@ describe("a vault module", () => {
     await write("internal/old/old.md", { type: "module", module: "old", name: "Old" });
     await write("internal/old/templates/Task.md", { type: "template" });
     await yami.discover();
-    expect(ids()).toEqual(["wiki", "hello"]);
+    expect(ids()).toEqual(["wiki", "threads", "hello"]);
     expect(yami.problems).toEqual([]);
   });
 
@@ -224,7 +224,7 @@ describe("the problems of vault modules", () => {
     await write("internal/teal/flows/t/FLOW.md", base("t"));
     await yami.discover();
 
-    expect(ids()).toEqual(["wiki", "hello", "code-review", "teal"]);
+    expect(ids()).toEqual(["wiki", "threads", "hello", "code-review", "teal"]);
     expect(yami.module("code-review")!.flows.map((f) => f.name)).toEqual(["review-a-change"]);
     expect(yami.module("teal")).toMatchObject({ color: undefined, icon: "box" });
     const cr = "code-review · internal/code-review";
@@ -297,7 +297,7 @@ describe("live changes", () => {
     await write("internal/notes/flows/daily/FLOW.md", { name: "daily", description: "A daily note." });
     await yami.discover();
     expect(heard).toBe(1);
-    expect(ids()).toEqual(["wiki", "hello", "code-review", "notes"]);
+    expect(ids()).toEqual(["wiki", "threads", "hello", "code-review", "notes"]);
     expect(agent.preferences.skills).toContain(`${root}/internal/code-review`);
     const notes = yami.module("notes");
     const before = yami.module("code-review");
@@ -321,7 +321,7 @@ describe("live changes", () => {
     await vault.remove("internal/code-review/skills/review/SKILL.md");
     await yami.discover();
     expect(heard).toBe(4);
-    expect(ids()).toEqual(["wiki", "hello", "code-review", "notes"]);
+    expect(ids()).toEqual(["wiki", "threads", "hello", "code-review", "notes"]);
     expect(yami.module("code-review")!.flows).toEqual([]);
     expect(messages()).toEqual([
       'code-review · internal/code-review/flows/quick-look/FLOW.md · The flow names the skill "review", which is not in the vault. Create internal/code-review/skills/review/SKILL.md, or fix the name in skills.',
@@ -331,12 +331,12 @@ describe("live changes", () => {
     await vault.remove(MODULE);
     await yami.discover();
     expect(heard).toBe(5);
-    expect(ids()).toEqual(["wiki", "hello", "notes"]);
+    expect(ids()).toEqual(["wiki", "threads", "hello", "notes"]);
     off();
     await vault.remove("internal/notes/flows/daily/FLOW.md");
     await yami.discover();
     expect(heard).toBe(5);
-    expect(ids()).toEqual(["wiki", "hello"]);
+    expect(ids()).toEqual(["wiki", "threads", "hello"]);
   });
 
   it("lets a live run keep the flow it started with", async () => {

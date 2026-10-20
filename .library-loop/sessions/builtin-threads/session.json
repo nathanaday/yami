@@ -11,5 +11,14 @@
     "librarian",
     "obsidian_plugin"
   ],
-  "rounds": []
+  "rounds": [
+    {
+      "n": 1,
+      "base": {
+        "creator": "cfedf08e0b700f9667ca2145cd2399e086ae1a99",
+        "consumer": "cfedf08e0b700f9667ca2145cd2399e086ae1a99"
+      },
+      "started": "2026-10-20T02:53:41.180Z"
+    }
+  ]
 }

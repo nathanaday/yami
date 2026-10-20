@@ -123,40 +123,65 @@ describe("options that change while Yami runs", () => {
 });
 
 describe("what a Yami adds to the vault and to its agents", () => {
-  it("writes the vault ledger, the base skill, and the wiki module's documents, and gives each agent its tools and two skill sets, as the README lists them", async () => {
-    t = await testYami();
-    const root = t.root;
-    const files = (await readdir(root, { recursive: true, withFileTypes: true }))
+  const listed = async (root: string) =>
+    (await readdir(root, { recursive: true, withFileTypes: true }))
       .filter((entry) => entry.isFile())
       .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1))
       .sort();
-    expect(files).toEqual([
+  const WIKI_FILES = [
+    "internal/wiki/policies/cite-every-claim/POLICY.md",
+    "internal/wiki/policies/one-plan/POLICY.md",
+    "internal/wiki/policies/one-topic/POLICY.md",
+    "internal/wiki/promises/change-applied/PROMISE.md",
+    "internal/wiki/promises/clean-topics/PROMISE.md",
+    "internal/wiki/promises/reading-list-made/PROMISE.md",
+    "internal/wiki/promises/sources-absorbed/PROMISE.md",
+    "internal/wiki/sessions.base",
+    "internal/wiki/skills/checkout/SKILL.md",
+    "internal/wiki/skills/ingest/SKILL.md",
+    "internal/wiki/skills/ingest/drafter.md",
+    "internal/wiki/skills/ingest/extractor.md",
+    "internal/wiki/skills/ingest/page-forms.md",
+    "internal/wiki/wiki.md",
+  ];
+  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_checkout"];
+
+  it("writes the vault ledger, the base skill, and the documents of the wiki and threads, and gives each agent its tools and three skill sets, as the README lists them", async () => {
+    t = await testYami();
+    const root = t.root;
+    expect(await listed(root)).toEqual([
       "Yami.base",
-      "internal/wiki/policies/cite-every-claim/POLICY.md",
-      "internal/wiki/policies/one-plan/POLICY.md",
-      "internal/wiki/policies/one-topic/POLICY.md",
-      "internal/wiki/promises/change-applied/PROMISE.md",
-      "internal/wiki/promises/clean-topics/PROMISE.md",
-      "internal/wiki/promises/sources-absorbed/PROMISE.md",
-      "internal/wiki/sessions.base",
-      "internal/wiki/skills/ingest/SKILL.md",
-      "internal/wiki/skills/ingest/drafter.md",
-      "internal/wiki/skills/ingest/extractor.md",
-      "internal/wiki/skills/ingest/page-forms.md",
-      "internal/wiki/wiki.md",
+      "internal/threads/agents/reviewer/AGENT.md",
+      "internal/threads/agents/validator/AGENT.md",
+      "internal/threads/policies/change-through-tools/POLICY.md",
+      "internal/threads/promises/thread-closed/PROMISE.md",
+      "internal/threads/sessions.base",
+      "internal/threads/skills/run/SKILL.md",
+      "internal/threads/skills/spec/SKILL.md",
+      "internal/threads/skills/stub/SKILL.md",
+      "internal/threads/threads.md",
+      ...WIKI_FILES,
       "internal/yami/skills/run/SKILL.md",
     ]);
     expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual([
       "yami_check",
       "yami_agent",
-      "wiki_search",
-      "wiki_match",
-      "wiki_lint",
-      "wiki_tags",
-      "wiki_neighbors",
-      "wiki_chunks",
-      "wiki_change",
+      ...WIKI_TOOLS,
+      "threads_stub",
+      "threads_spec",
+      "threads_plan",
+      "threads_round",
+      "threads_close",
+      "threads_status",
     ]);
-    expect(t.agent.preferences.skills).toEqual([join(root, "internal/yami"), join(root, "internal/wiki")]);
+    expect(t.agent.preferences.skills).toEqual([join(root, "internal/yami"), join(root, "internal/wiki"), join(root, "internal/threads")]);
+  });
+
+  it("writes nothing of threads, and gives no tool, skill set, or color of it, when the host leaves it out", async () => {
+    t = await testYami({ threads: false });
+    expect(await listed(t.root)).toEqual(["Yami.base", ...WIKI_FILES, "internal/yami/skills/run/SKILL.md"]);
+    expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(["yami_check", "yami_agent", ...WIKI_TOOLS]);
+    expect(t.agent.preferences.skills).toEqual([join(t.root, "internal/yami"), join(t.root, "internal/wiki")]);
+    expect(t.yami.modules.map((module) => module.id)).toEqual(["wiki"]);
   });
 });

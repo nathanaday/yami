@@ -1,5 +1,6 @@
 import { Notice, type Command, type Plugin } from "obsidian";
 import { basename } from "../document/document.js";
+import type { FormKind } from "../document/schema.js";
 import type { YamiModule } from "../module/module.js";
 import type { SessionAct } from "../module/session.js";
 import { WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
@@ -7,11 +8,15 @@ import { noAgentsMessage } from "./agents.js";
 import { moduleIcon } from "./icons.js";
 import { WikiCompareModal } from "./wiki/compare-modal.js";
 import { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
-import { askText } from "./wiki/open.js";
 import { WikiSearchModal } from "./wiki/search-modal.js";
 import type { ObsidianYami } from "./yami.js";
 
 const title = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+/** A name as it reads after `<module>: ` in a command: its first letter in lower case, unless the first word is in capitals, as in `PR`. */
+const after = (name: string) => (/^\p{Lu}\p{Lu}/u.test(name) ? name : name.charAt(0).toLowerCase() + name.slice(1));
+
+/** The kinds of form that the commands of a module that takes vault flows create. */
+const FORM_KINDS: FormKind[] = ["agent", "flow", "policy", "promise", "skill"];
 
 /** Every command id of the library starts with it, so a host's own command never has the id of one of the library's. */
 export const COMMAND_PREFIX = "yami-";
@@ -166,20 +171,23 @@ export function addSessionCommands(yami: ObsidianYami): () => void {
 
 /**
  * For each module: a command for each of its acts (a new session, an action on no session), and one for
- * each action on a session. Returns the function that brings the commands up to date with `yami.modules`:
- * it adds the commands of a module that is new or changed, and removes those of a module, a flow, or
- * an action that is gone. `createYami` calls it when the modules change.
+ * each action on a session. For a code module that takes vault flows, also a command that creates a
+ * starter form of each kind, and one that creates a session of a flow that the person picks. Returns the
+ * function that brings the commands up to date with `yami.modules`: it adds the commands of a module or a
+ * flow that is new or changed, and removes those of a module, a flow, or an action that is gone.
+ * `createYami` calls it when the modules change.
  */
 export function addModuleCommands(yami: ObsidianYami): () => void {
   const group = commandGroup(yami.plugin);
   const sync = () => {
-    const wanted = new Map<string, { key: YamiModule; command: Command }>();
+    const wanted = new Map<string, { key: unknown; command: Command }>();
     for (const module of yami.modules) {
       const icon = moduleIcon(module);
       for (const act of module.acts()) {
         const id = act.kind === "new" ? `${module.id}-new-${act.flow.name}` : `${module.id}-${act.action.id}`;
-        const name = `${module.name}: ${act.kind === "new" ? `${act.label.charAt(0).toLowerCase()}${act.label.slice(1)}` : act.label}`;
-        wanted.set(id, { key: module, command: { id, name, icon, callback: () => void yami.runModuleAct(act) } });
+        const name = `${module.name}: ${after(act.label)}`;
+        // A new act keeps its flow, and a vault flow that changes is a new flow of the same module.
+        wanted.set(id, { key: act.kind === "new" ? act.flow : module, command: { id, name, icon, callback: () => void yami.runModuleAct(act) } });
       }
       for (const action of module.actions) {
         if (!("on" in action)) continue;
@@ -188,7 +196,7 @@ export function addModuleCommands(yami: ObsidianYami): () => void {
           key: module,
           command: {
             id,
-            name: `${module.name}: ${action.name}`,
+            name: `${module.name}: ${after(action.name)}`,
             icon,
             checkCallback: (checking) => {
               const session = yami.activeSession(action.on);
@@ -200,11 +208,48 @@ export function addModuleCommands(yami: ObsidianYami): () => void {
           },
         });
       }
+      if (module.vaultFlows) for (const [id, command] of vaultFlowCommands(yami, module)) wanted.set(id, { key: module, command: { ...command, id, icon } });
     }
     group(wanted);
   };
   sync();
   return sync;
+}
+
+/** The commands of a code module that takes vault flows: create a starter form of each kind, and create a session of a flow. */
+function vaultFlowCommands(yami: ObsidianYami, module: YamiModule): [string, Omit<Command, "id">][] {
+  const forms = FORM_KINDS.map((kind): [string, Omit<Command, "id">] => [
+    `${module.id}-create-${kind}`,
+    {
+      name: `${module.name}: create ${kind}`,
+      callback: () =>
+        void yami.notify(
+          yami.ask(`The name of the new ${kind}, such as Daily review`, `Create the ${kind}`).then(async (name) => {
+            if (!name) return;
+            const path = await yami.createForm(module, kind, name);
+            return { message: `Created ${path}.`, open: path };
+          }),
+        ),
+    },
+  ]);
+  const session: [string, Omit<Command, "id">] = [
+    `${module.id}-create-session`,
+    {
+      name: `${module.name}: create a flow session`,
+      callback: () =>
+        void yami.notify(
+          (async () => {
+            const flows = module.acts().flatMap((act) => (act.kind === "new" ? [act.flow] : []));
+            if (!flows.length) return `${module.name} has no flow that a person starts. Create one with ${module.name}: create flow.`;
+            const flow = await yami.pick(flows, (f) => f.title, `The flow of the new ${module.name} session`);
+            if (!flow) return;
+            const created = await flow.create();
+            return { message: `Created ${created.path}.`, open: created.path };
+          })(),
+        ),
+    },
+  ];
+  return [...forms, session];
 }
 
 /** New module: asks for a name, and creates a vault module from the starter. */
@@ -215,7 +260,7 @@ export function addNewModuleCommand(yami: ObsidianYami): void {
     icon: "package-plus",
     callback: () =>
       void yami.notify(
-        askText(yami.app, "The name of the new module, such as Code review", "Create the module").then(async (name) => {
+        yami.ask("The name of the new module, such as Code review", "Create the module").then(async (name) => {
           if (!name) return;
           const module = await yami.createModule(name);
           return { message: `Created the module ${module.name} in ${module.layout.internal}/.`, open: module.document };

@@ -1,21 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runCheck } from "yami";
-import { runTool, type ToolSet } from "yami/agent";
-import { readDocument, sectionText, updateDocument } from "yami/document";
-import { review, testYami, type FsVault, type TestYami } from "yami/testing";
-import type { Wiki } from "yami/wiki";
-import { Threads } from "../../src/modules/threads/index.js";
-import { assemble, parse } from "../../src/modules/threads/thread.js";
+import { runTool, type ToolSet } from "../../src/agent/index.js";
+import { readDocument, sectionText, updateDocument } from "../../src/document/index.js";
+import { runCheck } from "../../src/index.js";
+import { assemble } from "../../src/module/threads/thread.js";
+import { review, testYami, type FsVault, type TestYami } from "../../src/testing/index.js";
+import { parseThread as parse, ThreadsModule } from "../../src/threads/index.js";
+import type { Wiki } from "../../src/wiki/index.js";
 
 let t: TestYami;
 let vault: FsVault;
 let wiki: Wiki;
-let threads: Threads;
+let threads: ThreadsModule;
 let tools: ToolSet | undefined;
 
 beforeEach(async () => {
-  threads = new Threads();
-  t = await testYami({ modules: [threads] });
+  t = await testYami();
+  threads = t.yami.module("threads") as ThreadsModule;
   ({ vault } = t);
   wiki = t.yami.wiki;
   tools = t.yami.tools();
@@ -317,6 +317,12 @@ describe("threads_status and the thread check", () => {
     const { threads: list } = await call("status", {});
     expect(list.map((t: { title: string }) => t.title)).toEqual(["Divide", "Soon", "Later"]);
     expect(list[0]).toMatchObject({ phase: "failed", next: { step: "resolve" } });
+  });
+
+  it("gives a host the same status as the tool, through the module", async () => {
+    await planned();
+    expect(await threads.status("Divide")).toEqual(await call("status", { thread: "Divide" }));
+    expect(await threads.status()).toEqual(await call("status", {}));
   });
 
   it("derives the phase from the document, so a forged phase property changes nothing", async () => {

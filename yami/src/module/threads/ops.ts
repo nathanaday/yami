@@ -1,9 +1,10 @@
-import { z, type Flow, type Vault } from "yami";
-import { link, readDocument, sectionText, timestamp } from "yami/document";
-import { hash } from "yami/wiki";
+import { z } from "../../agent/index.js";
+import { link, readDocument, sectionText } from "../../document/document.js";
+import { timestamp } from "../../document/schema.js";
+import { hash } from "../../wiki/tokens.js";
+import type { Flow } from "../module.js";
 import {
   afterPass,
-  board,
   budget,
   bullets,
   decision,
@@ -15,8 +16,8 @@ import {
   oneLine,
   openFindings,
   OUTCOMES,
-  parse,
-  phase,
+  parseThread,
+  threadPhase,
   planHash,
   readable,
   renderPlan,
@@ -27,11 +28,13 @@ import {
   specHash,
   view,
   type Finding,
-  type Outcome,
+  type FindingOutcome,
   type Requirement,
   type Round,
   type Task,
   type Thread,
+  type ThreadStatus,
+  type Where,
 } from "./thread.js";
 
 /** The input of each threads tool is declared once: the tool's schema, and the type of its SDK function. */
@@ -108,27 +111,28 @@ export const closeShape = {
 };
 
 /** Plants a thread: its session document, with the idea in the user's words and the research's context. */
-export async function stub(vault: Vault, flow: Flow, input: In<typeof stubShape>["threads"][number]) {
+export async function stub(where: Where, flow: Flow, input: In<typeof stubShape>["threads"][number]) {
+  const vault = where.vault;
   const idea = noHeadings("idea", input.idea);
   if (!idea) throw new Error("idea is empty: give the user's words.");
   const description = oneLine("description", input.description);
   const context = noHeadings("context", input.context ?? "");
   const after = [];
-  for (const other of input.after ?? []) after.push(link((await find(vault, other)).path));
-  const similarTo = await similar(vault, input.title, description);
+  for (const other of input.after ?? []) after.push(link((await find(where, other)).path));
+  const similarTo = await similar(where, input.title, description);
   const { path } = await flow.create({
     name: input.title,
     exact: true,
     request: idea,
     fields: { description, repositories: input.repositories ?? [], tags: input.tags ?? [], after, ...(input.priority && { priority: input.priority }) },
   });
-  const t = await save(vault, parse(await readDocument(vault, path)), { Context: context });
-  return { ...(await view(vault, t)), ...(similarTo.length && { similar: similarTo.map(({ title, path, phase }) => ({ title, path, phase })) }) };
+  const t = await save(vault, parseThread(await readDocument(vault, path)), { Context: context });
+  return { ...(await view(where, t)), ...(similarTo.length && { similar: similarTo.map(({ title, path, phase }) => ({ title, path, phase })) }) };
 }
 
 /** Writes the spec of a thread, or its new text. The plan stays. */
-export function spec(vault: Vault, input: In<typeof specShape>) {
-  return withThread(vault, input.thread, async (t) => {
+export function spec(where: Where, input: In<typeof specShape>): Promise<ThreadStatus> {
+  return withThread(where, input.thread, async (t, vault) => {
     readable(t, "Requirements");
     // The budget as the agent read it: one more round that the user's words give below is not undone by sending it back.
     const before = budget(t);
@@ -182,8 +186,8 @@ export function spec(vault: Vault, input: In<typeof specShape>) {
 }
 
 /** Adds tasks, and marks tasks done or dropped. A task that needs more work after it is done gets a new task. */
-export function plan(vault: Vault, input: In<typeof planShape>) {
-  return withThread(vault, input.thread, async (t) => {
+export function plan(where: Where, input: In<typeof planShape>): Promise<ThreadStatus> {
+  return withThread(where, input.thread, async (t, vault) => {
     if (!t.requirements.length) throw new Error(`${t.title} has no spec yet; write it with threads_spec first.`);
     if (!input.add?.length && !input.done?.length && !input.drop?.length) throw new Error("threads_plan needs add, done, or drop.");
     readable(t, "Plan");
@@ -218,8 +222,8 @@ export function plan(vault: Vault, input: In<typeof planShape>) {
 }
 
 /** Records a validation round, as the validator reported it. It holds the outcomes of the round before. */
-export function round(vault: Vault, input: In<typeof roundShape>) {
-  return withThread(vault, input.thread, async (t) => {
+export function round(where: Where, input: In<typeof roundShape>): Promise<ThreadStatus> {
+  return withThread(where, input.thread, async (t, vault) => {
     if (!t.plan.length) throw new Error(`${t.title} has no plan; a round checks done work.`);
     const open = t.plan.filter((task) => task.state === "open").map((task) => task.id);
     if (open.length) throw new Error(`${open.join(", ")} ${open.length === 1 ? "is" : "are"} open: mark each done or dropped with threads_plan before a round.`);
@@ -279,8 +283,8 @@ export function round(vault: Vault, input: In<typeof roundShape>) {
 }
 
 /** Closes a validated thread, or drops a thread. The outcome goes into its document. */
-export function close(vault: Vault, input: In<typeof closeShape>) {
-  return withThread(vault, input.thread, async (t) => {
+export function close(where: Where, input: In<typeof closeShape>): Promise<ThreadStatus> {
+  return withThread(where, input.thread, async (t, vault) => {
     const summary = oneLine("summary", input.summary);
     const date = timestamp().slice(0, 10);
     if (input.outcome === "dropped") {
@@ -289,8 +293,8 @@ export function close(vault: Vault, input: In<typeof closeShape>) {
       await vault.remove(t.path);
       return { ...t, outcome: "dropped" as const };
     }
-    const p = phase(t);
-    if (p !== "validated") throw new Error(`${t.title} is ${p}, not validated: ${(await view(vault, t)).next.text}.`);
+    const p = threadPhase(t);
+    if (p !== "validated") throw new Error(`${t.title} is ${p}, not validated: ${(await view(where, t)).next.text}.`);
     const r = lastRound(t)!;
     const outcomes = resolve(t, input.resolved ?? [], true);
     const done = t.plan.filter((task) => task.state === "done").length;
@@ -306,17 +310,12 @@ export function close(vault: Vault, input: In<typeof closeShape>) {
   });
 }
 
-/** One thread's state and next step, or the open threads, the most urgent first. */
-export async function status(vault: Vault, thread?: string) {
-  return thread ? view(vault, await find(vault, thread)) : { threads: await board(vault) };
-}
-
 /** Runs a write on a thread that has not ended, one write at a time, and returns the thread's view after it. */
-function withThread(vault: Vault, ref: string, work: (t: Thread) => Promise<Thread>) {
+function withThread(where: Where, ref: string, work: (t: Thread, vault: Where["vault"]) => Promise<Thread>): Promise<ThreadStatus> {
   return serial(async () => {
-    const t = await find(vault, ref);
+    const t = await find(where, ref);
     if (t.outcome) throw new Error(`${t.title} is ${t.outcome}; it takes no more changes.`);
-    return view(vault, await work(t));
+    return view(where, await work(t, where.vault));
   });
 }
 
@@ -325,13 +324,13 @@ function withThread(vault: Vault, ref: string, work: (t: Thread) => Promise<Thre
  * finding of the passing round takes stub, declined, or knowledge; so does a predating finding, unless
  * the user asked to fix it here.
  */
-function resolve(t: Thread, input: NonNullable<In<typeof roundShape>["resolved"]>, closing: boolean): Record<string, Outcome> {
+function resolve(t: Thread, input: NonNullable<In<typeof roundShape>["resolved"]>, closing: boolean): Record<string, FindingOutcome> {
   const last = lastRound(t);
   if (!last) {
     if (input.length) throw new Error("resolved names findings, and the thread has no round yet.");
     return {};
   }
-  const out: Record<string, Outcome> = {};
+  const out: Record<string, FindingOutcome> = {};
   for (const res of input) {
     const id = res.finding.trim().toUpperCase();
     const f = openFindings(t).find((x) => x.id === id);

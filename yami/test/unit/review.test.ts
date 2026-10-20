@@ -236,7 +236,7 @@ describe("the review step", () => {
     expect(await session.start()).toMatchObject({ state: "done" });
     const names = (s: { options: { tools?: { tools: AgentTool[] } } }) => s.options.tools?.tools.map((tool) => tool.name);
     const [worker, reviewer] = agent.started;
-    expect(names(reviewer!)).toEqual(["yami_check", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "judged_count", "yami_review"]);
+    expect(names(reviewer!)).toEqual(["yami_check", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "threads_status", "judged_count", "yami_review"]);
     expect(reviewer!.options.tools?.name).toBe("yami");
     expect(names(worker!)).toContain("wiki_change");
     expect(names(worker!)).toContain("judged_greet_user");

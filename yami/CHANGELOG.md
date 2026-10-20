@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.15.0 · library-loop builtin-threads round 1
+
+Yami has two built-in modules: the wiki, which now holds the checkout, and threads. A code module can take flows and forms from the vault, and `createYami` gives such a module commands that write starter forms and create a session of a flow. Threads takes vault flows.
+
+### Breaking
+- **Every Yami holds the threads module**, after the wiki and before the host's modules, so `yami.modules`, `yami.tools()`, `yami.skills()`, and the files that `enable` writes hold threads too. A host module with the id `threads` throws `The id threads is the built-in threads module's. …`. Migrate: a plugin that defined its own threads module deletes it and uses the built-in one, `yami.module("threads")` (a `ThreadsModule` from `yami/threads`); its thread documents in `threads/` keep working, since the id, the folder, the flow, and the fields are the same. A plugin that keeps a module of its own with the id passes `threads: false` to `createYami` or `Yami`, or renames it. A test that lists the modules or the tools adds threads, or builds with `testYami({ threads: false })`. The host's modules keep their colors: threads has a color of its own outside `MODULE_COLORS`.
+- **The checkout is part of the wiki module.** For a plugin that defined the librarian module: the tool `librarian_checkout` is `wiki_checkout`; the skill `/librarian:checkout` is `/wiki:checkout`; the promise is `internal/wiki/promises/reading-list-made/PROMISE.md` with the check `checked-out`; the reading lists are in `internal/wiki/sessions/<date> <name>.md`, not `librarian/<date> <name>.md`, with their copies in the folder of the same name; the commands are `Wiki: new checkout` (`yami-wiki-new-checkout`) and `Wiki: return this checkout` (`yami-wiki-return`); `Librarian.makeCheckout` and `returnCheckout` are `WikiModule.makeCheckout` and `returnCheckout`, and the type `Order` is `CheckoutOrder`, `Returned` is `ReturnedCheckout`. A session of another module or of another flow is refused with `<path> is not a checkout session of the wiki module.` Migrate: delete the librarian module. To keep an old checkout that is out, move `librarian/<name>.md` and its folder `librarian/<name>/` into `internal/wiki/sessions/`, and set `module: wiki` in the session document and the copies' `checkout` link to the new path; a returned one can stay where it is as a record.
+- **The command of an action has the first letter of the action's name in lower case**, as the command of a flow has: `Notes: publish this summary`, not `Notes: Publish this summary`. A name whose first word is in capitals keeps it: `Notes: PR comment`. The ids do not change. Migrate: a test that finds a command by its name uses the new name, or its id.
+- **`YamiModule.flows` is a getter**: the code flows, then the vault flows. Pushing to it adds no flow. Migrate: make a flow with `this.flow(options)`.
+
+### Added
+- `yami/threads`: `ThreadsModule`, with `threads.status(thread?)`, which gives what `threads_status` gives; `parseThread`, `threadPhase`, and `nextStep`, which read a thread's phase and next step from its document; `THREAD_FLOW`, `DEFAULT_BUDGET`, and the types `Thread`, `ThreadPhase`, `NextStep`, `ThreadStatus`, `BoardEntry`, `Requirement`, `Task`, `Round`, `Finding`, and `FindingOutcome`.
+- The option `threads` of `Yami`, `createYami`, and `testYami`: `false` leaves the built-in threads module out, with its tools, skills, commands, files, ledger, and color.
+- `YamiModule.vaultFlows`: a code module with `true` takes each valid `internal/<id>/flows/<name>/FLOW.md` as a flow after its code flows, and the skills that a person adds as its own. A broken vault flow, one with a code flow's name, and one with a field that does not fit the module's schema are problems in `yami.problems`, and keep out only that flow.
+- `yami.createForm(module, kind, name)` writes a starter agent, flow, policy, promise, or skill into such a module, discovers, and returns its path.
+- For each code module that takes vault flows, the commands `<Module>: create agent`, `create flow`, `create policy`, `create promise`, `create skill` (`yami-<id>-create-<kind>`), and `<Module>: create a flow session` (`yami-<id>-create-session`).
+- `ObsidianYami.ask(placeholder, hint)`, the one-field prompt that New module and the create commands use.
+- The wiki module's checkout: the flow `checkout`, the tool `wiki_checkout`, the skill `/wiki:checkout`, the check `checked-out`, the action `return`, the fields `status` and `returned`, the table `Checkouts` in its ledger, `WikiModule.makeCheckout` and `returnCheckout`, and the types `CheckoutOrder`, `Checkout`, and `ReturnedCheckout` in `yami`.
+- The live test of a thread: `YAMI_LIVE_THREAD=1 npm run test:live`.
+
+### Changed
+- The first prompt of a run lists a flow's own fields among the session properties, beside the fields of the module's schema.
+- The command of a flow follows its flow, so a vault flow that changes in a code module gets its command again with the new flow.
+
+### Fixed
+- A unit test of `reads.test.ts` waited 20 ms for a run to start, and failed once under load. It waits for the turn to start.
+
 ## 0.14.1 · links in tables
 
 A link in a Markdown table resolves as Obsidian resolves it. No change breaks a host.

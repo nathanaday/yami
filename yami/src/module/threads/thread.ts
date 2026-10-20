@@ -1,24 +1,38 @@
-import type { Vault } from "yami";
-import { basename, linkTarget, linksOf, readDocument, sectionText, timestamp, writeDocument, type Document } from "yami/document";
-import { hash, tokens } from "yami/wiki";
+import { basename, linkTarget, linksOf, readDocument, sectionText, writeDocument, type Document } from "../../document/document.js";
+import { timestamp } from "../../document/schema.js";
+import type { Vault } from "../../document/vault.js";
+import { hash, tokens } from "../../wiki/tokens.js";
+import type { Layout } from "../module.js";
 
-export const THREADS = "threads";
+/** The name of the threads module's one code flow. A session of another flow in `threads/` is not a thread. */
+export const THREAD_FLOW = "thread";
+/** The rounds a thread may take when its `budget` sets none. */
 export const DEFAULT_BUDGET = 3;
 export const OUTCOMES = ["fixed", "spec", "stub", "declined", "knowledge"] as const;
 /** The outcomes that need no more work in this thread: the ones a passing round's findings and older problems take. */
 export const ELSEWHERE = ["stub", "declined", "knowledge"];
 const PRIORITIES = ["high", "normal", "low"];
 
-export type Phase = "stub" | "specified" | "planned" | "in progress" | "unvalidated" | "failed" | "validated" | "closed" | "dropped";
+/** Where the threads are: the threads module's id, vault, and layout. */
+export interface Where {
+  readonly id: string;
+  readonly vault: Vault;
+  readonly layout: Layout;
+}
+
+/** A thread's phase, which code derives from its document each time it reads it. */
+export type ThreadPhase = "stub" | "specified" | "planned" | "in progress" | "unvalidated" | "failed" | "validated" | "closed" | "dropped";
 
 /** The sections of a thread, in the order the document holds them. Other sections keep their place after these. */
 const ORDER = ["Request", "Deliverables", "Progress", "Context", "Goal", "Requirements", "Rules", "Decisions", "Out of scope", "Knowledge", "Open questions", "Plan", "Validation", "Outcome"];
 
+/** A requirement of a thread's spec: `- **R1** text`. */
 export interface Requirement {
   id: string;
   text: string;
 }
 
+/** A task of a thread's plan: `- [ ] **T1** text · serves R1`, with a `done:` or `dropped:` trail. */
 export interface Task {
   id: string;
   text: string;
@@ -29,6 +43,7 @@ export interface Task {
   details: string;
 }
 
+/** A finding of a validation round. */
 export interface Finding {
   id: string;
   text: string;
@@ -37,7 +52,8 @@ export interface Finding {
   predates?: string;
 }
 
-export interface Outcome {
+/** What became of a finding of the round before. */
+export interface FindingOutcome {
   outcome: (typeof OUTCOMES)[number];
   note: string;
 }
@@ -57,9 +73,10 @@ export interface Round {
   results: Record<string, "pass" | "fail">;
   findings: Finding[];
   /** The outcome of each finding of the round before. */
-  resolved?: Record<string, Outcome>;
+  resolved?: Record<string, FindingOutcome>;
 }
 
+/** A thread as its document says: what code reads from its sections. */
 export interface Thread {
   path: string;
   title: string;
@@ -72,7 +89,8 @@ export interface Thread {
   problems: string[];
 }
 
-export interface Next {
+/** What a thread needs next, as a step and its words. */
+export interface NextStep {
   step: "spec" | "plan" | "wait" | "execute" | "validate" | "resolve" | "ask" | "close" | "none";
   text: string;
 }
@@ -87,7 +105,8 @@ const SEP = " · ";
 
 // Reading
 
-export function parse(doc: Document): Thread {
+/** Reads a thread from its session document. A line that the tools cannot read is a problem of the thread. */
+export function parseThread(doc: Document): Thread {
   const t: Thread = { path: doc.path, title: basename(doc.path), doc, requirements: [], plan: [], rounds: [], problems: [] };
   const unread = (heading: string, line: string) => t.problems.push(`## ${heading} holds a line the tools cannot read: "${line.trim().slice(0, 80)}". Fix it in Obsidian, or ask the user.`);
   for (const line of sectionText(doc.body, "Requirements").split("\n")) {
@@ -150,7 +169,8 @@ const current = (t: Thread, r = lastRound(t)) => r !== undefined && r.spec === s
 /** The findings that wait for an outcome: those of the last round, until the next round or the close gives them one. */
 export const openFindings = (t: Thread) => (t.outcome ? [] : (lastRound(t)?.findings ?? []));
 
-export function phase(t: Thread): Phase {
+/** The phase of a thread, derived from its requirements, its plan, its rounds, and its outcome. Its `phase` property is a copy that no code trusts. */
+export function threadPhase(t: Thread): ThreadPhase {
   if (t.outcome) return t.outcome;
   if (!t.requirements.length) return "stub";
   if (!t.plan.length) return "specified";
@@ -160,8 +180,9 @@ export function phase(t: Thread): Phase {
   return "unvalidated";
 }
 
-export function next(t: Thread): Next {
-  const p = phase(t);
+/** The next step of a thread, from its phase, its rounds, and its budget. It does not know of the threads in `after`; `ThreadsModule.status` does. */
+export function nextStep(t: Thread): NextStep {
+  const p = threadPhase(t);
   const r = lastRound(t);
   if ((p === "unvalidated" || p === "failed") && t.rounds.length >= budget(t)) {
     return { step: "ask", text: `ask the user: the thread used its ${budget(t)} rounds, and round ${r!.n} ${r!.verdict === "pass" ? "passed before the spec or the plan changed" : "failed"}` };
@@ -186,27 +207,55 @@ export function next(t: Thread): Next {
 }
 
 /** The threads in `after` that are not validated, closed, or dropped yet. A planned thread waits for them. */
-export async function waiting(vault: Vault, t: Thread, threads?: Thread[]): Promise<string[]> {
+export async function waiting(where: Where, t: Thread, threads?: Thread[]): Promise<string[]> {
   const targets = linksOf(t.doc.properties.after).map((target) => target.replace(/\.md$/, "").toLowerCase());
   if (!targets.length) return [];
-  threads ??= await all(vault);
+  threads ??= await all(where);
   return targets
     .map((target) => threads.find((o) => o.path.slice(0, -3).toLowerCase() === target || o.title.toLowerCase() === target))
-    .filter((o): o is Thread => o !== undefined && !["validated", "closed", "dropped"].includes(phase(o)))
+    .filter((o): o is Thread => o !== undefined && !["validated", "closed", "dropped"].includes(threadPhase(o)))
     .map((o) => o.title);
 }
 
+/** One thread's state and next step: what `threads_status` and every threads tool return. */
+export interface ThreadStatus {
+  title: string;
+  path: string;
+  phase: ThreadPhase;
+  /** The next step. `wait` when the thread is planned or in progress and a thread in its `after` is not validated or ended. */
+  next: NextStep;
+  /** The count of requirements. */
+  requirements: number;
+  tasks: { done: number; open: number; dropped: number };
+  /** The count of rounds. */
+  rounds: number;
+  budget: number;
+  last_round?: { n: number; verdict: "pass" | "fail"; current: boolean; failing: string[]; open_findings: Finding[] };
+  /** What is wrong with the document, each with its fix. */
+  problems?: string[];
+}
+
+/** An open thread on the board. */
+export interface BoardEntry {
+  title: string;
+  path: string;
+  phase: ThreadPhase;
+  next: NextStep;
+  priority: string;
+  description: string;
+}
+
 /** What a tool returns: the thread's state and its next step. */
-export async function view(vault: Vault, t: Thread) {
+export async function view(where: Where, t: Thread): Promise<ThreadStatus> {
   const r = lastRound(t);
   const count = (state: Task["state"]) => t.plan.filter((task) => task.state === state).length;
-  const p = phase(t);
-  const before = p === "planned" || p === "in progress" ? await waiting(vault, t) : [];
+  const p = threadPhase(t);
+  const before = p === "planned" || p === "in progress" ? await waiting(where, t) : [];
   return {
     title: t.title,
     path: t.path,
     phase: p,
-    next: before.length ? { step: "wait" as const, text: `wait for ${before.join(", ")} to be validated` } : next(t),
+    next: before.length ? { step: "wait" as const, text: `wait for ${before.join(", ")} to be validated` } : nextStep(t),
     requirements: t.requirements.length,
     tasks: { done: count("done"), open: count("open"), dropped: count("dropped") },
     rounds: t.rounds.length,
@@ -226,21 +275,23 @@ export async function view(vault: Vault, t: Thread) {
 
 // The board: every thread of the vault
 
-/** Every thread: each session document of the threads module directly in `threads/`. */
-export async function all(vault: Vault): Promise<Thread[]> {
+/** Every thread: each session document of the thread flow directly in the module's sessions folder. */
+export async function all(where: Where): Promise<Thread[]> {
+  const folder = where.layout.sessions;
   const out: Thread[] = [];
-  for (const path of await vault.list(THREADS)) {
-    if (path.slice(THREADS.length + 1).includes("/")) continue;
-    const doc = await readDocument(vault, path);
-    if (doc.properties.type === "session" && doc.properties.module === "threads") out.push(parse(doc));
+  for (const path of await where.vault.list(folder)) {
+    if (path.slice(folder.length + 1).includes("/")) continue;
+    const doc = await readDocument(where.vault, path);
+    const flow = doc.properties.flow ?? "";
+    if (doc.properties.type === "session" && doc.properties.module === where.id && (flow === "" || flow === THREAD_FLOW)) out.push(parseThread(doc));
   }
   return out;
 }
 
 /** The thread a reference names: its title, a link to it, or its path. A path in another folder names no thread. */
-export async function find(vault: Vault, ref: string): Promise<Thread> {
+export async function find(where: Where, ref: string): Promise<Thread> {
   const target = linkTarget(ref).replace(/\.md$/, "").toLowerCase();
-  const found = (await all(vault)).find((t) => (target.includes("/") ? t.path.slice(0, -3).toLowerCase() === target : t.title.toLowerCase() === target));
+  const found = (await all(where)).find((t) => (target.includes("/") ? t.path.slice(0, -3).toLowerCase() === target : t.title.toLowerCase() === target));
   if (!found) throw new Error(`No thread is named "${ref}". threads_status with no thread lists them.`);
   return found;
 }
@@ -248,24 +299,24 @@ export async function find(vault: Vault, ref: string): Promise<Thread> {
 const RANK: Record<string, number> = { failed: 0, "in progress": 1, unvalidated: 2, validated: 3, planned: 4, specified: 5, stub: 6 };
 
 /** The open threads, the most urgent first: by phase, then priority. A thread that waits comes after those that can go on. */
-export async function board(vault: Vault) {
-  const threads = await all(vault);
-  const out: { title: string; path: string; phase: Phase; next: Next; priority: string; description: string }[] = [];
+export async function board(where: Where): Promise<BoardEntry[]> {
+  const threads = await all(where);
+  const out: BoardEntry[] = [];
   for (const t of threads.filter((x) => !x.outcome)) {
-    const p = phase(t);
+    const p = threadPhase(t);
     const priority = PRIORITIES.includes(String(t.doc.properties.priority)) ? String(t.doc.properties.priority) : "normal";
-    const before = p === "planned" || p === "in progress" ? await waiting(vault, t, threads) : [];
-    const step = before.length ? { step: "wait" as const, text: `wait for ${before.join(", ")} to be validated` } : next(t);
+    const before = p === "planned" || p === "in progress" ? await waiting(where, t, threads) : [];
+    const step = before.length ? { step: "wait" as const, text: `wait for ${before.join(", ")} to be validated` } : nextStep(t);
     out.push({ title: t.title, path: t.path, phase: p, next: step, priority, description: String(t.doc.properties.description ?? "") });
   }
-  const rank = (x: (typeof out)[number]) => (x.next.step === "wait" ? RANK.stub! + 1 : RANK[x.phase]!);
+  const rank = (x: BoardEntry) => (x.next.step === "wait" ? RANK.stub! + 1 : RANK[x.phase]!);
   return out.sort((a, b) => rank(a) - rank(b) || PRIORITIES.indexOf(a.priority) - PRIORITIES.indexOf(b.priority) || (a.title < b.title ? -1 : 1));
 }
 
 /** Open threads whose title and description share most of their words with a new one. */
-export async function similar(vault: Vault, title: string, description: string) {
+export async function similar(where: Where, title: string, description: string): Promise<BoardEntry[]> {
   const words = new Set(tokens(`${title} ${description}`));
-  return (await board(vault)).filter((other) => {
+  return (await board(where)).filter((other) => {
     const theirs = new Set(tokens(`${other.title} ${other.description}`));
     const shared = [...words].filter((word) => theirs.has(word)).length;
     return other.title !== title && shared >= 2 && shared >= Math.min(words.size, theirs.size) / 2;
@@ -286,8 +337,8 @@ export function serial<T>(work: () => Promise<T>): Promise<T> {
 /** Writes the thread's document with its sections in order, and its derived phase as a copy for the ledger. */
 export async function save(vault: Vault, t: Thread, sections: Record<string, string | undefined>): Promise<Thread> {
   t.doc.body = assemble(t.doc.body, sections);
-  const saved = parse(t.doc);
-  saved.doc.properties.phase = phase(saved);
+  const saved = parseThread(t.doc);
+  saved.doc.properties.phase = threadPhase(saved);
   saved.doc.properties.updated = timestamp();
   await writeDocument(vault, saved.doc);
   return saved;
@@ -349,7 +400,7 @@ export function decision(what: string, userAsked: string): string {
  * that keeps them. A thread that used its budget gets the one round that validates the work they asked for.
  */
 export function afterPass(t: Thread, what: string, userAsked: string | undefined): string | undefined {
-  if (phase(t) !== "validated") return undefined;
+  if (threadPhase(t) !== "validated") return undefined;
   if (!userAsked?.trim()) throw new Error(`${t.title} passed round ${lastRound(t)!.n}: ${what} now would make that round stale. Close the thread; or, when the user asks for it, give their words in user_asked.`);
   if (t.rounds.length < budget(t)) return decision(what, userAsked);
   t.doc.properties.budget = t.rounds.length + 1;

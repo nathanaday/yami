@@ -28,6 +28,8 @@ export interface TestYamiOptions {
   /** The agent's first turns. `agent.queue` adds more. */
   turns?: Turn[];
   wiki?: WikiOptions;
+  /** Whether the Yami holds the built-in threads module, as the option of `Yami`. Default true. */
+  threads?: boolean;
   /**
    * Files and folders to copy into the vault before the modules are enabled, so that `enable` finds them,
    * as a vault module: each vault path with the file or the folder on disk to copy there. A relative disk
@@ -56,7 +58,7 @@ export async function testYami(options: TestYamiOptions = {}): Promise<TestYami>
   }
   const vault = new FsVault(root);
   const agent = new ScriptedAgent(options.turns);
-  const yami = new Yami({ vault, agents: [agent], modules: options.modules, wiki: options.wiki });
+  const yami = new Yami({ vault, agents: [agent], modules: options.modules, wiki: options.wiki, threads: options.threads });
   await yami.enable();
   return {
     yami,

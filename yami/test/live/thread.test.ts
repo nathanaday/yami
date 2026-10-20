@@ -10,14 +10,13 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { Yami } from "yami";
-import { ClaudeAgent } from "yami/agent/claude";
-import { FileConversations } from "yami/conversation";
-import { readDocument } from "yami/document";
-import { FsVault } from "yami/testing";
-import { Threads } from "../../src/modules/threads/index.js";
-import { stub } from "../../src/modules/threads/ops.js";
-import { parse, phase } from "../../src/modules/threads/thread.js";
+import { ClaudeAgent } from "../../src/agent/claude.js";
+import { FileConversations } from "../../src/conversation/index.js";
+import { readDocument } from "../../src/document/index.js";
+import { Yami } from "../../src/index.js";
+import { stub } from "../../src/module/threads/ops.js";
+import { FsVault } from "../../src/testing/index.js";
+import { parseThread as parse, threadPhase as phase, type ThreadsModule } from "../../src/threads/index.js";
 
 describe.runIf(process.env.YAMI_LIVE_THREAD)("a thread with a real agent", () => {
   it("goes from stub to closed: spec, review, plan, commits, a fresh validator, close", { timeout: 1_800_000 }, async () => {
@@ -36,12 +35,12 @@ describe.runIf(process.env.YAMI_LIVE_THREAD)("a thread with a real agent", () =>
 
     const vault = new FsVault(path.join(root, "vault"));
     mkdirSync(vault.root);
-    const threads = new Threads();
     const agent = new ClaudeAgent({ preferences: { effort: "low" } });
     // This test is the user: it allows each request, such as a commit in the scratch repository.
-    const yami = new Yami({ vault, agents: [agent], modules: [threads], conversations: new FileConversations(vault, async () => "allow") });
+    const yami = new Yami({ vault, agents: [agent], conversations: new FileConversations(vault, async () => "allow") });
+    const threads = yami.module("threads") as ThreadsModule;
     await yami.enable();
-    await stub(vault, threads.thread, {
+    await stub(threads, threads.thread, {
       title: "Divide",
       idea: "calc needs a divide(a, b) function that throws an error when b is zero.",
       description: "Add divide to calc.js, with tests.",

@@ -27,7 +27,7 @@ class Other extends YamiModule {
 
 async function fresh(name: string, flow: (m: Team) => Team["work"] = (m) => m.work) {
   const team = new Team();
-  t = await testYami({ modules: [team, new Other()] });
+  t = await testYami({ modules: [team, new Other()], threads: false });
   const session = await flow(team).create({ name, exact: true });
   return { ...t, team, session };
 }
@@ -292,7 +292,7 @@ describe("names of forms", () => {
       readonly short = this.policy({ name: "short", description: "Short lines.", body: "Keep each line short." });
     }
     const team = new Team();
-    t = await testYami({ modules: [team, new Brief()] });
+    t = await testYami({ modules: [team, new Brief()], threads: false });
     const session = await team.work.create({ name: "typed" });
     const path = session.path;
     await t.vault.write(path, (await t.vault.read(path)).replace('agents:\n  - "[[internal/team/agents/reader/AGENT|reader]]"', "agents:\n  - reader").replace("policies: []", "policies:\n  - brief:short\n  - always-say-hello"));
@@ -312,7 +312,7 @@ describe("names of forms", () => {
 
   it("stop a run before it starts when they find nothing", async () => {
     const team = new Team();
-    t = await testYami({ modules: [team] });
+    t = await testYami({ modules: [team], threads: false });
     const session = await team.work.create({ name: "lost" });
     await t.vault.write(session.path, (await t.vault.read(session.path)).replace("policies: []", "policies:\n  - nowhere:short"));
     await expect(session.start()).rejects.toThrow('The session links to policies "nowhere:short", which is not in the vault.');
