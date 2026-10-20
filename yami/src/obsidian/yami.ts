@@ -18,7 +18,7 @@ import { ObsidianConversations } from "./conversation/obsidian-conversations.js"
 import { NoteSessions, type AgentWork, type NoteEvents, type NoteSessionsOptions } from "./note-sessions.js";
 import { PermissionPrompts } from "./prompts/permission-modal.js";
 import { ObsidianVault } from "./vault.js";
-import { askText, ignoredPaths, openNote, pickOne, watchWiki, type OpenMode } from "./wiki/open.js";
+import { askText, ignoredPaths, openNote, pickOne, watchWiki, type AskOptions, type OpenMode } from "./wiki/open.js";
 
 /** The color of each harness's cursor and name in a note, unless the host gives one. */
 export const HARNESS_COLORS: Record<Harness, string> = { claude: "#d97757", codex: "#4f8cf7" };
@@ -310,9 +310,10 @@ export class ObsidianYami extends Yami {
   /**
    * Calls the listener when the sessions or the modules may look different: a session document or a
    * module's document is created, changed, renamed, or removed; a run changes its status; or a discovery
-   * changes `modules` or `problems`, as `onModulesChange` hears. So a view of the modules and the sessions
-   * needs this feed only. Calls that come close together become one, a moment after the last. Returns the
-   * function that stops it.
+   * changes `modules` or `problems`, as `onModulesChange` hears. The wiki's change documents are under its
+   * internal folder, so a view hears of each proposal, approval, rejection, and failure here too. So a view
+   * of the modules, the sessions, and the proposals needs this feed only. Calls that come close together
+   * become one, a moment after the last. Returns the function that stops it.
    */
   onSessionsChange(listener: () => void): () => void {
     return this.#sessionsFeed.on(listener);
@@ -401,13 +402,16 @@ export class ObsidianYami extends Yami {
 
   /**
    * Asks the person for a text in a prompt with one field: Enter gives the text, trimmed, and Escape gives
-   * nothing. The commands that create a module or a form ask for its name so. The prompt has the class
-   * `yami-ask`; its one item reads `<hint>: <text>`. The README table "The prompts" names its elements.
+   * nothing. The commands that create a module or a form ask for its name so, and Wiki: reject a change asks
+   * for the reason. The prompt has the class `yami-ask`; its one item reads `<hint>: <text>`. With
+   * `empty`, the item reads that text while the field is empty, and Enter then gives `""`; without it, an
+   * empty field has no item. The README table "The prompts" names its elements.
    * @example
    * const name = await yami.ask("The name of the new flow, such as Daily review", "Create the flow");
+   * const reason = await yami.ask("Why the change is rejected", "Reject the change", { empty: "Reject the change with no reason" });
    */
-  ask(placeholder: string, hint: string): Promise<string | undefined> {
-    return askText(this.app, placeholder, hint);
+  ask(placeholder: string, hint: string, options: AskOptions = {}): Promise<string | undefined> {
+    return askText(this.app, placeholder, hint, options);
   }
 
   /**

@@ -419,7 +419,7 @@ describe("the end of a run", () => {
 });
 
 describe("the wiki, built in", () => {
-  it("ingests a file into a session that ends done after the agent applies its change with wiki_change", async () => {
+  it("ingests a file into a session that ends done when the agent proposes its change with wiki_change, and a rejection unmets it with the reason", async () => {
     t = await testYami();
     const { yami, vault, agent } = t;
     await vault.write("Notes/Darts.md", "# Darts\n\nA dart takes in fullness at the bust.\n");
@@ -452,9 +452,20 @@ describe("the wiki, built in", () => {
     const result = await session.start({ maxIterations: 2 });
     const doc = await vault.read(session.path);
     expect(result, doc).toMatchObject({ state: "done", iterations: 1 });
-    expect(doc).toContain("iteration 1: 3 met, 0 unmet");
-    expect(doc).toContain("iteration 1: review: 3 followed, 0 broken");
+    // The two code checks judge the proposal; clean-topics has no check, so the review judges it.
+    expect(doc).toContain("iteration 1: 2 met, 0 unmet");
+    expect(doc).toContain("iteration 1: review: 3 followed, 0 broken, 1 met, 0 unmet");
+    expect(doc).toContain("change-applied]] — 1 change(s) of the session stand: proposed");
     expect(agent.started[0]!.options.access).toBe("read-only");
+
+    // The wiki holds nothing until a person approves the change.
+    expect(await vault.exists("wiki/topics/Dart.md")).toBe(false);
+    const [change] = await yami.wiki.changes();
+    expect(change).toMatchObject({ title: "Ingest darts", status: "proposed", session: session.path, module: "wiki", creates: 1, modifies: 1 });
+    await yami.wiki.reject(change!.path, "Cite the page.");
+    const check = await session.check();
+    expect(check.checks.map((c) => c.status)).toEqual(["unmet", "unmet"]);
+    expect(JSON.stringify(check.checks)).toContain("Ingest darts was rejected: Cite the page.");
   });
 
   it("names an ingest by its folder or its files, and adds the policies it is given", async () => {

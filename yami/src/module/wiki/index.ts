@@ -11,23 +11,23 @@ import { normalizeTag } from "../../wiki/wiki.js";
 import { WIKI_COLOR } from "../colors.js";
 import { YamiModule } from "../module.js";
 import { checkedOut, checkoutSkill, COPY, MAX_DOCUMENTS, orderShape, readingListMade, type Checkout, type CheckoutOrder, type ReturnedCheckout } from "./checkout.js";
-import { drafterBrief, extractorBrief, INGEST, pageForms } from "./ingest.js";
+import { absorbed, drafterBrief, extractorBrief, INGEST, pageForms, proposed } from "./ingest.js";
 
 /**
  * The wiki module, built into every Yami: ingest sessions that turn sources into cited topics through
- * change plans, checkouts that give a person copies of the wiki's material to mark up and return, and the
- * wiki tools that every agent in the vault gets. Its folder, `wiki/`, holds the knowledge base for a person
+ * change plans that a person approves, checkouts that give a person copies of the wiki's material to mark
+ * up and return, and the wiki tools that every agent in the vault gets. Its folder, `wiki/`, holds the knowledge base for a person
  * to read; its sessions and ledger are under `internal/wiki/`.
  */
 export class WikiModule extends YamiModule {
   readonly id = WIKI;
   readonly name = "Wiki";
-  readonly description = "The knowledge base of the vault: topics cited to sources, changed through plans, with a version for each change.";
+  readonly description = "The knowledge base of the vault: topics cited to sources, changed through plans that a person approves, with a version for each change.";
   readonly sessionsIn = "internal";
   readonly color = WIKI_COLOR;
   readonly icon = "book-open";
   readonly schema: Schema = {
-    /** The changes this session applied: an ingest's plans, or a checkout's return. */
+    /** The changes this session proposed: an ingest's plans, or a checkout's return. */
     changes: { type: "links", default: [] },
   };
   readonly ledgerViews: LedgerView[] = [
@@ -42,7 +42,7 @@ export class WikiModule extends YamiModule {
       type: "table",
       name: "Changes",
       filters: { and: ['type == "change"'] },
-      order: ["file.name", "status", "before", "after", "creates", "modifies", "removes", "session", "applied"],
+      order: ["file.name", "status", "reason", "creates", "modifies", "removes", "session", "before", "after", "applied", "rejected"],
       sort: [{ property: "created", direction: "DESC" }],
     },
     {
@@ -53,8 +53,8 @@ export class WikiModule extends YamiModule {
       sort: [{ property: "created", direction: "DESC" }],
     },
   ];
-  readonly checks = { "checked-out": checkedOut };
-  readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, with a version in ${SNAPSHOTS}/ for each change and the change documents in ${CHANGES}/. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
+  readonly checks = { "checked-out": checkedOut, proposed, absorbed };
+  readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, which proposes a change document in ${CHANGES}/ that a person approves in Obsidian, with a version in ${SNAPSHOTS}/ for each applied change. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
 
   readonly cite = this.policy({
     name: "cite-every-claim",
@@ -64,7 +64,7 @@ export class WikiModule extends YamiModule {
   readonly onePlan = this.policy({
     name: "one-plan",
     description: "Change the wiki only through one change plan.",
-    body: `Every change to \`${TOPICS}/\` and \`${SOURCES}/\` goes through \`wiki_change\`, as one plan of creates, modifies, and removes. Never write those notes yourself, never change the original that a source embeds or links, never change a \`## Notes\` section, and never edit the session document.`,
+    body: `Every change to \`${TOPICS}/\` and \`${SOURCES}/\` goes through \`wiki_change\`, as one plan of creates, modifies, and removes. The tool proposes the plan as a change document; a person approves it in Obsidian, and only then does the wiki change. Your work ends when the plan is proposed: do not wait for the approval, and never ask for it. Never write those notes yourself, never change the original that a source embeds or links, never change a \`## Notes\` section, and never edit the session document.`,
   });
   readonly oneTopic = this.policy({
     name: "one-topic",
@@ -73,34 +73,25 @@ export class WikiModule extends YamiModule {
   });
   readonly changeApplied = this.promise({
     name: "change-applied",
-    description: "At least one change plan of the session is applied.",
-    check: "property",
-    field: "changes",
-    property: "status",
-    value: "applied",
-    atLeast: 1,
-    body: "At least one change plan of this session is applied. `wiki_change` links each applied change from the session.",
+    description: "A change plan of the session is proposed, or applied.",
+    check: "proposed",
+    body: "At least one change plan of this session stands: proposed, for a person to approve, or applied. `wiki_change` links each change from the session. A rejected change does not count: read its reason, and propose a new plan.",
   });
   readonly absorbed = this.promise({
     name: "sources-absorbed",
-    description: "Every source of the session is absorbed.",
-    check: "property",
-    field: "sources",
-    property: "status",
-    value: "absorbed",
-    body: "Every source of this session has `status: absorbed`, set by a modify in the plan after its claims are in the topics and its description, tags, Summary, and Structure are filled.",
+    description: "Every source of the session is absorbed, or a standing change absorbs it.",
+    check: "absorbed",
+    body: "Every source of this session has `status: absorbed`, or a change of this session that is proposed or applied sets it, by a modify after its claims are in the topics and its description, tags, Summary, and Structure are filled.",
   });
   readonly clean = this.promise({
     name: "clean-topics",
-    description: "The sources and the topics that cite them pass lint.",
-    check: "lint",
-    field: "sources",
-    body: "The sources of this session, and every topic that cites them, pass lint with no error: no dead link, and a description on each. `wiki_lint` shows what is left.",
+    description: "The sources and the topics that cite them pass lint once the plan is applied.",
+    body: "Once the plan is applied, the sources of this session and every topic that cites them pass lint with no error: no dead link, and a description on each. The wiki holds the result only after a person approves, so the review judges this from the change document: `wiki_lint` over the topics that exist, and the warnings that `wiki_change` returned for links to no note.",
   });
   readonly ingestSkill = this.skill({
     name: "ingest",
     description:
-      "Absorb the sources of a session into cited topics through one change plan: chunk, extract, match, draft, change.",
+      "Absorb the sources of a session into cited topics through one change plan that a person approves: chunk, extract, match, draft, propose.",
     body: `# Ingest
 
 The session's \`sources\` property links the source notes to absorb. You cannot write under \`${TOPICS}/\` or \`${SOURCES}/\` yourself: the session is read-only, and every change to the wiki goes through \`wiki_change\` as one plan. Work map-reduce, so a long document or many documents cost the same care as one.
@@ -117,18 +108,18 @@ This skill's folder, \`${INGEST}/\`, holds three files. Workers read them themse
 4. **Slice.** Put every subject that hits or nears one topic into the same slice, so two drafters never write one topic. At most eight subjects per slice.
 5. **Draft.** Send one worker per slice. Tell it to read \`${INGEST}/drafter.md\` first, and give it the slice, the sources, their tags, and the tag list. Draft yourself, from \`drafter.md\`, when there are one or two slices. Each returns writes.
 6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
-7. **Change.** Call \`wiki_change\`. It validates the plan, snapshots the wiki, applies every write, snapshots again, and links the change from this session. When it refuses, fix the writes it names and call it again. When it returns warnings, fix them with a second, small plan.
-8. **Check.** Call \`wiki_lint\` with the sources' paths. Fix every error with another plan.
+7. **Propose.** Call \`wiki_change\`. It validates the plan, writes it as a change document that waits for a person's approval, and links the change from this session. Nothing in the wiki changes until a person approves it in Obsidian. When the tool refuses, fix the writes it names and call it again. When it returns warnings, links to no note, fix those writes and propose the plan again; the person approves the last proposal and rejects the rest.
+8. **End.** Your work ends when the plan is proposed and covers every source. Do not wait for the approval, and do not lint the wiki for the plan's effect: the wiki holds it only after the approval. When a change of this session was rejected, the session's feedback holds the reason: read it, and propose a new plan that answers it.
 
 One plan holds at most 100 writes, about ten sources, or forty chunks. More is several plans, one after another.
 `,
     files: { "extractor.md": extractorBrief, "drafter.md": drafterBrief, "page-forms.md": pageForms },
   });
 
-  /** A session that absorbs its sources into the wiki. Read-only: the agent changes the wiki only through `wiki_change`. */
+  /** A session that absorbs its sources into the wiki. Read-only: the agent changes the wiki only through `wiki_change`, and the run ends when the plan is proposed. */
   readonly ingest = this.flow({
     name: "ingest",
-    description: "Absorb the session's sources into cited topics through one change plan.",
+    description: "Absorb the session's sources into cited topics through one change plan, which a person approves.",
     access: "read-only",
     command: false,
     schema: {
@@ -233,7 +224,8 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
    * Returns a checkout, the person's act. A copy whose body changed returns its edits to its original, unless
    * the original changed too since the checkout, or is gone: then the copy stays. A link to another copy
    * points back at its original. Each edit is checked alone, so an edit the wiki refuses stays in its copy
-   * with the reason, and holds back no other. One change, `Return <name>`, applies the rest. Every copy
+   * with the reason, and holds back no other. One change, `Return <name>`, proposed and approved in one step
+   * since the edits are the person's own, applies the rest. Every copy
    * that returned or had no edit is removed. The session gets `status: returned`, `returned`, and a
    * Return section that says what happened. It throws for a session that is no checkout session of the wiki,
    * or a checkout that is not out. The action Return this checkout calls it.
@@ -274,6 +266,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }
     }
     const change = writes.length ? (await wiki.change({ title: `Return ${basename(session)}`, session, writes })).path : undefined;
+    if (change) await wiki.approve(change);
     for (const copy of done) await vault.remove(copy);
     const summary = [
       change ? `- Returned the edits of ${writes.length} cop${writes.length === 1 ? "y" : "ies"} in ${link(change)}.` : "- No copy held an edit.",
@@ -413,7 +406,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }),
       defineTool({
         name: "change",
-        description: `The only way the wiki changes. Takes one plan: a title, notes, the session document's path, and writes (create: path, properties, body; modify: path, the properties that change with null to remove one, and the whole new body or none; remove: path), each with a why. Validates the plan (paths under ${TOPICS}/ or ${SOURCES}/, a description on every note, the schema), snapshots the wiki when its state is not captured, writes the change document to ${CHANGES}/, applies every write, snapshots again, and links the change from the session. Returns the change document, the versions before and after, and warnings for links to no note. Refuses an invalid plan with the write and the rule, and changes nothing. A failed write puts the wiki back at the version before.`,
+        description: `The only way the wiki changes: proposes one plan, which a person approves in Obsidian before anything is written. Takes a title, notes, the session document's path, and writes (create: path, properties, body; modify: path, the properties that change with null to remove one, and the whole new body or none; remove: path), each with a why. Validates the plan (paths under ${TOPICS}/ or ${SOURCES}/, a description on every note, the schema), writes the change document to ${CHANGES}/ with status proposed, and links it from the session. Returns the change document's path, the counts, and warnings for links to no note. Refuses an invalid plan with the write and the rule, and writes nothing. Nothing in ${TOPICS}/ or ${SOURCES}/ changes until the person approves; do not wait for that.`,
         input: {
           title: z.string().describe("A short name: the file name of the change document."),
           notes: z.string().optional().describe("What the change does and why, the coverage, and each skipped subject with its reason."),
@@ -430,7 +423,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
             )
             .min(1),
         },
-        title: ({ title, writes }) => `Change the wiki: ${title.slice(0, 50)} (${writes.length} writes)`,
+        title: ({ title, writes }) => `Propose a change to the wiki: ${title.slice(0, 50)} (${writes.length} writes)`,
         run: async (plan) => {
           try {
             return JSON.stringify(await wiki.change(plan as ChangePlan));

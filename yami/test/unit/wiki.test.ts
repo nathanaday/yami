@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, PropertiesError, readDocument } from "../../src/document/index.js";
 import { runCheck, Yami, type WikiModule } from "../../src/index.js";
-import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, normalizeTag, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type Embedder } from "../../src/wiki/index.js";
+import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, normalizeTag, readProposal, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
 import { FsVault } from "../../src/testing/index.js";
 
 let root = "";
@@ -571,8 +571,25 @@ describe("change", () => {
     await wiki.refresh();
     return path;
   };
+  const codexPlan = (sessionPath: string): ChangePlan => ({
+    title: "Ingest the codex notes",
+    notes: "Adds the protocol topic and closes the source.",
+    session: sessionPath,
+    writes: [
+      {
+        op: "create",
+        path: `${TOPICS}/App-server protocol.md`,
+        why: "the source explains it and no topic does",
+        properties: { description: "The JSON-RPC protocol of codex app-server.", tags: ["yami/agent"], sources: [link(`${SOURCES}/codex-notes.md`)], kind: "concept" },
+        body: "## Definition\n\nJSON-RPC over stdio ([[codex-notes]]). See [[Codex harness]] and [[Nowhere]].\n\n`````\nfive backticks inside\n`````",
+      },
+      { op: "modify", path: `${SOURCES}/codex-notes.md`, why: "absorbed", properties: { status: "absorbed", authority: "primary", tags: null }, body: "![[attachments/codex.pdf]]\n\n## Summary\n\nDone." },
+      { op: "remove", path: `${TOPICS}/Sourdough.md`, why: "off topic" },
+    ],
+  });
+  const create = (name: string, body = "x"): ChangePlan => ({ title: name, writes: [{ op: "create", path: `${TOPICS}/${name}.md`, properties: { description: `${name}.` }, body }] });
 
-  it("refuses an invalid plan, names each problem, and changes nothing", async () => {
+  it("refuses an invalid plan, names each problem, and writes nothing", async () => {
     const wiki = await fixture();
     const plan = {
       title: "",
@@ -605,61 +622,207 @@ describe("change", () => {
     expect(await vault.list("internal/wiki/changes")).toEqual([]);
   });
 
-  it("applies a plan as one step: snapshot, change document, writes, snapshot, and the link from the session", async () => {
+  it("proposes a plan: the change document with every write whole, the link from the session, and nothing in the wiki", async () => {
     const wiki = await fixture();
     const sessionPath = await session(wiki);
-    const result = await wiki.change({
+    const result = await wiki.change(codexPlan(sessionPath));
+    expect(result).toEqual({
+      path: expect.stringMatching(/^internal\/wiki\/changes\/\d{4}-\d{2}-\d{2} \d{4} Ingest the codex notes\.md$/),
       title: "Ingest the codex notes",
-      notes: "Adds the protocol topic and closes the source.",
-      session: sessionPath,
-      writes: [
-        {
-          op: "create",
-          path: `${TOPICS}/App-server protocol.md`,
-          why: "the source explains it and no topic does",
-          properties: { description: "The JSON-RPC protocol of codex app-server.", tags: ["yami/agent"], sources: [link(`${SOURCES}/codex-notes.md`)], kind: "concept" },
-          body: "## Definition\n\nJSON-RPC over stdio ([[codex-notes]]). See [[Codex harness]] and [[Nowhere]].",
-        },
-        { op: "modify", path: `${SOURCES}/codex-notes.md`, why: "absorbed", properties: { status: "absorbed", authority: "primary", tags: null }, body: "![[attachments/codex.pdf]]\n\n## Summary\n\nDone." },
-        { op: "remove", path: `${TOPICS}/Sourdough.md`, why: "off topic" },
-      ],
+      status: "proposed",
+      creates: 1,
+      modifies: 1,
+      removes: 1,
+      warnings: ["wiki/topics/App-server protocol.md links [[Nowhere]], which is not a note"],
     });
-    expect(result).toMatchObject({ before: 1, after: 2, creates: 1, modifies: 1, removes: 1, warnings: ["wiki/topics/App-server protocol.md links [[Nowhere]], which is not a note"] });
-    expect(result.path).toMatch(/^internal\/wiki\/changes\/\d{4}-\d{2}-\d{2} \d{4} Ingest the codex notes\.md$/);
+
+    // Nothing under wiki/ changed, and there is no version.
+    expect(await vault.exists(`${TOPICS}/App-server protocol.md`)).toBe(false);
+    expect(await vault.exists(`${TOPICS}/Sourdough.md`)).toBe(true);
+    expect((await readDocument(vault, `${SOURCES}/codex-notes.md`)).properties.tags).toEqual(["yami/agent"]);
+    expect(await wiki.versions()).toEqual([]);
+    expect((await readDocument(vault, sessionPath)).properties.changes).toEqual([link(result.path)]);
+
+    const change = await readDocument(vault, result.path);
+    expect(change.properties).toEqual({ type: "change", module: "wiki", title: "Ingest the codex notes", status: "proposed", creates: 1, modifies: 1, removes: 1, session: link(sessionPath), created: expect.any(String) });
+    expect(change.body).toContain("# Ingest the codex notes\n\nWaits for approval. A person applies it with Wiki: approve this change, or refuses it with Wiki: reject this change.\n\n## Summary");
+    expect(change.body).toContain("- **create** [[wiki/topics/App-server protocol|App-server protocol]] · the source explains it and no topic does");
+    expect(change.body).toContain("- **remove** Sourdough · off topic");
+    expect(change.body).toContain("Adds the protocol topic");
+    expect(change.body).toContain("### modify · wiki/sources/codex-notes.md\n\nabsorbed\n\n<!-- hash: ");
+    expect(change.body).toContain("### remove · wiki/topics/Sourdough.md\n\noff topic\n\n<!-- hash: ");
+    expect(change.body).toContain("``````markdown\n---\ntype: topic\n");
+
+    // The document reads back as the plan, each note whole: the defaults of a create, the merge of a modify.
+    const proposal = await readProposal(vault, result.path);
+    expect(proposal).toMatchObject({ title: "Ingest the codex notes", notes: "Adds the protocol topic and closes the source.", session: sessionPath });
+    expect(proposal.writes.map((w) => [w.op, w.path, w.why])).toEqual([
+      ["create", `${TOPICS}/App-server protocol.md`, "the source explains it and no topic does"],
+      ["modify", `${SOURCES}/codex-notes.md`, "absorbed"],
+      ["remove", `${TOPICS}/Sourdough.md`, "off topic"],
+    ]);
+    expect(proposal.writes[0]!.properties).toEqual({ type: "topic", status: "draft", kind: "concept", aliases: [], description: "The JSON-RPC protocol of codex app-server.", tags: ["yami/agent"], sources: [link(`${SOURCES}/codex-notes.md`)] });
+    expect(Object.keys(proposal.writes[0]!.properties!)[0]).toBe("type");
+    expect(proposal.writes[0]!.body).toBe("## Definition\n\nJSON-RPC over stdio ([[codex-notes]]). See [[Codex harness]] and [[Nowhere]].\n\n`````\nfive backticks inside\n`````\n");
+    expect(proposal.writes[1]!.properties).toEqual({ type: "source", description: "Notes on the Codex app-server protocol.", file: "[[attachments/codex.pdf]]", status: "absorbed", authority: "primary" });
+    expect(proposal.writes[1]!.body).toBe("![[attachments/codex.pdf]]\n\n## Summary\n\nDone.\n");
+    expect(proposal.writes[1]!.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(proposal.writes[2]).toEqual({ op: "remove", path: `${TOPICS}/Sourdough.md`, why: "off topic", hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+  });
+
+  it("approves a proposal: snapshot, the writes, snapshot, and the status, and refuses a second approval", async () => {
+    const wiki = await fixture();
+    const sessionPath = await session(wiki);
+    const { path } = await wiki.change(codexPlan(sessionPath));
+    const result = await wiki.approve(path);
+    expect(result).toEqual({ path, title: "Ingest the codex notes", status: "applied", before: 1, after: 2, creates: 1, modifies: 1, removes: 1, warnings: ["wiki/topics/App-server protocol.md links [[Nowhere]], which is not a note"] });
 
     const created = await readDocument(vault, `${TOPICS}/App-server protocol.md`);
     expect(created.properties).toMatchObject({ type: "topic", status: "draft", kind: "concept", description: "The JSON-RPC protocol of codex app-server." });
     expect(created.properties.created).toBeDefined();
+    expect(created.body).toContain("five backticks inside");
     const source = await readDocument(vault, `${SOURCES}/codex-notes.md`);
-    expect(source.properties).toMatchObject({ status: "absorbed", authority: "primary", description: "Notes on the Codex app-server protocol." });
+    expect(source.properties).toMatchObject({ status: "absorbed", authority: "primary", description: "Notes on the Codex app-server protocol.", updated: expect.any(String) });
     expect(source.properties.tags).toBeUndefined();
     expect(source.body).toContain("Done.");
     expect(await vault.exists(`${TOPICS}/Sourdough.md`)).toBe(false);
 
-    const change = await readDocument(vault, result.path);
-    expect(change.properties).toMatchObject({ type: "change", module: "wiki", status: "applied", before: 1, after: 2, creates: 1, session: link(sessionPath) });
-    expect(change.body).toContain("- **create** [[wiki/topics/App-server protocol|App-server protocol]] · the source explains it and no topic does");
-    expect(change.body).toContain("- **remove** Sourdough · off topic");
-    expect(change.body).toContain("### modify · codex-notes");
-    expect(change.body).toContain("status: absorbed");
-    expect(change.body).toContain("Adds the protocol topic");
-
-    const versions = await wiki.versions();
-    expect(versions.map((v) => [v.version, v.change])).toEqual([
+    const change = await readDocument(vault, path);
+    expect(change.properties).toMatchObject({ status: "applied", before: 1, after: 2, applied: expect.any(String), session: link(sessionPath) });
+    expect(change.body).toContain("# Ingest the codex notes\n\nApplied: version 1 → 2.\n\n## Summary");
+    expect((await wiki.versions()).map((v) => [v.version, v.change])).toEqual([
       [1, undefined],
-      [2, link(result.path)],
+      [2, link(path)],
     ]);
-    expect((await readDocument(vault, versions[1]!.path)).body).toContain("Since version 1: 1 added, 1 changed, 1 removed.");
-    expect((await readDocument(vault, sessionPath)).properties.changes).toEqual([link(result.path)]);
+    expect((await readDocument(vault, (await wiki.versions())[1]!.path)).body).toContain("Since version 1: 1 added, 1 changed, 1 removed.");
     expect((await wiki.captured()).captured).toBe(true);
 
-    // The checks of the module see the change through the session. The loop refreshes the wiki before the checks.
-    await wiki.refresh();
-    const context = { vault, wiki, session: "Ingest codex", path: sessionPath, properties: (await readDocument(vault, sessionPath)).properties };
-    const applied = { path: "p", properties: { check: "property", field: "changes", property: "status", value: "applied", atLeast: 1 }, body: "" };
-    expect(await runCheck(applied, context)).toMatchObject({ status: "met" });
-    const absorbed = { path: "p", properties: { check: "property", field: "sources", property: "status", value: "absorbed" }, body: "" };
-    expect(await runCheck(absorbed, context)).toMatchObject({ status: "met" });
+    // The details of an applied change compare with the version before it.
+    const details = await wiki.changeDetails(path);
+    expect(details).toMatchObject({ status: "applied", before: 1, after: 2, session: sessionPath, module: "wiki" });
+    expect(details.writes.map((w) => [w.op, w.changed])).toEqual([
+      ["create", undefined],
+      ["modify", false],
+      ["remove", false],
+    ]);
+    expect(details.writes[2]!.before).toContain("A starter of flour and water ferments");
+    expect(details.writes[1]!.before).toContain("tags:");
+    expect(details.writes[1]!.after).toContain("status: absorbed");
+    expect(details.writes[0]!.after).toContain("JSON-RPC over stdio");
+
+    await expect(wiki.approve(path)).rejects.toThrow("is applied, not proposed; only a proposed change can be approved.");
+    await expect(wiki.reject(path)).rejects.toThrow("is applied, not proposed; only a proposed change can be rejected.");
+    expect(wiki.changeActs(details)).toEqual([]);
+  });
+
+  it("refuses an approval when the plan no longer fits the wiki, and the change stays proposed", async () => {
+    const wiki = await fixture();
+    const { path } = await wiki.change(create("New"));
+    await note(`${TOPICS}/New.md`, { type: "topic", description: "Made by hand in between." }, "x");
+    const error = await wiki.approve(path).catch((e: Error) => e);
+    expect(error).toBeInstanceOf(InvalidPlan);
+    expect((error as InvalidPlan).problems).toEqual(["write 1 (create wiki/topics/New.md): the note exists; use modify"]);
+    expect((await readDocument(vault, path)).properties.status).toBe("proposed");
+    expect(await wiki.versions()).toEqual([]);
+
+    const { path: gone } = await wiki.change({ title: "Gone", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, body: "y" }] });
+    await vault.remove(`${TOPICS}/Levain.md`);
+    await expect(wiki.approve(gone)).rejects.toThrow("write 1 (modify wiki/topics/Levain.md): no note at this path");
+    expect(await wiki.changes()).toHaveLength(2);
+  });
+
+  it("flags a note that changed since the proposal, and an approval overwrites it after a version keeps it", async () => {
+    const wiki = await fixture();
+    const { path } = await wiki.change({ title: "Levain", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, body: "The proposal's body." }] });
+    expect((await wiki.changeDetails(path)).writes[0]).toMatchObject({ op: "modify", changed: false });
+    await note(`${TOPICS}/Levain.md`, { type: "topic", description: "A sourdough starter, in the French usage.", tags: ["cooking/bread", "hand"], aliases: ["Starter"], sources: [] }, "## Definition\n\nLevain is the starter ([[Sourdough]]).\n");
+    const details = await wiki.changeDetails(path);
+    expect(details.writes[0]).toMatchObject({ changed: true });
+    expect(details.writes[0]!.before).toContain("- hand");
+    expect(details.writes[0]!.after).toContain("The proposal's body.");
+
+    await wiki.approve(path);
+    expect(await vault.read(`${TOPICS}/Levain.md`)).toContain("The proposal's body.");
+    expect(await vault.read(`${TOPICS}/Levain.md`)).not.toContain("hand");
+    expect((await wiki.versions()).map((v) => v.version)).toEqual([1, 2]);
+    await wiki.restore(1);
+    expect(await vault.read(`${TOPICS}/Levain.md`)).toContain("- hand");
+  });
+
+  it("refuses a change document that a hand edit broke, and says so", async () => {
+    const wiki = await fixture();
+    const { path } = await wiki.change(create("New"));
+    const text = await vault.read(path);
+    await vault.write(path, text.replace("### create · wiki/topics/New.md", "### create · notes/New.md"));
+    await expect(wiki.approve(path)).rejects.toThrow("The change document ");
+    await expect(wiki.approve(path)).rejects.toThrow("does not parse: create notes/New.md is not a note under wiki/topics/ or wiki/sources/. Its Writes section is what an approval applies");
+    await vault.write(path, text.replace(/`{5,}\n$/, ""));
+    await expect(wiki.changeDetails(path)).rejects.toThrow("has a markdown block with no end");
+    await vault.write(path, text.replace("---\ntype: topic", "---\ntype: topic: bad"));
+    await expect(wiki.approve(path)).rejects.toThrow("the note of create wiki/topics/New.md:");
+    await vault.write(path, text.replace(/## Writes[\s\S]*$/, "## Writes\n"));
+    await expect(wiki.approve(path)).rejects.toThrow("its Writes section holds no write");
+    expect((await readDocument(vault, path)).properties.status).toBe("proposed");
+    expect(await vault.exists(`${TOPICS}/New.md`)).toBe(false);
+    expect(await wiki.versions()).toEqual([]);
+    await expect(wiki.approve("internal/wiki/changes/none.md")).rejects.toThrow("There is no change document at internal/wiki/changes/none.md.");
+    await expect(wiki.approve(`${TOPICS}/Levain.md`)).rejects.toThrow("wiki/topics/Levain.md is not a change document.");
+  });
+
+  it("rejects a proposal with the reason, which the document shows, and refuses a second act", async () => {
+    const wiki = await fixture();
+    const { path } = await wiki.change(create("New"));
+    await wiki.reject(path, "  The wiki has this under Levain.  ");
+    const doc = await readDocument(vault, path);
+    expect(doc.properties).toMatchObject({ status: "rejected", rejected: expect.any(String), reason: "The wiki has this under Levain." });
+    expect(doc.body).toContain("# New\n\nRejected: The wiki has this under Levain.\n\n## Summary");
+    expect(await vault.exists(`${TOPICS}/New.md`)).toBe(false);
+    expect(await wiki.versions()).toEqual([]);
+    await expect(wiki.reject(path)).rejects.toThrow("is rejected, not proposed; only a proposed change can be rejected.");
+    await expect(wiki.approve(path)).rejects.toThrow("is rejected, not proposed; only a proposed change can be approved.");
+
+    const { path: silent } = await wiki.change(create("Other"));
+    await wiki.reject(silent);
+    const other = await readDocument(vault, silent);
+    expect(other.properties.reason).toBeUndefined();
+    expect(other.body).toContain("Rejected, with no reason given.");
+  });
+
+  it("lists the changes newest first with a filter by status, and gives the acts of a proposal", async () => {
+    const wiki = await fixture();
+    const sessionPath = await session(wiki);
+    const a = await wiki.change({ ...create("A"), notes: "On A.", session: sessionPath });
+    const b = await wiki.change(create("B"));
+    const c = await wiki.change(create("C"));
+    await wiki.approve(b.path);
+    await wiki.reject(c.path, "no");
+    expect((await wiki.changes()).map((ch) => ch.title)).toEqual(["A"]);
+    expect((await wiki.changes("all")).map((ch) => [ch.title, ch.status])).toEqual([
+      ["C", "rejected"],
+      ["B", "applied"],
+      ["A", "proposed"],
+    ]);
+    expect((await wiki.changes("rejected"))[0]).toMatchObject({ title: "C", reason: "no", rejected: expect.any(String), creates: 1, modifies: 0, removes: 0 });
+    expect((await wiki.changes("applied"))[0]).toMatchObject({ title: "B", before: 1, after: 2, applied: expect.any(String) });
+    expect((await wiki.changes())[0]).toEqual({ path: a.path, title: "A", status: "proposed", created: expect.any(String), session: sessionPath, module: "wiki", creates: 1, modifies: 0, removes: 0, notes: "On A." });
+
+    // A change document whose properties do not parse is left out until they do.
+    await vault.write(a.path, (await vault.read(a.path)).replace("status: proposed", "status: proposed: twice"));
+    expect(await wiki.changes()).toEqual([]);
+
+    const acts = wiki.changeActs({ path: c.path, status: "proposed", title: "C" });
+    expect(acts.map((act) => [act.kind, act.label])).toEqual([
+      ["approve", "Approve"],
+      ["reject", "Reject"],
+    ]);
+    await expect(acts[0]!.run()).rejects.toThrow("is rejected, not proposed");
+    const d = await wiki.change({ title: "D", writes: [{ op: "create", path: `${TOPICS}/D.md`, properties: { description: "D." }, body: "x" }, { op: "remove", path: `${TOPICS}/Levain.md` }] });
+    const [approve] = wiki.changeActs(d);
+    expect(await approve!.run()).toBe("Applied D: v2 → v3 · 1 created, 1 removed");
+    const e = await wiki.change(create("E"));
+    const [, reject] = wiki.changeActs(e);
+    expect(await (reject as { run(reason?: string): Promise<string> }).run("not now")).toBe("Rejected E.");
+    expect((await readDocument(vault, e.path)).properties.reason).toBe("not now");
   });
 
   it("reuses the latest snapshot when the wiki is captured, and puts the wiki back when a write fails", async () => {
@@ -670,30 +833,32 @@ describe("change", () => {
       if (path.endsWith("Levain.md")) throw new Error("disk full");
       return remove(path);
     };
-    const failing = wiki.change({
+    const { path } = await wiki.change({
       title: "Bad change",
       writes: [
         { op: "create", path: `${TOPICS}/New.md`, properties: { description: "New." }, body: "x" },
         { op: "remove", path: `${TOPICS}/Levain.md` },
       ],
     });
-    await expect(failing).rejects.toThrow("the wiki is back at version 1: disk full");
+    await expect(wiki.approve(path)).rejects.toThrow("the wiki is back at version 1: disk full");
     expect(await vault.exists(`${TOPICS}/New.md`)).toBe(false);
     expect(await vault.exists(`${TOPICS}/Levain.md`)).toBe(true);
     expect((await wiki.versions()).map((v) => v.version)).toEqual([1]);
-    const [changeDoc] = await vault.list("internal/wiki/changes");
-    expect((await readDocument(vault, changeDoc!)).properties).toMatchObject({ status: "failed", error: "disk full", before: 1 });
+    const failed = await readDocument(vault, path);
+    expect(failed.properties).toMatchObject({ status: "failed", error: "disk full", before: 1 });
+    expect(failed.body).toContain("Failed, and the wiki is back at version 1: disk full");
+    expect(wiki.changeActs({ path, status: "failed", title: "Bad change" })).toEqual([]);
     vault.remove = remove;
 
-    const ok = await wiki.change({ title: "Good change", writes: [{ op: "create", path: `${TOPICS}/New.md`, properties: { description: "New." }, body: "x" }] });
-    expect(ok).toMatchObject({ before: 1, after: 2 });
+    const ok = await wiki.change(create("New"));
+    expect(await wiki.approve(ok.path)).toMatchObject({ before: 1, after: 2 });
   });
 
-  it("applies concurrent plans one after another, each with its own version", async () => {
+  it("applies concurrent approvals one after another, each with its own version", async () => {
     const wiki = await fixture();
-    const plan = (name: string) => wiki.change({ title: name, writes: [{ op: "create", path: `${TOPICS}/${name}.md`, properties: { description: `${name}.` }, body: "x" }] });
-    const [a, b, c] = await Promise.all([plan("A"), plan("B"), plan("C")]);
-    expect([a.before, a.after, b.before, b.after, c.before, c.after]).toEqual([1, 2, 2, 3, 3, 4]);
+    const proposals = await Promise.all([wiki.change(create("A")), wiki.change(create("B")), wiki.change(create("C"))]);
+    const [a, b, c] = await Promise.all(proposals.map((p) => wiki.approve(p.path)));
+    expect([a!.before, a!.after, b!.before, b!.after, c!.before, c!.after]).toEqual([1, 2, 2, 3, 3, 4]);
     expect((await wiki.versions()).map((v) => v.version)).toEqual([1, 2, 3, 4]);
     expect((await vault.list("internal/wiki/changes")).length).toBe(3);
   });
@@ -701,9 +866,39 @@ describe("change", () => {
   it("checks a plan against the wiki as the agent left it, not as the index remembers it", async () => {
     const wiki = await fixture();
     await note(`${TOPICS}/Fresh.md`, { type: "topic", description: "Written after the index." }, "x");
-    const result = await wiki.change({ title: "Modify fresh", writes: [{ op: "modify", path: `${TOPICS}/Fresh.md`, body: "updated" }] });
-    expect(result.modifies).toBe(1);
+    const { path, modifies } = await wiki.change({ title: "Modify fresh", writes: [{ op: "modify", path: `${TOPICS}/Fresh.md`, body: "updated" }] });
+    expect(modifies).toBe(1);
+    await wiki.approve(path);
     expect(await vault.read(`${TOPICS}/Fresh.md`)).toContain("updated");
+  });
+
+  it("meets the ingest's promises with a proposal, and a rejection unmets them with its reason", async () => {
+    const wiki = await fixture();
+    const { yami, ingest } = await enabled();
+    const own = (yami.module("wiki") as WikiModule).checks;
+    await note(`${SOURCES}/paper.md`, { type: "source", description: "A paper.", status: "pending", file: "[[papers/paper.pdf]]" }, "![[papers/paper.pdf]]\n");
+    const { path: sessionPath } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`), link(`${SOURCES}/paper.md`)] } });
+    await wiki.refresh();
+    // The loop reads the vault again before the checks, so they see the change documents.
+    const context = async () => (await wiki.refresh(), { vault, wiki, path: sessionPath, properties: (await readDocument(vault, sessionPath)).properties });
+    const proposed = { path: "p", properties: { check: "proposed" }, body: "" };
+    const absorbed = { path: "p", properties: { check: "absorbed" }, body: "" };
+    expect(await runCheck(proposed, await context(), own)).toEqual({ status: "unmet", detail: "no change of the session is proposed or applied" });
+    expect(await runCheck(absorbed, await context(), own)).toEqual({ status: "unmet", detail: "no standing change absorbs wiki/sources/paper.md" });
+
+    const first = await wiki.change({ title: "First", session: sessionPath, writes: [{ op: "modify", path: `${SOURCES}/paper.md`, properties: { status: "absorbed" } }] });
+    expect(await runCheck(proposed, await context(), own)).toEqual({ status: "met", detail: "1 change(s) of the session stand: proposed" });
+    expect(await runCheck(absorbed, await context(), own)).toEqual({ status: "met", detail: "2 source(s) absorbed, in the wiki or in a standing change" });
+
+    await wiki.reject(first.path, "The summary is empty.");
+    expect(await runCheck(proposed, await context(), own)).toEqual({ status: "unmet", detail: "no change of the session is proposed or applied; First was rejected: The summary is empty." });
+    expect(await runCheck(absorbed, await context(), own)).toEqual({ status: "unmet", detail: "no standing change absorbs wiki/sources/paper.md; First was rejected: The summary is empty." });
+
+    const second = await wiki.change({ title: "Second", session: sessionPath, writes: [{ op: "modify", path: `${SOURCES}/paper.md`, properties: { status: "absorbed" }, body: "![[papers/paper.pdf]]\n\n## Summary\n\nIt says things." }] });
+    await wiki.approve(second.path);
+    await wiki.refresh();
+    expect(await runCheck(proposed, await context(), own)).toEqual({ status: "met", detail: "1 change(s) of the session stand: applied" });
+    expect(await runCheck(absorbed, await context(), own)).toMatchObject({ status: "met" });
   });
 });
 
@@ -792,6 +987,7 @@ describe("what the index leaves out", () => {
     const wiki = await fixture();
     await enabled();
     const result = await wiki.change({ title: "One topic", writes: [{ op: "create", path: `${TOPICS}/Codex app-server.md`, properties: { description: "The app-server of codex." }, body: "x" }] });
+    await wiki.approve(result.path);
     await wiki.refresh();
     const paths = wiki.notes.map((n) => n.path);
     expect(paths.some((p) => p.startsWith("internal/wiki/changes/") || p.startsWith("internal/wiki/snapshots/") || p.startsWith("internal/wiki/skills/"))).toBe(false);
@@ -895,6 +1091,11 @@ describe("wiki_change through the tool", () => {
     const change = yami.tools()!.tools.find((t) => t.name === "wiki_change")!;
     const result = await runTool(change, { title: "Untag", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, properties: { tags: null } }] }, new AbortController().signal);
     expect(result.isError, result.text).toBe(false);
+    const proposed = JSON.parse(result.text) as { path: string; modifies: number; warnings: string[] };
+    expect(proposed).toMatchObject({ title: "Untag", modifies: 1, warnings: [] });
+    expect((await readDocument(vault, `${TOPICS}/Levain.md`)).properties.tags).toEqual(["cooking/bread"]);
+    expect((await readDocument(vault, proposed.path)).properties.status).toBe("proposed");
+    await yami.wiki.approve(proposed.path);
     expect((await readDocument(vault, `${TOPICS}/Levain.md`)).properties.tags).toBeUndefined();
   });
 });

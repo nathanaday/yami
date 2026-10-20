@@ -61,6 +61,20 @@ describe("the prompts of ask and pick", () => {
     expect(await cancelled).toBeUndefined();
   });
 
+  it("ask with empty: the one item reads the empty text while the field is empty, and Enter gives an empty string", async () => {
+    const answer = askText(app, "Why the change is rejected", "Reject the change", { empty: "Reject the change with no reason" });
+    const modal = last();
+    expect(modal.getSuggestions("  ")).toEqual([""]);
+    expect(modal.getSuggestions(" late ")).toEqual(["late"]);
+    const item = document.createElement("div");
+    modal.renderSuggestion("", item);
+    expect(item.textContent).toBe("Reject the change with no reason");
+    modal.renderSuggestion("late", item);
+    expect(item.textContent).toBe("Reject the change: late");
+    modal.onChooseSuggestion("");
+    expect(await answer).toBe("");
+  });
+
   it("pick: a prompt with the class yami-pick, whose items read the label of each", async () => {
     const flows = [{ title: "Daily review" }, { title: "Weekly" }];
     const picked = pickOne(app, flows, (f) => f.title, "The flow of the new Threads session");

@@ -189,9 +189,11 @@ export const SNAPSHOT: Schema = {
   restored: { type: "number" },
 };
 
-export const CHANGE_STATUSES = ["applying", "applied", "failed"] as const;
+/** A change waits as `proposed`, then a person's approval takes it through `applying` to `applied` or `failed`, or a rejection makes it `rejected`. */
+export const CHANGE_STATUSES = ["proposed", "applying", "applied", "failed", "rejected"] as const;
+export type ChangeStatus = (typeof CHANGE_STATUSES)[number];
 
-/** One change to the wiki: the plan an agent built, and what happened to it. */
+/** One change to the wiki: the plan an agent proposed, and what a person did with it. */
 export const CHANGE: Schema = {
   type: typed("change"),
   module: { type: "text", required: true },
@@ -199,6 +201,9 @@ export const CHANGE: Schema = {
   status: { type: "text", values: CHANGE_STATUSES, required: true },
   created: { type: "date" },
   applied: { type: "date" },
+  rejected: { type: "date" },
+  /** The person's reason for a rejection. */
+  reason: { type: "text" },
   /** The session that proposed it. */
   session: { type: "link" },
   /** The versions before and after the change. */

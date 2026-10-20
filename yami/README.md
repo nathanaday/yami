@@ -447,7 +447,8 @@ A view of the sessions, such as a panel, gets its data and its acts here, and ho
 | `module.acts()` | What a person can do with a module itself: `new` from each flow that offers a command (its `label` is the flow's), then each `action` on no session. `runModuleAct(act)` in `yami/obsidian` does one. |
 | `STATUS_LABELS` | The words for each status: "Not started", "Working", "Checking", "Reviewing", "Done", "Needs attention", "Failed", "Stopped". |
 | `yami.modules`, `yami.problems`, `yami.onModulesChange(listener)` | The modules with the vault modules, what keeps a vault module or a flow out, and a call when either changes. See [Vault modules](#vault-modules). |
-| `yami.onSessionsChange(listener)` | In Obsidian, one feed for a view of the modules and the sessions: a call after a session document or a module's document changes, a run changes its status, or a discovery changes `modules` or `problems`. A view that subscribes to it needs no `onModulesChange`. |
+| `yami.onSessionsChange(listener)` | In Obsidian, one feed for a view of the modules, the sessions, and the wiki's proposals: a call after a session document or a module's document changes, a run changes its status, a discovery changes `modules` or `problems`, or a change document of the wiki is written (a proposal, an approval, a rejection, a failure), since the change documents are under the wiki's internal folder. A view that subscribes to it needs no `onModulesChange`. |
+| `wiki.changes()`, `wiki.changeDetails(path)`, `wiki.changeActs(change)` | The proposals that wait, one change with its writes and the texts of a diff, and the acts of a change: see [Changes and versions](#changes-and-versions). |
 | `flow.label` | What a button or a command that creates a session says: `New <name>`, with each dash as a space: "New weekly review", "New code review". |
 | `flow.title` | What a view calls the flow, such as in a session's meta line, by the rule of `label` with a capital and no `New`: "Weekly review", "Code review". A session's default name begins with it. |
 | `LINKED_KINDS` | The fields that link documents, in the order a person reads them: promises, policies, skills, agents, articles. |
@@ -569,6 +570,8 @@ Every source of this session has `status: absorbed`.
 | `lint` | `path`, or `folder`, or `field` | The wiki's lint finds no error in the note, the folder, or the notes linked in the session's `field` and every note that links them. |
 | none | | Never by Yami. The review judges the promise after the checks pass. |
 
+The wiki module adds `proposed` and `absorbed`, the checks of an ingest's promises: see [The wiki module](#the-wiki-module).
+
 A check that returns `review`, such as an unknown check name, ends the session `needs-attention` for a person to decide. A module adds checks in its `checks`. The wiki reads the vault again before the checks run, so they see what the agent wrote. A check that throws, for example on a linked note whose properties do not parse, leaves its promise unmet with the reason, and the agent hears it in the next prompt.
 
 ## `yami/wiki`
@@ -587,7 +590,12 @@ await wiki.match(["Self-supervised learning", "SSL"]);                          
 await wiki.lint({ folder: "wiki/topics" });                                         // findings with a fix each
 wiki.note("wiki/topics/Interrupt.md");                                              // links, backlinks, tags, chunks
 wiki.graph;                                                                         // the graphology Graph
-await wiki.change({ title, notes, session, writes: [{ op: "create", path, properties, body, why }] });
+await wiki.change({ title, notes, session, writes: [{ op: "create", path, properties, body, why }] });   // proposes; a person approves
+await wiki.approve(path);                                                          // the person's act: applies a proposal
+await wiki.reject(path, reason);                                                   // the person's act: refuses a proposal
+await wiki.changes();                                                              // the proposals that wait; changes("all") for every change
+await wiki.changeDetails(path);                                                    // one change, each write with the texts before and after
+wiki.changeActs(change);                                                           // approve and reject, while the change is proposed
 await wiki.captured();                                                              // is the knowledge base at its latest version?
 await wiki.snapshot();                                                              // the next version
 await wiki.versions();                                                              // every version, oldest first
@@ -604,10 +612,10 @@ await wiki.restore(3);                                                          
 
 ### Changes and versions
 
-The knowledge base, `wiki/topics/` and `wiki/sources/`, changes only through a change plan, and every change has a version before and after it.
+The knowledge base, `wiki/topics/` and `wiki/sources/`, changes only through a change plan that a person approves, and every applied change has a version before and after it. There are two steps: an agent proposes, with `wiki.change(plan)` or the tool `wiki_change`, and a person approves or rejects, with `wiki.approve(path)` and `wiki.reject(path, reason)`, the commands of [`createYami`](#command-ids), or a view over the change API.
 
 ```ts
-const result = await wiki.change({
+const proposal = await wiki.change({
   title: "Ingest the DINOv2 paper",
   notes: "What the change does, the coverage, and each skipped subject.",
   session: "internal/wiki/sessions/Ingest DINOv2 2026-10-15.md",
@@ -617,16 +625,45 @@ const result = await wiki.change({
     { op: "remove", path: "wiki/topics/Old idea.md", why: "merged into Self-supervised learning" },
   ],
 });
-// { path: "internal/wiki/changes/2026-10-15 1432 Ingest the DINOv2 paper.md", before: 3, after: 4, creates: 1, modifies: 1, removes: 1, warnings: [] }
+// { path: "internal/wiki/changes/2026-10-15 1432 Ingest the DINOv2 paper.md", title: "Ingest the DINOv2 paper", status: "proposed", creates: 1, modifies: 1, removes: 1, warnings: [] }
+
+const applied = await wiki.approve(proposal.path);
+// { path, title, status: "applied", before: 3, after: 4, creates: 1, modifies: 1, removes: 1, warnings: [] }
 ```
 
-`change()` runs as one step, and changes from several agents run one after another:
+**Propose.** `change(plan)` reads the vault again and validates the plan against the knowledge base as it is now: every path under the knowledge folders, a title, at most 100 writes, no path twice; a create at a free path with a description and a body, its properties valid for the folder's type; a modify of a note that exists, valid after the merge, where `null` removes a property and a body replaces the body, and whose `base`, when given, is still the note's `bodyHash`; a remove of a note that exists. An invalid plan throws `InvalidPlan` with one line per problem, and nothing is written. A link in new content that resolves to no note is a warning, not a refusal. Then it writes the change document with `status: proposed`, links it from the session document's `changes` field, and returns its `path`, the `title`, the counts, and the `warnings`. It writes nothing under `wiki/` and takes no snapshot.
 
-1. It reads the vault again and validates the plan: every path under the knowledge folders, a title, at most 100 writes, no path twice; a create at a free path with a description and a body, its properties valid for the folder's type; a modify of a note that exists, valid after the merge, where `null` removes a property and a body replaces the body; a remove of a note that exists. An invalid plan throws `InvalidPlan` with one line per problem, and nothing changes. A link in new content that resolves to no note is a warning, not a refusal.
-2. It snapshots the knowledge base when its state is not captured, so a person's hand edits are in a version before the change touches them.
-3. It writes the change document, `status: applying`, with a Summary (one line per write with its `why`), the Notes, and every write in full.
-4. It applies the writes. A write that fails puts every note back from the version before, marks the change `failed` with the error, and throws.
-5. It snapshots again; the new version links the change. The change document gets `status: applied`, `before`, and `after`, and the session document's `changes` field gets the link.
+**The change document** is the one record of the plan, in `internal/wiki/changes/<date> <time> <title>.md`, and a person reads it as any note. Under the title, one line says where the change stands: that it waits for approval, or that it was applied, failed, or rejected, with the reason. Then a Summary (one line per write with its `why`), the Notes, and under Writes every write in full: `### <op> · <path>`, the `why`, and for a create or a modify the whole note after the write in a `markdown` block, properties and body, which is exactly what an approval writes. A modify or a remove also records, in a comment, the hash of the note's text as the proposal read it. Its properties: `status` (`proposed`, `applying`, `applied`, `failed`, or `rejected`), `title`, `created`, `session`, the counts, and then `before`, `after`, and `applied` for an applied change, `error` for a failed one, `rejected` and `reason` for a rejected one. The module ledger's Changes table shows them. The document holds no button and no custom markup; the acts are the host's.
+
+**Approve.** `approve(path)` is the person's act, and approvals run one after another:
+
+1. It reads the plan back from the change document. A document that is not `proposed` is refused with a message that names its status: `<name> is applied, not proposed; only a proposed change can be approved.` A document that a hand edit broke is refused with `The change document <name> does not parse: <reason>…`; so is a hand edit that moves a write outside the knowledge folders. A hand edit that keeps the form is applied as written.
+2. It validates the plan again against the knowledge base as it is now, with the rules above. A plan that no longer fits, such as a create at a path that a note took since, or a modify of a note that is gone, throws `InvalidPlan` with the problems, and the change stays proposed.
+3. It snapshots the knowledge base when its state is not captured, so a person's hand edits are in a version before the change touches them, and sets `applying` with `before`.
+4. It applies the writes, each note whole as the document shows it. A write that fails puts every note back from the version before, marks the change `failed` with the error, and throws `The change failed, and the wiki is back at version <n>: <error>`.
+5. It snapshots again; the new version links the change. The change document gets `status: applied`, `applied`, and `after`. The result is the `path`, the `title`, `before`, `after`, the counts, and the `warnings` of the second validation.
+
+**Reject.** `reject(path, reason?)` is the person's act on a proposed change: it sets `status: rejected`, `rejected` (the date), and `reason` when one is given, writes the reason under the title (`Rejected: <reason>`, or `Rejected, with no reason given.`), and writes nothing else. A change that is not proposed is refused as `approve` refuses it.
+
+**The reads**, for a view:
+
+| Call | Gives |
+| --- | --- |
+| `wiki.changes(status?)` | The changes with a status, newest first: the proposals that wait by default, or every change with `"all"`, or one of `proposed`, `applying`, `applied`, `failed`, `rejected`. Each `ChangeSummary` has `path`, `title`, `status`, `created`, `applied` and `rejected` (dates), `session` (the session that proposed it, as a path) and `module` (that session's module), `before` and `after`, `creates`, `modifies`, `removes`, `notes`, `reason`, and `error`. A change document whose properties do not parse is left out until they do. |
+| `wiki.changeDetails(path)` | The summary and `writes`: for each its `op`, `path`, `why`, `before` (modify, remove: the note's text before the write, from the version before for an applied change, else the vault now), `after` (create, modify: the note's text after it, as the document records it), and `changed` (modify, remove: the note's text now is not the text the proposal read, so an approval overwrites a later edit; a view warns before the person approves). It throws as `approve` does for a document that does not parse. |
+| `wiki.changeActs({ path, status, title })` | What a person can do with the change now, as `session.acts()` gives a session's: `approve` and `reject`, each with a `kind`, a `label`, and a `run`, present only while the change is `proposed`, and nothing otherwise. A summary, the details, or a proposal's result fits. `run()` resolves with what to tell the person: `Applied Ingest DINOv2: v3 → v4 · 2 created, 1 modified`, or `Rejected Ingest DINOv2.`; the reject's `run(reason)` takes the reason. A refusal throws with its reasons. The commands use them too, so the rule of when an act applies is in one place. |
+
+In Obsidian, `yami.onSessionsChange` hears of each proposal, approval, rejection, and failure, because the change documents are under the wiki's internal folder: see [What a view reads](#what-a-view-reads).
+
+```ts
+for (const change of await wiki.changes()) {
+  const { writes } = await wiki.changeDetails(change.path);
+  const stale = writes.some((w) => w.changed);
+  for (const act of wiki.changeActs(change)) button(act.label, () => act.run().then(notice));
+}
+```
+
+**The return of a checkout** is the person's own act on their own edits, so it proposes and approves in one step, and its change document reads `applied`.
 
 A **snapshot** is `internal/wiki/snapshots/v<N>.md`, which the module ledger lists, and `v<N>.json.gz` beside it: every note of the knowledge base by path, gzipped. The document holds `version`, `created`, `hash`, `notes`, `archive`, `change`, and `restored`, and its body names the notes added, changed, and removed since the version before. `captured()` compares the hash of the knowledge base now with the latest snapshot's. `restore(n)` snapshots the current state when it is not captured, writes version n back (notes the version lacks are removed), and records the result as a new version with `restored: n`, so the versions stay one line in time.
 
@@ -659,11 +696,11 @@ The gold file is a list of `{ "query", "expected": ["path or [[name]]"] }`; `ben
 
 A module built into every Yami, `WikiModule` in `yami`: `yami.module("wiki")` returns it. Its folder, `wiki/`, holds the knowledge base, `wiki/topics/` and `wiki/sources/`, for a person to read. Its sessions, ledger, changes, versions, and cache are under `internal/wiki/`.
 
-- Its `ingest` flow makes a session whose `sources` field links the source notes to absorb, and whose `changes` field links the changes it applied. `changes` is in the module's `schema`, for both flows; `sources` is in the `ingest` flow's `schema`, so a checkout does not get it. `yami.ingest` captures the files and creates the session; the commands **Wiki: ingest this file** and **Wiki: ingest a folder** call it.
-- Ingest sessions run with `access: "read-only"`: the agent reads anything and changes nothing except through `wiki_change`. Its policies: `cite-every-claim`, `one-plan` (change the wiki through one plan), and `one-topic` (one subject, one topic). Its promises: `change-applied` (at least one applied change), `sources-absorbed` (each source has `status: absorbed`), and `clean-topics` (`lint` over the sources and the topics that cite them). A module adds its own policies to an ingest as `wiki:` names do: `yami.ingest({ files, policies: [this.ownWords] })`.
-- Its skill, `/wiki:ingest`, is a map-reduce: `wiki_chunks` for each source, one worker per chunk that reads `extractor.md` (an Item Map of subjects and cited claims), `wiki_match` for every subject at once, one worker per slice that reads `drafter.md` (the writes), then one plan for `wiki_change`. `page-forms.md` gives the topic and source forms. The three files sit in the skill's folder, and the lead gives each worker a path, not the text. A long document or a folder of documents costs the same care as one.
-- Its tools, for every agent in the vault: `wiki_search`, `wiki_match`, `wiki_lint`, `wiki_tags`, `wiki_neighbors` (a note's or a tag's place in the tag hierarchy, so an agent can walk a large wiki by subject), `wiki_chunks`, and `wiki_change`. Each but `wiki_change` is `readOnly`, so a reviewer has it. The search tool's description carries the citation procedure, so a plain conversation answers from the wiki without a skill. "Ask the wiki" needs no wiki code: start a conversation with the question.
-- Its ledger, `internal/wiki/sessions.base`, has the session tables and three more: `Versions`, each with its link to the change, `Changes`, and `Checkouts`, each with its `status`, `created`, and `returned`.
+- Its `ingest` flow makes a session whose `sources` field links the source notes to absorb, and whose `changes` field links the changes it proposed. `changes` is in the module's `schema`, for both flows; `sources` is in the `ingest` flow's `schema`, so a checkout does not get it. `yami.ingest` captures the files and creates the session; the commands **Wiki: ingest this file** and **Wiki: ingest a folder** call it.
+- Ingest sessions run with `access: "read-only"`: the agent reads anything and changes nothing except through `wiki_change`, which proposes. **An ingest ends at the proposal**: the run is done when the plan is proposed and covers its sources, and the person approves the change after, in Obsidian. Its policies: `cite-every-claim`, `one-plan` (change the wiki through one plan, which a person approves), and `one-topic` (one subject, one topic). Its promises judge the proposals, since the wiki holds the result only after the approval: `change-applied` has the module's check `proposed`, met when a change of the session is proposed or applied; `sources-absorbed` has the check `absorbed`, met when every source of the session has `status: absorbed` in the wiki or a proposed or applied change of the session sets it; `clean-topics` has no check, so the review judges it from the change document and `wiki_lint`. A rejected change counts for neither check, so the promises are unmet again and a resume works on it; the checks' details, which the resume's feedback holds, name the rejected change with the person's reason. A module adds its own policies to an ingest as `wiki:` names do: `yami.ingest({ files, policies: [this.ownWords] })`.
+- Its skill, `/wiki:ingest`, is a map-reduce: `wiki_chunks` for each source, one worker per chunk that reads `extractor.md` (an Item Map of subjects and cited claims), `wiki_match` for every subject at once, one worker per slice that reads `drafter.md` (the writes), then one plan for `wiki_change`, and the work ends when it is proposed. `page-forms.md` gives the topic and source forms. The three files sit in the skill's folder, and the lead gives each worker a path, not the text. A long document or a folder of documents costs the same care as one.
+- Its tools, for every agent in the vault: `wiki_search`, `wiki_match`, `wiki_lint`, `wiki_tags`, `wiki_neighbors` (a note's or a tag's place in the tag hierarchy, so an agent can walk a large wiki by subject), `wiki_chunks`, and `wiki_change`, which proposes a plan for a person to approve and returns the proposal's path, counts, and warnings, as `wiki.change` does. Each but `wiki_change` is `readOnly`, so a reviewer has it. The search tool's description carries the citation procedure, so a plain conversation answers from the wiki without a skill. "Ask the wiki" needs no wiki code: start a conversation with the question.
+- Its ledger, `internal/wiki/sessions.base`, has the session tables and three more: `Versions`, each with its link to the change, `Changes`, each with its `status`, `reason`, counts, session, versions, and dates, and `Checkouts`, each with its `status`, `created`, and `returned`.
 
 ### Checkouts
 
@@ -673,7 +710,7 @@ A checkout is a reading list of the wiki's material on a subject, with a copy of
 - **What `wiki_checkout` returns.** Its input is a `CheckoutOrder`. It returns the `Checkout` of `makeCheckout` as JSON text: `{"session":"internal/wiki/sessions/2026-10-06 RL.md","copies":["internal/wiki/sessions/2026-10-06 RL/Reinforcement learning (checkout).md"]}`, with the copies in reading order. It refuses an order that `makeCheckout` refuses, and writes nothing: its `run` throws that error, and through `runTool`, as an agent calls it, the result is `{ isError: true, text }` with the error's message, such as `Nothing is not a note of wiki/topics/ or wiki/sources/; only knowledge is checked out.` An input that the schema refuses, such as more than 60 documents, gives `The input is not valid:` and the problems.
 - **The copies** go in the folder of the session's name, beside it: `internal/wiki/sessions/2026-10-06 RL/Q-learning (checkout).md`. A copy holds the original's body, `copy_of`, `sha256` (the hash of that body), and `checkout`. The index skips a note with `copy_of`, so search finds each subject once. Only notes of `wiki/topics/` and `wiki/sources/` are checked out, at most 60.
 - **The session's fields**: `status` (`out`, then `returned`) and `returned` (when), from the `checkout` flow's `schema`, and `changes` (the change of the return), from the module's. Its promise, `reading-list-made`, has the check `checked-out`: met when the status is `out` or `returned`.
-- **The return** is the person's act, **Wiki: return this checkout**, on a checkout that is out. A copy whose body changed returns as a `modify` of its original with `base`, so a change that lands in between is never overwritten. A copy stays, with the reason in the Return section, when its original changed since the checkout, is gone, or the wiki refuses the edit; it holds back no other copy. A link to another copy points back at its original. One change, `Return <name>`, applies the rest, and the copies that returned or had no edit are removed.
+- **The return** is the person's act, **Wiki: return this checkout**, on a checkout that is out. A copy whose body changed returns as a `modify` of its original with `base`, so a change that lands in between is never overwritten. A copy stays, with the reason in the Return section, when its original changed since the checkout, is gone, or the wiki refuses the edit; it holds back no other copy. A link to another copy points back at its original. One change, `Return <name>`, proposed and approved in one step since the edits are the person's own, applies the rest, and the copies that returned or had no edit are removed.
 
 | `WikiModule` | What it does |
 | --- | --- |
@@ -900,7 +937,7 @@ The Obsidian layer. It holds what needs the Obsidian API: `createYami`, the vaul
 | `statusBar` | `true` | A status bar item that says which agents work. |
 | `folderColors` | `true` | Each module's folder in the module's color in the file explorer, its internal folder muted, and `internal/` gray (`INTERNAL_COLOR`). `folderColorRules(yami)` gives the CSS. |
 
-It gives each module's commands the module's icon, and warns in the console of a module whose icon Obsidian does not have. It discovers the vault modules a moment after a module document, a file in a form's folder, or the base skill changes, or a file is created, renamed, or removed (`watchModules`), and then adds and removes each flow's command as the flow appears and goes, and updates the folder colors. Removing a command needs Obsidian 1.7.2 or later. New module asks for a name in a prompt with one text field: Enter creates the module with `yami.createModule` and opens its module document, and Escape cancels. It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations and the sessions of `noteSessions`, and removes the shared-document hub.
+It gives each module's commands the module's icon, and warns in the console of a module whose icon Obsidian does not have. It discovers the vault modules a moment after a module document, a file in a form's folder, or the base skill changes, or a file is created, renamed, or removed (`watchModules`), and then adds and removes each flow's command as the flow appears and goes, and updates the folder colors. Removing a command needs Obsidian 1.7.2 or later. New module asks for a name in a prompt with one text field: Enter creates the module with `yami.createModule` and opens its module document, and Escape cancels. Wiki: reject this change and Wiki: reject a change ask for the reason the same way, and an empty reason is allowed. It enables the modules when the workspace is ready, shows a notice when one fails, marks the wiki's index stale on each change in the vault, and, when the plugin unloads, kills the live runs, closes the conversations and the sessions of `noteSessions`, and removes the shared-document hub.
 
 ### Agents and options that change while the plugin runs
 
@@ -941,7 +978,7 @@ A plugin author tells users what appears in their vault. With no modules of the 
 | `internal/wiki/wiki.md` | The wiki module's document. |
 | `internal/wiki/sessions.base` | The wiki module's ledger: its ingest sessions, versions, and changes. |
 | `internal/wiki/policies/cite-every-claim/POLICY.md`, `one-plan/POLICY.md`, `one-topic/POLICY.md` | The policies of an ingest session. |
-| `internal/wiki/promises/change-applied/PROMISE.md`, `clean-topics/PROMISE.md`, `sources-absorbed/PROMISE.md` | The promises of an ingest session. |
+| `internal/wiki/promises/change-applied/PROMISE.md`, `clean-topics/PROMISE.md`, `sources-absorbed/PROMISE.md` | The promises of an ingest session. `change-applied` and `sources-absorbed` name the module's checks `proposed` and `absorbed`; `clean-topics` has no check. |
 | `internal/wiki/skills/ingest/SKILL.md`, with `drafter.md`, `extractor.md`, and `page-forms.md` | The ingest skill, `/wiki:ingest`, and the briefs of its workers. |
 | `internal/wiki/skills/checkout/SKILL.md`, `internal/wiki/promises/reading-list-made/PROMISE.md` | The skill and the promise of a checkout session. |
 | `internal/threads/threads.md`, `internal/threads/sessions.base` | The threads module's document and ledger. Not with `threads: false`, nor any other file of threads. |
@@ -964,7 +1001,7 @@ A plugin can turn off each part that it replaces with its own, and extend a part
 | --- | --- | --- |
 | The conversation commands and the ribbon icon | `commands: { conversations: false }` | `setAgents` gives an agent its New conversation command. `yami.conversations.start` starts a conversation from a host's own command. |
 | The session commands | `commands: { sessions: false }` | `session.acts()` gives a host's own commands or buttons what the library's do. |
-| The wiki commands | `commands: { wiki: false }` | The modals of [The wiki in Obsidian](#the-wiki-in-obsidian-obsidianwiki). |
+| The wiki commands | `commands: { wiki: false }` | The modals of [The wiki in Obsidian](#the-wiki-in-obsidian-obsidianwiki), and for the changes, `wiki.changeActs` gives a host's own commands or buttons what the library's do. |
 | New module | `commands: { modules: false }` | `yami.createModule(name)`. |
 | The commands of the modules' flows and actions | No: they belong to the modules. A flow with `command: false` has none. | |
 | The status bar item | `statusBar: false` | `yami.addWork(work)` shows a host's own agent work in it. |
@@ -987,6 +1024,10 @@ A plugin can turn off each part that it replaces with its own, and extend a part
 | `sessions` | `yami-stop-session` | Stop this session | the active session's run is live | Interrupts the run's turn; the run ends `stopped`. |
 | `sessions` | `yami-kill-session` | Kill this session's agent | the active session's run is live | Closes the run's harness session at once; the run ends `stopped`. |
 | `wiki` | `yami-wiki-search`, `yami-wiki-related`, `yami-wiki-compare`, `yami-wiki-match`, `yami-wiki-lint-note`, `yami-wiki-lint-vault`, `yami-wiki-snapshot`, `yami-wiki-versions`, `yami-wiki-restore`, `yami-wiki-refresh`, `yami-wiki-ingest-file`, `yami-wiki-ingest-folder` | Wiki: search, … | always, or with a note or a selection for the commands that need one | The views of [The wiki in Obsidian](#the-wiki-in-obsidian-obsidianwiki), versions, and ingest. |
+| `wiki` | `yami-wiki-approve-this-change` | Wiki: approve this change | the active note is a change document of the wiki with `status: proposed` | Approves it with `wiki.approve`. The notice gives the versions and the counts: `Applied Ingest DINOv2: v3 → v4 · 2 created, 1 modified`. A refusal shows its reasons in a notice: `Yami: The change plan is not valid: …`, or `Yami: The change document … does not parse: …`. |
+| `wiki` | `yami-wiki-reject-this-change` | Wiki: reject this change | the active note is a change document of the wiki with `status: proposed` | Asks for the reason in the `ask` prompt (see [The prompts](#the-prompts)); Escape rejects nothing. Then rejects it with `wiki.reject`, and the notice reads `Rejected Ingest DINOv2.` |
+| `wiki` | `yami-wiki-approve-change` | Wiki: approve a change | always | Lets the person pick one of the proposals that wait, each as `<title> · <counts> · <age>`, such as `Ingest DINOv2 · 2 created, 1 modified · 3 hours ago`, in the `pick` prompt with the placeholder `The change to approve`, then approves it as above. With no proposal, the notice reads `No change waits for approval.` |
+| `wiki` | `yami-wiki-reject-change` | Wiki: reject a change | always | Lets the person pick a proposal as above, with the placeholder `The change to reject`, asks for the reason, and rejects it. |
 | `modules` | `yami-new-module` | New module | always | Asks for a name, and creates a starter vault module. |
 | always | `yami-<module id>-new-<flow name>` | `<module name>: new <flow name>`, with each dash of the flow's name as a space | always, for each flow that offers a command | Creates a session of the flow and opens it. |
 | always | `yami-<module id>-<action id>` | `<module name>: <action name>`, with the first letter of the action's name in lower case, unless its first word is in capitals: `Wiki: return this checkout`, `Notes: PR comment` | for an action on a session, when its `when` holds on the session open in the editor; otherwise always | Does the action. |
@@ -1050,9 +1091,9 @@ A conversation note uses the same mechanism for its one agent session, with the 
 | Element | Selector | What it holds |
 | --- | --- | --- |
 | The prompt of `ask` | `.yami-ask` | The prompt of New module and of `<Module>: create <kind>`. Before the person types, it shows `Type a name.` and no item. |
-| The prompt of `pick` | `.yami-pick` | The prompt of `<Module>: create a flow session`, of an action with `choose`, of Wiki: restore a version, and of Wiki: ingest a folder. |
+| The prompt of `pick` | `.yami-pick` | The prompt of `<Module>: create a flow session`, of an action with `choose`, of Wiki: restore a version, of Wiki: ingest a folder, and of Wiki: approve a change and Wiki: reject a change. |
 | The text field | `.yami-ask input.prompt-input`, `.yami-pick input.prompt-input` | Its placeholder is the `placeholder` of the call: `The name of the new flow, such as Daily review`, or `The flow of the new Threads session`. |
-| An item | `.suggestion-item`, the selected one `.suggestion-item.is-selected` | In `ask`, one item when the field holds text: `<hint>: <text>`, such as `Create the flow: Daily review`. In `pick`, one item for each item of the call whose label matches what the person typed, all of them at first, with the text of `label(item)`. |
+| An item | `.suggestion-item`, the selected one `.suggestion-item.is-selected` | In `ask`, one item when the field holds text: `<hint>: <text>`, such as `Create the flow: Daily review`; an `ask` that allows an empty answer, as the reject commands do, shows its `empty` text while the field is empty, and Enter then gives `""`. In `pick`, one item for each item of the call whose label matches what the person typed, all of them at first, with the text of `label(item)`. |
 
 Each `ask` prompt of the library has its own placeholder and hint, and both are public API:
 
@@ -1064,6 +1105,7 @@ Each `ask` prompt of the library has its own placeholder and hint, and both are 
 | `<Module>: create policy` | `The name of the new policy, such as Cite sources` | `Create the policy` |
 | `<Module>: create promise` | `The name of the new promise, such as Summary written` | `Create the promise` |
 | `<Module>: create skill` | `The name of the new skill, such as Summarize` | `Create the skill` |
+| Wiki: reject this change, Wiki: reject a change | `Why the change is rejected` | `Reject the change`; while the field is empty, the item reads `Reject the change with no reason` (`REJECT_PLACEHOLDER`, `REJECT_HINT`, and `REJECT_EMPTY` in `yami/obsidian`) |
 
 Enter chooses the selected item, and Escape closes the prompt with no choice. In `<Module>: create a flow session`, the text of each item is the flow's `title`, such as `Daily review` for the flow `daily-review`, and the placeholder is `The flow of the new <Module> session`.
 
@@ -1076,6 +1118,8 @@ await page.locator(".yami-ask input.prompt-input").fill("Hello");
 await page.locator(".yami-ask .suggestion-item", { hasText: "Create the module: Hello" }).click();
 // After it runs Threads: create a flow session:
 await page.locator(".yami-pick .suggestion-item", { hasText: "Daily review" }).click();
+// After it runs Wiki: reject this change, with no reason:
+await page.locator(".yami-ask .suggestion-item", { hasText: "Reject the change with no reason" }).click();
 ```
 
 The plugin must ship `yami/obsidian/styles.css` as the `styles.css` next to its `main.js`; `copyStyles` in `yami/esbuild` copies it.

@@ -1,11 +1,30 @@
 import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
-import { link, LINK, linkTarget, parseDocument, PropertiesError, updateDocument, writeDocument } from "../document/document.js";
-import { timestamp } from "../document/schema.js";
+import { basename, link, LINK, linkTarget, parseDocument, PropertiesError, readDocument, writeDocument } from "../document/document.js";
+import { timestamp, type ChangeStatus } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { algorithms, type Algorithm, type Hit, type Query, type Scored } from "./algorithms/index.js";
 import { Bm25, normalize, type Fields } from "./bm25.js";
-import { applyWrites, changeDocument, changePath, validatePlan, type AppliedChange, type ChangePlan } from "./change.js";
+import {
+  applyWrites,
+  changeDetails,
+  changeDocument,
+  changePath,
+  countWrites,
+  describeCounts,
+  linkChange,
+  listChanges,
+  readProposal,
+  resolveWrites,
+  setStatus,
+  validatePlan,
+  type AppliedChange,
+  type ChangeAct,
+  type ChangeDetails,
+  type ChangePlan,
+  type ChangeSummary,
+  type ProposedChange,
+} from "./change.js";
 import { chunk, type Chunk } from "./chunks.js";
 import { EmbeddingCache, type Embedder } from "./embed.js";
 import { CACHE_PATH, ORIGINALS } from "./folders.js";
@@ -90,9 +109,9 @@ export class Wiki {
   /** The excluded paths of the last refresh, so a changed list makes the index stale. */
   private excludedAt = "";
   /** Counts the invalidations, so a refresh that a change overtook does not mark the index fresh. */
-  private changes = 0;
+  private invalidations = 0;
   private pending: Promise<void> | undefined;
-  /** Snapshots, restores, and changes run one at a time, in the order they arrive. */
+  /** Snapshots, restores, proposals, approvals, and rejections run one at a time, in the order they arrive. */
   private serial: Promise<unknown> = Promise.resolve();
   readonly options: Required<Pick<WikiOptions, "exclude" | "skipTypes" | "defaultAlgorithm">> & WikiOptions;
 
@@ -121,7 +140,7 @@ export class Wiki {
 
   /** Reads every note and builds the index, the graph, and the communities. */
   async refresh(): Promise<void> {
-    const changes = this.changes;
+    const invalidations = this.invalidations;
     const exclude = this.excluded();
     this.excludedAt = exclude.join("\n");
     const all = await this.vault.list("");
@@ -207,7 +226,7 @@ export class Wiki {
       const communities = louvain(this.graph, { rng: mulberry32(1) });
       for (const note of notes) note.community = communities[note.path];
     }
-    this.fresh = changes === this.changes;
+    this.fresh = invalidations === this.invalidations;
   }
 
   /** Refreshes when the index is stale. Calls that arrive during a refresh wait for that one. */
@@ -230,7 +249,7 @@ export class Wiki {
   /** Marks the index stale, so the next query reads the vault again. */
   invalidate(): void {
     this.fresh = false;
-    this.changes += 1;
+    this.invalidations += 1;
   }
 
   note(path: string): Note | undefined {
@@ -434,46 +453,131 @@ export class Wiki {
   }
 
   /**
-   * Applies a change plan as one step: validates it, snapshots the knowledge base when its state is
-   * not captured, writes the change document, applies the writes, snapshots again, and links the
-   * change from the session. A write that fails puts the knowledge base back at the version before.
+   * Proposes a change plan: validates it against the knowledge base as it is now, writes the change
+   * document with `status: proposed`, and links it from the session. Nothing under `wiki/` changes, and
+   * no snapshot is taken, until a person approves it with `approve`. An invalid plan throws `InvalidPlan`
+   * with one line per problem, and writes nothing.
+   * @example
+   * const { path, warnings } = await wiki.change({ title: "Ingest DINOv2", session, writes: [{ op: "create", path, properties, body, why }] });
    */
-  change(plan: ChangePlan): Promise<AppliedChange> {
+  change(plan: ChangePlan): Promise<ProposedChange> {
     return this.queued(async () => {
       await this.refresh();
       const warnings = await validatePlan(this, plan);
+      const writes = await resolveWrites(this, plan);
+      const now = timestamp();
+      const path = await changePath(this.vault, plan.title, now);
+      const counts = countWrites(writes);
+      const properties: Properties = { status: "proposed", ...counts };
+      if (plan.session) properties.session = link(plan.session);
+      await writeDocument(this.vault, changeDocument(this.vault, path, plan, writes, properties));
+      if (plan.session) await linkChange(this.vault, plan.session, path);
+      return { path, title: plan.title, status: "proposed", ...counts, warnings };
+    });
+  }
+
+  /**
+   * Applies a proposed change, the person's act: reads the plan back from the change document, validates
+   * it again against the knowledge base as it is now, snapshots when the state is not captured, applies
+   * every write, snapshots again, and sets `applied` with the versions before and after. Approvals run
+   * one after another. It throws, and writes nothing, for a change that is not `proposed` (the message
+   * names its status), for a document that no longer parses, and for a plan that no longer validates
+   * (`InvalidPlan`, with the problems; the change stays proposed). A write that fails puts the knowledge
+   * base back at the version before, sets `failed` with the error, and throws.
+   * @example
+   * const { before, after, creates } = await wiki.approve("internal/wiki/changes/2026-10-15 1432 Ingest DINOv2.md");
+   */
+  approve(path: string): Promise<AppliedChange> {
+    return this.queued(async () => {
+      await this.refresh();
+      const proposal = await readProposal(this.vault, path);
+      if (proposal.properties.status !== "proposed") throw new Error(`${basename(path)} is ${String(proposal.properties.status)}, not proposed; only a proposed change can be approved.`);
+      const warnings = await validatePlan(this, { title: proposal.title, writes: proposal.writes });
       const state = await captured(this.vault);
       const before = state.captured && state.latest ? state.latest : await snapshot(this.vault);
       const now = timestamp();
-      const path = await changePath(this.vault, plan.title, now);
-      const counts = {
-        creates: plan.writes.filter((w) => w.op === "create").length,
-        modifies: plan.writes.filter((w) => w.op === "modify").length,
-        removes: plan.writes.filter((w) => w.op === "remove").length,
-      };
-      const properties: Properties = { status: "applying", before: before.version, ...counts };
-      if (plan.session) properties.session = link(plan.session);
-      await writeDocument(this.vault, changeDocument(this.vault, path, plan, properties, this));
+      await setStatus(this.vault, path, { status: "applying", before: before.version });
       try {
-        await applyWrites(this.vault, plan, now);
+        await applyWrites(this.vault, proposal.writes, now);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         await writeArchive(this.vault, before);
         this.invalidate();
-        await updateDocument(this.vault, path, (doc) => Object.assign(doc.properties, { status: "failed", error: message }));
+        await setStatus(this.vault, path, { status: "failed", error: message });
         throw new Error(`The change failed, and the wiki is back at version ${before.version}: ${message}`);
       }
       this.invalidate();
       const after = await snapshot(this.vault, { change: path });
-      await updateDocument(this.vault, path, (doc) => Object.assign(doc.properties, { status: "applied", applied: timestamp(), after: after.version }));
-      if (plan.session) {
-        await updateDocument(this.vault, plan.session, (doc) => {
-          const list = Array.isArray(doc.properties.changes) ? (doc.properties.changes as unknown[]) : [];
-          doc.properties.changes = [...list, link(path)];
-        });
-      }
-      return { path, before: before.version, after: after.version, ...counts, warnings };
+      await setStatus(this.vault, path, { status: "applied", applied: timestamp(), after: after.version });
+      return { path, title: proposal.title, status: "applied", before: before.version, after: after.version, ...countWrites(proposal.writes), warnings };
     });
+  }
+
+  /**
+   * Rejects a proposed change, the person's act: sets `rejected`, the date, and the reason, in the
+   * properties and under the title, and writes nothing else. It throws for a change that is not
+   * `proposed`, and the message names its status.
+   * @example
+   * await wiki.reject(path, "The topic repeats Vision transformer.");
+   */
+  reject(path: string, reason = ""): Promise<void> {
+    return this.queued(async () => {
+      if (!(await this.vault.exists(path))) throw new Error(`There is no change document at ${path}.`);
+      const { properties } = await readDocument(this.vault, path);
+      if (properties.type !== "change") throw new Error(`${path} is not a change document.`);
+      if (properties.status !== "proposed") throw new Error(`${basename(path)} is ${String(properties.status)}, not proposed; only a proposed change can be rejected.`);
+      await setStatus(this.vault, path, { status: "rejected", rejected: timestamp(), ...(reason.trim() && { reason: reason.trim() }) });
+    });
+  }
+
+  /**
+   * The changes with a status, newest first: by default the proposals that wait, or every change with
+   * `"all"`. Each gives its path, title, status, dates, the session that proposed it and that session's
+   * module, the counts, the notes, and the reason or the error. A change document whose properties do not
+   * parse is left out until they do.
+   * @example
+   * const waiting = await wiki.changes();
+   * const every = await wiki.changes("all");
+   */
+  changes(status: ChangeStatus | "all" = "proposed"): Promise<ChangeSummary[]> {
+    return listChanges(this.vault, status);
+  }
+
+  /**
+   * One change with its writes: the summary, and for each write its `op`, `path`, `why`, the note's text
+   * `before` (modify, remove: from the version before for an applied change, else the vault now) and `after`
+   * (create, modify), and `changed` when the note's text now is not the text the proposal read. It throws
+   * as `approve` does for a document that does not parse.
+   * @example
+   * const { writes } = await wiki.changeDetails(path);
+   * if (writes.some((w) => w.changed)) warn("A note changed since the proposal.");
+   */
+  changeDetails(path: string): Promise<ChangeDetails> {
+    return changeDetails(this.vault, path);
+  }
+
+  /**
+   * What a person can do with a change now: `approve` and `reject`, while it is proposed, and nothing
+   * otherwise. Each has a `label` and a `run` that resolves with what to tell the person: `Applied Ingest
+   * DINOv2: v3 → v4 · 2 created, 1 modified`, or `Rejected Ingest DINOv2.`; the reject's `run` takes the
+   * reason. A refusal throws, with the reasons. The commands and a view both use them.
+   * @example
+   * for (const act of wiki.changeActs(summary)) button(act.label, () => act.run());
+   */
+  changeActs(change: Pick<ChangeSummary, "path" | "status" | "title">): ChangeAct[] {
+    if (change.status !== "proposed") return [];
+    const approve = async () => {
+      const result = await this.approve(change.path);
+      return `Applied ${change.title}: v${result.before} → v${result.after} · ${describeCounts(result)}`;
+    };
+    const reject = async (reason?: string) => {
+      await this.reject(change.path, reason);
+      return `Rejected ${change.title}.`;
+    };
+    return [
+      { kind: "approve", label: "Approve", run: approve },
+      { kind: "reject", label: "Reject", run: reject },
+    ];
   }
 
   private queued<T>(work: () => Promise<T>): Promise<T> {

@@ -14,7 +14,7 @@ export { ObsidianConversations } from "./conversation/obsidian-conversations.js"
 export { type PermissionContext, PermissionPrompts } from "./prompts/permission-modal.js";
 export { type QuestionForm, renderQuestions } from "./prompts/question-form.js";
 export { folderColorRules, showFolderColors } from "./colors.js";
-export { COMMAND_PREFIX } from "./commands.js";
+export { age, COMMAND_PREFIX, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
 export type { AgentWork, NoteAgent, NoteSession, NoteSessions, NoteSessionSetup, NoteSessionsOptions, SessionIds } from "./note-sessions.js";
 export { checkModuleIcons, moduleIcon } from "./icons.js";
 export { watchModules } from "./discovery.js";
@@ -22,5 +22,5 @@ export { ObsidianVault } from "./vault.js";
 export { createYami, HARNESS_COLORS, IDLE_MINUTES, ObsidianYami, type AgentEntry, type CommandGroup, type YamiPluginOptions } from "./yami.js";
 export { WikiCompareModal } from "./wiki/compare-modal.js";
 export { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
-export { ignoredPaths, modeOf, type OpenMode, openNote, pickOne, watchWiki } from "./wiki/open.js";
+export { type AskOptions, ignoredPaths, modeOf, type OpenMode, openNote, pickOne, watchWiki } from "./wiki/open.js";
 export { WikiSearchModal, type WikiSearchOptions } from "./wiki/search-modal.js";

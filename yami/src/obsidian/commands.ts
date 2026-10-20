@@ -1,9 +1,10 @@
 import { Notice, type Command, type Plugin } from "obsidian";
 import { basename } from "../document/document.js";
-import type { FormKind } from "../document/schema.js";
+import type { ChangeStatus, FormKind } from "../document/schema.js";
 import type { YamiModule } from "../module/module.js";
 import type { SessionAct } from "../module/session.js";
-import { WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
+import { describeCounts, type ChangeAct, type ChangeSummary } from "../wiki/change.js";
+import { CHANGES, WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
 import { noAgentsMessage } from "./agents.js";
 import { moduleIcon } from "./icons.js";
 import { WikiCompareModal } from "./wiki/compare-modal.js";
@@ -277,7 +278,7 @@ export function addNewModuleCommand(yami: ObsidianYami): void {
   });
 }
 
-/** The wiki in the command palette: search, related notes, the algorithms side by side, match, lint, versions, and ingest. */
+/** The wiki in the command palette: search, related notes, the algorithms side by side, match, lint, versions, ingest, and the approval of changes. */
 export function addWikiCommands(yami: ObsidianYami): void {
   const { app, plugin, wiki } = yami;
   const activeNote = () => {
@@ -408,4 +409,77 @@ export function addWikiCommands(yami: ObsidianYami): void {
     const sources = (await session.read()).properties.sources;
     return { message: `Created ${session.path} with ${Array.isArray(sources) ? sources.length : 0} source(s). Run it to absorb them.`, open: session.path };
   }
+
+  /** The change document open in the editor, from Obsidian's cache. */
+  const activeChange = (): Pick<ChangeSummary, "path" | "status" | "title"> | undefined => {
+    const file = activeNote();
+    if (!file || !file.path.startsWith(`${CHANGES}/`)) return undefined;
+    const properties = yami.properties(file.path);
+    return properties.type === "change" ? { path: file.path, status: properties.status as ChangeStatus, title: String(properties.title ?? file.basename) } : undefined;
+  };
+  const act = (change: Pick<ChangeSummary, "path" | "status" | "title">, kind: ChangeAct["kind"]) => wiki.changeActs(change).find((a) => a.kind === kind);
+  const reason = () => yami.ask(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY });
+  const describe = (change: ChangeSummary) => `${change.title} · ${describeCounts(change)} · ${age(change.created)}`;
+  addCommand(plugin, {
+    id: "wiki-approve-this-change",
+    name: "Wiki: approve this change",
+    checkCallback: (checking) => {
+      const change = activeChange();
+      const approve = change && act(change, "approve");
+      if (!approve) return false;
+      if (!checking) yami.notify(approve.run());
+      return true;
+    },
+  });
+  addCommand(plugin, {
+    id: "wiki-reject-this-change",
+    name: "Wiki: reject this change",
+    checkCallback: (checking) => {
+      const change = activeChange();
+      const reject = change && act(change, "reject");
+      if (!reject) return false;
+      if (!checking) yami.notify(reason().then((text) => (text === undefined ? undefined : reject.run(text))));
+      return true;
+    },
+  });
+  addCommand(plugin, {
+    id: "wiki-approve-change",
+    name: "Wiki: approve a change",
+    callback: () =>
+      yami.notify(
+        wiki.changes().then(async (proposals) => {
+          if (!proposals.length) return NO_PROPOSAL;
+          const picked = await yami.pick(proposals, describe, "The change to approve");
+          return picked && act(picked, "approve")!.run();
+        }),
+      ),
+  });
+  addCommand(plugin, {
+    id: "wiki-reject-change",
+    name: "Wiki: reject a change",
+    callback: () =>
+      yami.notify(
+        wiki.changes().then(async (proposals) => {
+          if (!proposals.length) return NO_PROPOSAL;
+          const picked = await yami.pick(proposals, describe, "The change to reject");
+          if (!picked) return undefined;
+          const text = await reason();
+          return text === undefined ? undefined : act(picked, "reject")!.run(text);
+        }),
+      ),
+  });
+}
+
+/** The texts of the reject prompt: public API, as the README table "The prompts" has them. */
+export const REJECT_PLACEHOLDER = "Why the change is rejected";
+export const REJECT_HINT = "Reject the change";
+export const REJECT_EMPTY = "Reject the change with no reason";
+const NO_PROPOSAL = "No change waits for approval.";
+
+/** How long ago a time was, for a person: `just now`, `5 minutes ago`, `3 hours ago`, `2 days ago`. */
+export function age(time: string, now = new Date()): string {
+  const minutes = Math.floor((now.getTime() - new Date(time).getTime()) / 60_000);
+  if (!(minutes >= 1)) return "just now";
+  const [n, unit] = minutes < 60 ? [minutes, "minute"] : minutes < 1440 ? [Math.floor(minutes / 60), "hour"] : [Math.floor(minutes / 1440), "day"];
+  return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
 }

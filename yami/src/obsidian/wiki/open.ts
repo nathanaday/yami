@@ -45,16 +45,21 @@ export function chooseSelected(modal: object, evt: KeyboardEvent): false {
   return false;
 }
 
+export interface AskOptions {
+  /** The text of the one item while the field is empty. With it, Enter on an empty field gives `""`; without it, an empty field has no item. */
+  empty?: string;
+}
+
 /** Lets the person type one line, in a prompt with the class `yami-ask`. Resolves with the text, trimmed, or with nothing when the person closes the prompt. */
-export function askText(app: App, placeholder: string, hint: string): Promise<string | undefined> {
+export function askText(app: App, placeholder: string, hint: string, options: AskOptions = {}): Promise<string | undefined> {
   return new Promise((resolve) => {
     let given = false;
     const modal = new (class extends SuggestModal<string> {
       getSuggestions(query: string) {
-        return query.trim() ? [query.trim()] : [];
+        return query.trim() || options.empty !== undefined ? [query.trim()] : [];
       }
       renderSuggestion(text: string, el: HTMLElement) {
-        el.setText(`${hint}: ${text}`);
+        el.setText(text ? `${hint}: ${text}` : options.empty!);
       }
       onChooseSuggestion(text: string) {
         given = true;

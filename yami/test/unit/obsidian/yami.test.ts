@@ -231,6 +231,19 @@ describe("setAgents", () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
+  it("tells onSessionsChange of a change document of the wiki, and not of a conversation note", async () => {
+    const yami = await build();
+    let heard = 0;
+    yami.onSessionsChange(() => heard++);
+    fake!.vault("create", { path: "internal/wiki/changes/2026-10-20 1000 Ingest DINOv2.md" });
+    await vi.waitFor(() => expect(heard).toBe(1));
+    fake!.vault("modify", { path: "internal/wiki/changes/2026-10-20 1000 Ingest DINOv2.md" });
+    await vi.waitFor(() => expect(heard).toBe(2));
+    fake!.vault("modify", { path: "conversations/Chat.md" });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(heard).toBe(2);
+  });
+
   it("refuses two agents of one name, and changes nothing", async () => {
     const claude = new ScriptedAgent();
     const yami = await build({ agents: [claude] });

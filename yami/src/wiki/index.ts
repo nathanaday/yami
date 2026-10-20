@@ -1,7 +1,28 @@
 export { Wiki, FIELD_WEIGHTS, expandTags, mulberry32, normalizeTag, snippet, type Note, type Seed, type WikiOptions } from "./wiki.js";
 export { algorithms, type Algorithm, type Hit, type Query, type Scored } from "./algorithms/index.js";
 export { Bm25, normalize, type Fields } from "./bm25.js";
-export { applyWrites, bodyHash, InvalidPlan, MAX_WRITES, validatePlan, type AppliedChange, type ChangePlan, type Write } from "./change.js";
+export {
+  applyWrites,
+  bodyHash,
+  changeDetails,
+  describeCounts,
+  InvalidPlan,
+  listChanges,
+  MAX_WRITES,
+  readProposal,
+  validatePlan,
+  type AppliedChange,
+  type ChangeAct,
+  type ChangeDetails,
+  type ChangePlan,
+  type ChangeSummary,
+  type ChangeWrite,
+  type Proposal,
+  type ProposedChange,
+  type ProposedWrite,
+  type Write,
+  type WriteCounts,
+} from "./change.js";
 export { chunk, MAX_CHUNK, type Chunk } from "./chunks.js";
 export { cosine, EmbeddingCache, VoyageEmbedder, type Embedder, type VoyageOptions } from "./embed.js";
 export { CACHE_PATH, CHANGES, inKnowledge, KNOWLEDGE, ORIGINALS, SNAPSHOTS, SOURCES, TOPICS, WIKI, WIKI_INTERNAL } from "./folders.js";

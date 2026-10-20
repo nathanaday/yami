@@ -20,6 +20,7 @@ export {
 } from "./document.js";
 export {
   AGENT,
+  CHANGE_STATUSES,
   CONVERSATION,
   DOCUMENT_TYPES,
   FLOW,
@@ -33,6 +34,7 @@ export {
   timestamp,
   validate,
   withDefaults,
+  type ChangeStatus,
   type DocumentType,
   type Field,
   type FieldType,

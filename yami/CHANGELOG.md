@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.17.0 · library-loop change-approval round 1
+
+A change plan is a proposal that a person approves. `wiki.change(plan)` and `wiki_change` write the change document and nothing else; `wiki.approve(path)` applies it, `wiki.reject(path, reason)` refuses it, and the reads and the acts of the changes give a view what it needs. An ingest session ends when its plan is proposed.
+
+### Breaking
+- **`wiki.change(plan)` proposes; it no longer applies.** It validates the plan, writes the change document with `status: proposed`, links it from the session, and returns a `ProposedChange`: `{ path, title, status: "proposed", creates, modifies, removes, warnings }`, with no `before` and no `after`. Nothing under `wiki/` changes and no snapshot is taken until `wiki.approve(path)`, which does what `change()` did and returns an `AppliedChange`: `{ path, title, status: "applied", before, after, creates, modifies, removes, warnings }`. Migrate: for the old one-step behavior, propose and then approve: `const { path } = await wiki.change(plan); await wiki.approve(path);`.
+- **The tool `wiki_change` proposes.** Its description says that a person approves, and its result is the `ProposedChange` as JSON text. An agent's skill that waited for the change to apply, or linted the wiki for its effect, ends at the proposal instead.
+- **The statuses of a change document** are `proposed`, `applying`, `applied`, `failed`, and `rejected` (`CHANGE_STATUSES`, type `ChangeStatus` in `yami/document`); before, `applying`, `applied`, and `failed`. A new change document starts `proposed`. The schema adds `rejected` (date) and `reason` (text).
+- **The change document's form changed**, since an approval reads the plan back from it: under the title, one line says where the change stands; each write's heading is `### <op> · <path>`, with the `why` under it, a hash comment for a modify or a remove, and the whole note after the write in a `markdown` block. A hand edit that keeps the form is applied as written; one that breaks it is refused with `The change document <name> does not parse: …`. A change document written by 0.16 is `applied` and stays a record, but `changeDetails` cannot read its writes.
+- **A modify applies the note whole**, as the change document shows it: the properties merged at the proposal replace the note's, and the body too. Before, a modify merged at apply time. A note that changed between the proposal and the approval is overwritten, and the snapshot before the approval keeps it; `changeDetails` flags such a write with `changed: true`, so a view warns first.
+- **The ingest's promises judge the proposals.** `change-applied` has the module's check `proposed` (a change of the session is proposed or applied); `sources-absorbed` has the check `absorbed` (every source is absorbed in the wiki, or a proposed or applied change of the session sets it); `clean-topics` has no check, so the review judges it. The promise names and files stay. Migrate a vault that 0.16 set up: Yami never overwrites a form that exists, so delete `internal/wiki/promises/change-applied/`, `sources-absorbed/`, `clean-topics/`, `internal/wiki/policies/one-plan/`, and `internal/wiki/skills/ingest/`, and the next start writes the new texts. An ingest session that 0.16 ran is done and stays so.
+- **The `changes` field of a wiki session links the changes it proposed**, applied or not.
+- **`ObsidianYami.ask(placeholder, hint, options?)`** takes `AskOptions`; the two-argument call is unchanged.
+
+### Added
+- `wiki.approve(path)`: validates the plan again against the wiki as it is now (a plan that no longer fits throws `InvalidPlan` and the change stays proposed; a change that is not proposed is refused with a message that names its status), snapshots when the state is not captured, applies, snapshots again, and sets `applied`. Approvals run one after another with the snapshots and the restores.
+- `wiki.reject(path, reason?)`: sets `rejected`, the date, and the reason, in the properties and under the title; refuses a change that is not proposed.
+- `wiki.changes(status?)`: the changes newest first, the proposals that wait by default or every change with `"all"`, each a `ChangeSummary` with its path, title, status, dates, the session that proposed it and that session's module, the counts, the notes, the reason, and the error. `wiki.changeDetails(path)`: the summary and each write with its `before` and `after` texts and the `changed` flag, as `ChangeDetails`. `wiki.changeActs(change)`: `approve` and `reject` as `ChangeAct`s while the change is proposed, each with a `label` and a `run` that resolves with what to tell the person. `readProposal`, `listChanges`, `changeDetails`, `describeCounts`, and the types `Proposal`, `ProposedWrite`, `ProposedChange`, `ChangeSummary`, `ChangeWrite`, `ChangeDetails`, `ChangeAct`, and `WriteCounts` in `yami/wiki`.
+- The commands `Wiki: approve this change` (`yami-wiki-approve-this-change`) and `Wiki: reject this change` (`yami-wiki-reject-this-change`), on the change document open in the editor while it is proposed, and `Wiki: approve a change` (`yami-wiki-approve-change`) and `Wiki: reject a change` (`yami-wiki-reject-change`), which pick one of the proposals that wait as `<title> · <counts> · <age>`. Reject asks for the reason with `ask`, and an empty reason is allowed. The notice gives `Applied <title>: v3 → v4 · 2 created, 1 modified`, the reasons of a refusal, or `Rejected <title>.`; with no proposal, `No change waits for approval.` The texts are `REJECT_PLACEHOLDER`, `REJECT_HINT`, and `REJECT_EMPTY` in `yami/obsidian`, and `age(time)` gives the age in words.
+- `AskOptions.empty` for `ask`: the item's text while the field is empty, which allows an empty answer.
+- The wiki module's checks `proposed` and `absorbed`. Their details name a rejected change of the session with the person's reason, so a resume's feedback holds it.
+- The README says that `onSessionsChange` fires for the change documents of the wiki, and a test over the fake app covers it.
+- The Changes table of the wiki's ledger shows the status, the reason, the counts, the session, the versions, and the dates.
+
+### Changed
+- The return of a checkout proposes and approves in one step, so its behavior does not change, and its change document reads `applied`.
+- The ingest skill and the `one-plan` policy say that the tool proposes, that a person approves in Obsidian, and that the run ends when the plan is proposed; after a rejection, the agent reads the reason in its feedback and proposes a new plan.
+- A created note's `type` is its first property, as the page forms show it.
+
 ## 0.16.1 · library-loop builtin-threads round 3
 
 The README gives the placeholder and the hint of each `ask` prompt of the library.

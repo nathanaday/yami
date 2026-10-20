@@ -1,7 +1,53 @@
+import { linksOf, readDocument } from "../../document/document.js";
+import { readProposal, type Proposal } from "../../wiki/change.js";
 import { SOURCES, TOPICS } from "../../wiki/folders.js";
+import type { Check, CheckContext } from "../checks.js";
 
 /** The folder of the ingest skill, where its reference files sit beside SKILL.md. */
 export const INGEST = "internal/wiki/skills/ingest";
+
+/** The changes a session links: the ones that stand (proposed or applied), and the rejected ones with their reasons. */
+async function sessionChanges(context: CheckContext): Promise<{ standing: Proposal[]; rejected: string[] }> {
+  const standing: Proposal[] = [];
+  const rejected: string[] = [];
+  for (const target of linksOf(context.properties.changes)) {
+    const path = context.wiki.locate(target);
+    if (!path) throw new Error(`changes links ${target}, which is not a note`);
+    const proposal = await readProposal(context.vault, path);
+    const status = proposal.properties.status;
+    if (status === "proposed" || status === "applied") standing.push(proposal);
+    else if (status === "rejected") rejected.push(`${proposal.title} was rejected${proposal.properties.reason ? `: ${String(proposal.properties.reason)}` : ", with no reason given"}`);
+  }
+  return { standing, rejected };
+}
+
+/** Met when a change of the session is proposed or applied. The detail names each rejected change with its reason, so a resume answers it. */
+export const proposed: Check = async (_promise, context) => {
+  const { standing, rejected } = await sessionChanges(context);
+  if (standing.length) return { status: "met", detail: `${standing.length} change(s) of the session stand: ${standing.map((p) => p.properties.status).join(", ")}` };
+  return { status: "unmet", detail: `no change of the session is proposed or applied${rejected.length ? `; ${rejected.join("; ")}` : ""}` };
+};
+
+/** Met when every source of the session has `status: absorbed`, or a standing change of the session sets it. */
+export const absorbed: Check = async (_promise, context) => {
+  const { standing, rejected } = await sessionChanges(context);
+  const sets = new Set(standing.flatMap((p) => p.writes.filter((w) => w.op === "modify" && w.properties?.status === "absorbed").map((w) => w.path)));
+  const pending: string[] = [];
+  const missing: string[] = [];
+  let count = 0;
+  for (const target of linksOf(context.properties.sources)) {
+    const path = context.wiki.locate(target);
+    if (!path) {
+      missing.push(target);
+      continue;
+    }
+    count += 1;
+    if (!sets.has(path) && (await readDocument(context.vault, path)).properties.status !== "absorbed") pending.push(path);
+  }
+  if (missing.length) return { status: "unmet", detail: `sources links ${missing.join(", ")}, which are not notes` };
+  if (pending.length) return { status: "unmet", detail: `no standing change absorbs ${pending.join(", ")}${rejected.length ? `; ${rejected.join("; ")}` : ""}` };
+  return { status: "met", detail: count ? `${count} source(s) absorbed, in the wiki or in a standing change` : "sources links nothing" };
+};
 
 export const pageForms = `# Page forms
 
