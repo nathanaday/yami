@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { VaultModule } from "yami";
 import { readDocument, sectionText, updateDocument } from "yami/document";
 import { review, testYami, type TestYami } from "yami/testing";
-import { Librarian } from "../../src/modules/librarian/index.js";
 
 const FIXTURE = "test/fixtures/vault-modules/hello";
 const FLOW = "internal/hello/flows/greeting/FLOW.md";
@@ -11,7 +10,7 @@ let t: TestYami;
 let changes: number;
 
 beforeEach(async () => {
-  t = await testYami({ modules: [new Librarian()], files: { "internal/hello": FIXTURE } });
+  t = await testYami({ files: { "internal/hello": FIXTURE } });
   changes = 0;
   t.yami.onModulesChange(() => changes++);
 });
@@ -73,7 +72,7 @@ describe("Hello as a vault module", () => {
     expect(t.yami.problems).toEqual([{ module: "hello", path: FLOW, document: FLOW, message: expect.stringContaining("access") }]);
     expect(hello()?.flows ?? []).toEqual([]);
     expect(changes).toBe(1);
-    expect(t.yami.modules.map((m) => m.id)).toEqual(["wiki", "librarian", "hello"]);
+    expect(t.yami.modules.map((m) => m.id)).toEqual(["wiki", "threads", "hello"]);
 
     // Another vault module still runs to done.
     const starter = await t.yami.createModule("Chores");

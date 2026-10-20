@@ -2,9 +2,6 @@ import { Plugin, type WorkspaceLeaf } from "obsidian";
 import { ClaudeAgent } from "yami/agent/claude";
 import { CodexAgent } from "yami/agent/codex";
 import { createYami, type ObsidianYami } from "yami/obsidian";
-import { Journals } from "./modules/journals";
-import { Librarian } from "./modules/librarian";
-import { Threads } from "./modules/threads";
 import { NAVIGATOR_VIEW, WikiNavigator } from "./navigator/view";
 import { PANEL_VIEW, YamiPanel } from "./panel/view";
 
@@ -19,10 +16,7 @@ export default class YamiPlugin extends Plugin {
   yami!: ObsidianYami;
 
   onload() {
-    this.yami = createYami(this, {
-      agents: [new ClaudeAgent(), new CodexAgent()],
-      modules: [new Threads(), new Librarian(), new Journals()],
-    });
+    this.yami = createYami(this, { agents: [new ClaudeAgent(), new CodexAgent()] });
     window.yami = this.yami;
     this.register(() => delete window.yami);
 

@@ -2,12 +2,11 @@
   "name": "yami-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "The Yami Obsidian plugin: conversations with Claude Code and Codex, and the threads, librarian, and journals modules built on the yami library.",
+  "description": "The Yami showcase plugin: conversations with Claude Code and Codex, the built-in wiki and threads modules, and two views over the yami library.",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc --noEmit && node esbuild.config.mjs production",
     "test": "vitest run test/unit",
-    "test:live": "vitest run test/live",
     "test:obsidian": "vitest run test/obsidian"
   },
   "devDependencies": {

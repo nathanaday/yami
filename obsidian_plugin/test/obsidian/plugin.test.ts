@@ -232,44 +232,94 @@ describe("Yami in Obsidian", () => {
     expect(await obsidian.read(copy!)).toBe(await obsidian.read("Papers/Attention.md"));
   });
 
-  it("publishes a journal volume, and returns a checkout with the user's edit", { timeout: 60_000 }, async () => {
-    const command = (id: string) => page().evaluate((name) => (window as any).app.commands.executeCommandById(name), id);
-    for (const module of ["threads", "librarian", "journals"]) await obsidian.waitForNote(`internal/${module}/${module}.md`, (text) => text.length > 0, 10_000);
+  it("installs the built-in modules, and returns a checkout with the user's edit", { timeout: 60_000 }, async () => {
+    for (const module of ["wiki", "threads"]) await obsidian.waitForNote(`internal/${module}/${module}.md`, (text) => text.length > 0, 10_000);
     expect(existsSync(path.join(obsidian.vault, "internal/threads/agents/validator/AGENT.md"))).toBe(true);
+    expect(existsSync(path.join(obsidian.vault, "internal/wiki/skills/checkout/SKILL.md"))).toBe(true);
+    // The built-in modules and Yami's own skill set are all that the install writes: no module of the plugin's own.
+    const folders = (dir: string) => readdirSync(path.join(obsidian.vault, dir), { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name).sort();
+    expect(folders("internal")).toEqual(["threads", "wiki", "yami"]);
+    // The vault's own folders and the earlier tests' are the rest.
+    expect(folders("").filter((f) => !["Meetings", "Papers", "internal"].includes(f))).toEqual(["wiki"]);
 
-    // Publish: pick the volume; the edition's session opens with a source for each note.
-    await page().evaluate(async () => {
-      const vault = (window as any).app.vault;
-      await vault.createFolder("journals/garden-log");
-      await vault.create("journals/garden-log/Tomatoes.md", "Plant after the frost.\n");
-    });
-    await command("yami:yami-journals-publish");
-    await page().waitForSelector(".prompt-input");
-    await page().keyboard.type("Garden Log");
-    await page().keyboard.press("Enter");
-    await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path.startsWith("internal/wiki/sessions/Garden Log edition "), undefined, { timeout: 10_000 });
-    const edition = await obsidian.read(await activePath());
-    expect(edition).toContain("[[wiki/sources/Tomatoes (source)|Tomatoes (source)]]");
-    expect(edition).toContain("[[internal/journals/policies/journal-sources/POLICY|journal-sources]]");
-
-    // Return: a checkout made with the librarian's tool, a copy edited by the user, and the return command.
+    // A checkout made with the wiki's tool, a copy edited by the user, and the return command.
     const made = await page().evaluate(async () => {
       const app = (window as any).app;
       if (!app.vault.getFolderByPath("wiki/topics")) await app.vault.createFolder("wiki/topics");
       await app.vault.create("wiki/topics/Compost.md", "---\ntype: topic\ndescription: Rotted plant matter.\n---\nCompost feeds the soil.\n");
-      const tool = (window as any).yami.agents[0].preferences.tools.tools.find((t: any) => t.name === "librarian_checkout");
+      const tool = (window as any).yami.tools().tools.find((t: any) => t.name === "wiki_checkout");
       return JSON.parse(await tool.run({ request: "the material on compost", name: "Compost", documents: [{ path: "wiki/topics/Compost.md", why: "the basics" }] }, { signal: new AbortController().signal }));
     });
+    expect(made.session).toMatch(/^internal\/wiki\/sessions\/\d{4}-\d{2}-\d{2} Compost\.md$/);
+    expect(made.copies).toEqual([`${made.session.slice(0, -3)}/Compost (checkout).md`]);
     await page().evaluate(async (copy) => {
       const app = (window as any).app;
       await app.vault.modify(app.vault.getFileByPath(copy), (await app.vault.read(app.vault.getFileByPath(copy))).replace("feeds the soil", "feeds the soil and holds water"));
     }, made.copies[0]);
     await page().evaluate((file) => (window as any).app.workspace.getLeaf().openFile((window as any).app.vault.getFileByPath(file)), made.session);
     await page().waitForFunction((file) => (window as any).app.metadataCache.getFileCache((window as any).app.vault.getFileByPath(file))?.frontmatter?.status === "out", made.session);
-    await command("yami:yami-librarian-return");
+    expect(await page().evaluate(() => (window as any).app.commands.findCommand("yami:yami-wiki-return")?.name)).toBe("Yami: Wiki: return this checkout");
+    await run("yami:yami-wiki-return");
     await obsidian.waitForNote(made.session, (text) => text.includes("status: returned"), 15_000);
     expect(await obsidian.read("wiki/topics/Compost.md")).toContain("Compost feeds the soil and holds water.");
     expect(existsSync(path.join(obsidian.vault, made.copies[0]))).toBe(false);
+  });
+
+  it("creates the forms of threads from the command palette, and a session of the person's own flow, which the panel lists", { timeout: 60_000 }, async () => {
+    const forms: [kind: string, name: string, file: string][] = [
+      ["agent", "Code checker", "internal/threads/agents/code-checker/AGENT.md"],
+      ["flow", "Daily review", "internal/threads/flows/daily-review/FLOW.md"],
+      ["policy", "Plain words", "internal/threads/policies/plain-words/POLICY.md"],
+      ["promise", "Review written", "internal/threads/promises/review-written/PROMISE.md"],
+      ["skill", "Summarize commits", "internal/threads/skills/summarize-commits/SKILL.md"],
+    ];
+    for (const [kind, name, file] of forms) {
+      const id = `yami:yami-threads-create-${kind}`;
+      expect(await page().evaluate((command) => (window as any).app.commands.findCommand(command)?.name, id)).toBe(`Yami: Threads: create ${kind}`);
+      await run(id);
+      await page().waitForSelector(".modal-container input", { timeout: 5_000 });
+      await page().keyboard.type(name);
+      await page().keyboard.press("Enter");
+      await page().waitForFunction((want) => (window as any).app.workspace.getActiveFile()?.path === want, file, { timeout: 10_000 });
+      expect(await obsidian.read(file), file).toMatch(/^---\nname: [a-z-]+\ndescription: /);
+    }
+    // Every starter is valid as written.
+    expect(await page().evaluate(async () => {
+      const yami = (window as any).yami;
+      await yami.discover();
+      return yami.problems;
+    })).toEqual([]);
+    await page().waitForFunction(() => Boolean((window as any).app.commands.commands["yami:yami-threads-new-daily-review"]), undefined, { timeout: 10_000 });
+
+    // Create a flow session: pick the person's flow, and its session opens in threads/.
+    await run("yami:yami-threads-create-session");
+    await page().waitForSelector(".prompt-input", { timeout: 5_000 });
+    const offered = await page().$$eval(".suggestion-item", (els) => els.map((el) => el.textContent ?? ""));
+    expect(offered.some((text) => /daily review/i.test(text)), offered.join(" | ")).toBe(true);
+    await page().keyboard.type("daily review");
+    await page().keyboard.press("Enter");
+    await page().waitForFunction(
+      () => {
+        const app = (window as any).app;
+        const file = app.workspace.getActiveFile();
+        return file?.path.startsWith("threads/") && app.metadataCache.getFileCache(file)?.frontmatter?.flow === "daily-review";
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+    const session = await activePath();
+    const doc = await obsidian.read(session);
+    expect(doc).toContain("type: session");
+    expect(doc).toContain("module: threads");
+
+    // The panel lists it under Threads, as any session.
+    await run("yami:open-panel");
+    await page().evaluate(() => (window as any).app.workspace.getLeavesOfType("yami-panel")[0].view.go({ level: "module", module: "threads" }));
+    await page().waitForSelector(`.yami-panel [data-key="session:${session}"]`, { timeout: 10_000 });
+    expect(await page().textContent(`.yami-panel [data-key="session:${session}"] .yami-row-meta span`)).toBe("Not started");
+    expect(await page().$('.yami-panel button:has-text("New daily review")')).not.toBeNull();
+    await page().click(".yami-panel .yami-back");
+    await page().waitForSelector('.yami-panel .yami-panel-title:text-is("Modules")');
   });
 
   it("creates the hello module with New module, and the panel shows it with no reload", { timeout: 60_000 }, async () => {
@@ -463,7 +513,7 @@ describe("Yami in Obsidian", () => {
     const colors = await page().evaluate(async () => {
       const app = (window as any).app;
       const yami = app.plugins.plugins.yami.yami;
-      for (const folder of ["hello", "librarian", "wiki"]) if (!app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
+      for (const folder of ["hello", "threads", "wiki"]) if (!app.vault.getFolderByPath(folder)) await app.vault.createFolder(folder);
       const explorer = app.workspace.getLeavesOfType("file-explorer")[0].view;
       explorer.revealInFolder(app.vault.getFileByPath("internal/hello/hello.md"));
       await new Promise((resolve) => setTimeout(resolve, 300));
@@ -472,9 +522,10 @@ describe("Yami in Obsidian", () => {
         return title ? getComputedStyle(title).color : "no title";
       };
       const hello = yami.module("hello").colors;
+      const threads = yami.module("threads").colors;
       return {
-        shown: ["internal", "hello", "internal/hello", "librarian", "wiki"].map(shown),
-        expected: ["#8a8a8a", hello.folder, hello.internal, "#a0522d", "#00a2c7"],
+        shown: ["internal", "hello", "internal/hello", "threads", "internal/threads", "wiki"].map(shown),
+        expected: ["#8a8a8a", hello.folder, hello.internal, threads.folder, threads.internal, "#00a2c7"],
       };
     });
     const rgb = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
@@ -495,9 +546,8 @@ describe("Yami in Obsidian", () => {
         })),
       );
     const icons = Object.fromEntries((await rows()).map((r) => [r.key, r.icon]));
-    expect(icons).toEqual({ "module:wiki": "lucide-book-open", "module:hello": "lucide-hand", "module:threads": "lucide-spool", "module:librarian": "lucide-library", "module:journals": "lucide-notebook-pen" });
+    expect(icons).toEqual({ "module:wiki": "lucide-book-open", "module:threads": "lucide-spool", "module:hello": "lucide-hand" });
     expect(await page().$$(".yami-panel .yami-row-desc")).toHaveLength(0);
-    expect((await rows()).find((r) => r.key === "module:journals")).toMatchObject({ line: "Publish a volume", badge: null });
 
     // A session that needs attention is the badge. The line leaves it out, unless it is all there is; the label says every count.
     const create = (name: string, state?: string) =>
@@ -534,16 +584,16 @@ describe("Yami in Obsidian", () => {
 
     const commandIcons = await page().evaluate(() => {
       const commands = (window as any).app.commands.commands;
-      return ["hello-new-greeting", "librarian-return", "journals-publish", "wiki-ingest-file"].map((id) => commands[`yami:yami-${id}`]?.icon);
+      return ["hello-new-greeting", "wiki-return", "threads-create-flow", "threads-create-session", "wiki-ingest-file"].map((id) => commands[`yami:yami-${id}`]?.icon);
     });
-    expect(commandIcons).toEqual(["hand", "library", "notebook-pen", undefined]);
+    expect(commandIcons).toEqual(["hand", "book-open", "spool", "spool", undefined]);
   });
 
   it("shows the modules, a module's sessions, and a session in the panel, and runs the session from it", { timeout: TIMEOUT }, async () => {
     await run("yami:open-panel");
     await page().waitForSelector(".yami-panel .yami-module-row");
     const names = () => page().$$eval(".yami-panel .yami-row-name", (els) => els.map((el) => el.textContent));
-    expect(await names()).toEqual(expect.arrayContaining(["Wiki", "Hello world", "Threads", "Librarian", "Journals"]));
+    expect(await names()).toEqual(["Wiki", "Threads", "Hello world"]);
     const focused = () => page().evaluate(() => document.activeElement?.getAttribute("data-key") ?? document.activeElement?.textContent);
 
     // The keyboard: Enter goes in with the focus on Back, and Backspace comes out with the focus on the row it left.
@@ -555,10 +605,10 @@ describe("Yami in Obsidian", () => {
     await page().waitForSelector('.yami-panel .yami-panel-title:text-is("Modules")');
     expect(await focused()).toBe("module:hello");
 
-    // A module with no sessions shows its actions only.
-    await page().click('.yami-module-row:has-text("Journals")');
-    await page().waitForSelector('.yami-panel button:has-text("Publish a volume")');
-    expect(await page().textContent(".yami-panel .yami-panel-empty")).toBe("Journals keeps no sessions.");
+    // Threads lists the person's own flow session, and offers the person's flow as an act.
+    await page().click('.yami-module-row:has-text("Threads")');
+    await page().waitForSelector('.yami-panel button:has-text("New daily review")');
+    expect(await page().$$eval(".yami-panel .yami-session-row .yami-row-meta", (els) => els.map((el) => el.textContent))).toEqual([expect.stringContaining("Not started")]);
     await page().click(".yami-panel .yami-back");
 
     // New greeting creates a session, and the change feed puts it in the list.
@@ -598,7 +648,10 @@ describe("Yami in Obsidian", () => {
     expect((await page().textContent('.yami-panel .yami-row:has-text("always-say-hello") .yami-row-desc'))?.length).toBeGreaterThan(0);
     expect(await page().textContent('.yami-panel .yami-section:has(h3:text-is("Policies")) .yami-section-count')).toBe("1 of 1 followed");
     expect(await page().$$eval(".yami-panel .yami-section-head h3", (els) => els.map((el) => el.textContent))).toEqual(["Promises", "Policies", "Skills", "Agents", "Conversation", "Progress"]);
-    expect(await page().$$eval('.yami-panel .yami-section:has(h3:text-is("Conversation")) .yami-row', (els) => els.map((el) => el.getAttribute("data-key")))).toEqual(["conversation", "review"]);
+    // The agent may call its proofreader on its own; each such run is a row between the conversation and the review.
+    const notes = await page().$$eval('.yami-panel .yami-section:has(h3:text-is("Conversation")) .yami-row', (els) => els.map((el) => el.getAttribute("data-key") ?? ""));
+    expect([notes[0], notes.at(-1)], notes.join(" | ")).toEqual(["conversation", "review"]);
+    expect(notes.slice(1, -1).every((key) => key.startsWith("agent:")), notes.join(" | ")).toBe(true);
     expect(await page().textContent(".yami-panel .yami-progress li")).toContain("iteration 1: review: 1 followed, 0 broken");
     expect(await page().$$eval(".yami-panel .yami-action", (els) => els.map((el) => el.textContent))).toEqual(["Run with Claude", "Run with Codex", "Resume"]);
 
@@ -704,7 +757,7 @@ describe("Yami in Obsidian", () => {
 
   it("offers the commands of the sessions, the flows, and the actions", async () => {
     const ids = await page().evaluate(() => Object.keys((window as any).app.commands.commands).filter((id) => id.startsWith("yami:")));
-    for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "librarian-new-checkout", "librarian-return", "journals-publish", "wiki-ingest-file", "wiki-search"]) {
+    for (const id of ["run-session-claude", "run-session-codex", "resume-session", "stop-session", "kill-session", "hello-new-greeting", "wiki-new-checkout", "wiki-return", "threads-create-agent", "threads-create-flow", "threads-create-policy", "threads-create-promise", "threads-create-skill", "threads-create-session", "wiki-ingest-file", "wiki-search"]) {
       expect(ids, id).toContain(`yami:yami-${id}`);
     }
     for (const id of ["open-panel", "open-wiki-navigator"]) expect(ids, id).toContain(`yami:${id}`);

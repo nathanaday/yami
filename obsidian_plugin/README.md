@@ -1,6 +1,6 @@
 # Yami
 
-The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conversations with Claude Code and Codex in your notes, and the sessions of its modules: threads, the librarian, and journals, and of any module that you define in the vault, such as hello. `src/main.ts` gives `createYami` the agents and the modules; `yami/obsidian` does the rest.
+The Yami showcase plugin, and the test bed of the `yami` library. It runs conversations with Claude Code and Codex in your notes, the library's two built-in modules, the wiki and threads, and any module that you define in the vault, such as Hello. It adds two views over the library: the panel and the wiki navigator. `src/main.ts` gives `createYami` the agents and no module of its own; `yami/obsidian` does the rest.
 
 ## Develop
 
@@ -28,17 +28,19 @@ The Yami Obsidian plugin, and the test bed of the `yami` library. It runs conver
 
 ## The modules
 
-Each module is a folder in `src/modules/`: the class in `index.ts`, and its forms beside it as markdown files, which the build imports as text. A form is a folder named by the document's name, with one file: `skills/<name>/SKILL.md`, `agents/<name>/AGENT.md`, `policies/<name>/POLICY.md`, or `promises/<name>/PROMISE.md`. A code module's flows are code, made with `this.flow`. When the plugin loads, each module writes the files that are missing under `internal/<module>/`. Files that exist stay as they are, so you can edit them in the vault.
+The plugin has no module of its own. Every Yami has the two built-in modules of the library, and finds the modules that you define in the vault:
 
-In the file explorer, each module's folder has the module's color, its folder under `internal/` the same color muted, and `internal/` is gray. The wiki is cyan. The librarian sets its color, `#a0522d`, with `readonly color`; the other modules take a basic color by their id. Each module sets its icon, a Lucide name, with `readonly icon`: the panel shows it, and the module's commands carry it.
+| Module | Icon | Folder | Flows | Actions |
+| --- | --- | --- | --- | --- |
+| Wiki | `book-open` | `wiki/`, its sessions in `internal/wiki/sessions/` | `ingest`, `checkout` | Return this checkout |
+| Threads | `spool` | `threads/` | `thread` (planted by `/threads:stub`), and your own flows | |
+| Hello (in the vault) | `hand` | `hello/` | `greeting` | |
 
-| Module | Icon | Folder | Flows | Agents | Actions |
-| --- | --- | --- | --- | --- | --- |
-| Threads | `spool` | `threads/` | `thread` (planted by `/threads:stub`) | `reviewer`, `validator` | |
-| Librarian | `library` | `librarian/` | `checkout` | | Return this checkout |
-| Journals | `notebook-pen` | none | | | Publish a volume |
+When the plugin loads, each built-in module writes the files that are missing under `internal/<module>/`: `internal/wiki/wiki.md` and `internal/threads/threads.md`, their ledgers, and their forms. Files that exist stay as they are, so you can edit them in the vault.
 
-To add a module in code, write its folder and add an instance to `modules` in `src/main.ts`. Its commands appear on the next load: one for each flow, **<Module>: new <flow>**, and one for each action. Its tools, skills, and agents reach every agent. Test it in `test/unit/` with `testYami` from `yami/testing`. To add a module with no code, define it in the vault: see [Define a module in the vault](#define-a-module-in-the-vault).
+In the file explorer, each module's folder has the module's color, its folder under `internal/` the same color muted, and `internal/` is gray. The wiki is cyan. The panel shows each module's icon, and the module's commands carry it.
+
+To add a module in code, write it in the library's form and add an instance to `modules` in `createYami`; see the `yami` README. To add a module with no code, define it in the vault: see [Define a module in the vault](#define-a-module-in-the-vault). To add a kind of work to threads with no code, see [Your own flows in threads](#your-own-flows-in-threads).
 
 ## Define a module in the vault
 
@@ -116,8 +118,8 @@ When a document is wrong, for example `access: readonly` in a flow, or a flat `p
 **Open the Yami panel**, from the ribbon or the command palette, shows a panel in the right sidebar:
 
 - **Modules**: each module with its icon in its color, and a line that counts its sessions by status. A badge counts the sessions that need attention. Sessions that work now are at the top. Under the modules, **Problems** lists each module document or form that Yami cannot use, with what to fix, and the base skill (`internal/yami/skills/run/SKILL.md`) when you edited it and a Yami update has a new text; click one to open the document.
-- **A module**: its description, a button for each of its flows, such as **New greeting**, its actions, such as **Publish a volume**, and its sessions, newest first. A module defined in the vault shows its problems under its description. A session's mark shows its status: a hollow circle before its first run, a turning arc while the agent works, a half-filled circle while Yami checks the promises, a dot in a circle while a reviewer judges the work, a filled circle when done, a diamond when it needs attention, a cross when it failed, and a square when stopped. A row's button runs or stops the session.
-- **A session**: its status and its flow, its acts as buttons (**Run with Claude**, **Resume**, **Stop**, **Return this checkout**), its promises with whether the last check or review met them, its policies with whether the last review found them followed, each with the reason or, before any, its description, its skills, agents, and articles, its conversation, the conversation of each agent run with its status, the conversation of its last review, and its progress. Click a document to open it; Cmd-click opens it in a new tab.
+- **A module**: its description, a button for each of its flows, such as **New greeting** or **New daily review**, its actions, and its sessions, newest first, with the flow of each when the module has more than one. A module defined in the vault shows its problems under its description. A session's mark shows its status: a hollow circle before its first run, a turning arc while the agent works, a half-filled circle while Yami checks the promises, a dot in a circle while a reviewer judges the work, a filled circle when done, a diamond when it needs attention, a cross when it failed, and a square when stopped. A row's button runs or stops the session.
+- **A session**: its status and its flow, its acts as buttons (**Run with Claude**, **Resume**, **Stop**, **Return this checkout** on a checkout that is out), its promises with whether the last check or review met them, its policies with whether the last review found them followed, each with the reason or, before any, its description, its skills, agents, and articles, its conversation, the conversation of each agent run with its status, the conversation of its last review, and its progress. Click a document to open it; Cmd-click opens it in a new tab.
 
 Backspace goes up a level. The panel follows the vault: a session that an agent creates, a run that starts, and a promise that is met show at once. The panel is the plugin's own code, `src/panel/`, over the library's read API.
 
@@ -139,7 +141,7 @@ Before the agent changes a file or runs a command, the request shows above the m
 
 Commands: **End this conversation**, **Stop the agent in this conversation**, **Focus the message box**, and **Undo the agent's last changes in this note**.
 
-Every module skill is a command in every conversation: type `/wiki:ingest` or `/librarian:checkout`, with what the skill should work on after it. The message box suggests them after `/`. The agent can also load a module skill on its own when a request needs it, without asking you: reading a module skill's files is the one thing Codex does without an approval under **ask**.
+Every module skill is a command in every conversation: type `/wiki:ingest`, `/wiki:checkout`, or `/threads:stub`, with what the skill should work on after it. The message box suggests them after `/`. The agent can also load a module skill on its own when a request needs it, without asking you: reading a module skill's files is the one thing Codex does without an approval under **ask**.
 
 The agents use your own setup for their harness: your `CLAUDE.md` and `AGENTS.md` files, skills, plugins, MCP servers, and permission rules. `window.yami` holds the plugin's Yami for the developer console: its `agents`, `modules`, `wiki`, `conversations`, and `running` sessions.
 
@@ -166,30 +168,24 @@ A thread is one piece of work on one or more repositories, from idea to closed. 
 
 - In a conversation, `/threads:stub <your idea>` plants a thread, and `/threads:run <thread>` takes it to closed: a spec, a review, a plan, the work with a commit per task, a validation by a read-only agent, and the close. A thread is also a session: open its document and run **Run this session with Claude**.
 - **Skills**: `/threads:stub`, `/threads:spec` (writes the spec, has it reviewed, and plans), and `/threads:run`. **Agents**: `threads:reviewer` reviews a spec and `threads:validator` validates the work. Both are read-only: they run the commands that only read or check, such as `git log` and the tests, and change no file. The skills call them with `yami_agent`, so each runs in a fresh context on Claude Code and on Codex. The agent that did the work never validates it. A suite that writes a build cache or a temporary file, such as `go test` or `npm test`, runs: the commands of a read-only agent write only a scratch folder of their own. A write to a repository or to the vault fails, and so does a command that needs the network, such as `git push` or a suite that fetches its dependencies. Fetch the dependencies before the validator runs.
-- **Tools**: `threads_stub`, `threads_spec`, `threads_plan` (add, done, drop), `threads_round`, `threads_close` (closed or dropped), and `threads_status`, which only reads, so a reviewer has it too. Each write returns the thread's `phase`, its `next` step, and its problems. The input of each is declared once, in `stubShape`, `specShape`, `planShape`, `roundShape`, and `closeShape`.
+- **Tools**: `threads_stub`, `threads_spec`, `threads_plan` (add, done, drop), `threads_round`, `threads_close` (closed or dropped), and `threads_status`, which only reads, so a reviewer has it too. Each write returns the thread's `phase`, its `next` step, and its problems.
 - **The phase** is derived from the document at each read: stub, specified, planned, in progress, unvalidated, failed, validated, closed, or dropped. The next step is spec, plan, wait, execute, validate, resolve, ask, close, or none. The `thread` check is met when the thread is closed or dropped, and is for review when the user decides: the budget of rounds is used, or the thread waits for one in its `after`.
 - **The rules of a round**: each requirement gets one result with evidence; a failing requirement needs a blocking finding; a finding with `predates` never blocks; each finding of the last round needs an outcome (fixed, spec, stub, declined, or knowledge) in the next round or at the close, where only stub, declined, or knowledge are taken; a carried result must be a pass of the last round whose requirement text did not change; a thread may take 3 rounds unless the spec sets `budget`. After a pass, a change to the plan or the spec needs `user_asked`, the user's words, which the decisions keep.
 - **The document's formats**: `- **R1** text`; `- [ ] **T1** text · serves R1, R2` with a `· done: <trail>` or `· dropped: <reason>`, and details indented below; each round as `### Round N`, with its data in a hidden comment on its last line.
 
 For a repository outside the vault, let the agent edit there and run its tests in your Claude Code settings (`additionalDirectories`) or Codex settings (`sandbox_workspace_write.writable_roots`), or answer each approval in the conversation.
 
-## The librarian
+### Your own flows in threads
 
-A checkout is a reading list of the wiki's material on a subject, and a copy of each document for you to read and mark up.
+Threads takes flows and forms from the vault, so you can add your own kinds of work to it with no code. Their sessions go in `threads/` beside the threads, and the panel lists them under Threads. They are not threads: the board and the thread tools leave them out.
 
-- **Librarian: new checkout** creates a checkout session. Write your request in its Request section, and run it. Or, in a conversation, `/librarian:checkout <subject>`.
-- The checkout skill searches with `wiki_search` and the `hop2` algorithm, keeps what serves the request, orders it foundations first with a reason each, and calls `librarian_checkout`. The tool writes the reading list into the session document, and the copies in the folder of its name, `<Title> (checkout).md`. A copy holds the original's body, `copy_of`, and `sha256`, the hash of that body. Only topics and sources are checked out, at most 60.
-- Mark up the copies, then open the reading list and run **Librarian: return this checkout**. Each copy whose hash changed returns its edits as a `modify` with `base`, in one change, "Return <name>"; a copy whose original changed too, is gone, or whose edit the wiki refuses stays, with the reason. Copies that returned or had no edit are removed. The reading list's Return section says what happened.
-
-## Journals
-
-Your own writing: each folder directly under `journals/` is a volume. No agent changes a journal.
-
-**Journals: publish a volume** lists the volumes with how many notes wait to be published. It captures each note whose latest source does not hold its text, and opens the edition, a wiki ingest session `<Volume Name> edition <date>`, with those sources and the `journal-sources` policy (primary authority, exact quotes, no claim the note does not make). Run the edition to absorb them. It refuses a volume with no note, and one with no change since its last publish.
+1. Run **Threads: create flow** and give a name, such as `Daily review`. Yami writes a starter flow at `internal/threads/flows/daily-review/FLOW.md`, valid as written, and opens it. Its comments say what each key takes.
+2. Write the forms that the flow names with **Threads: create agent**, **create policy**, **create promise**, and **create skill**. Each writes a starter in `internal/threads/<agents|policies|promises|skills>/<name>/` and opens it. A name that a form of that kind has already shows the reason in a notice.
+3. Run **Threads: create a flow session**, and pick the flow. Yami creates its session in `threads/` and opens it. The flow's own command, **Threads: new daily review**, does the same.
 
 ## The wiki
 
-The plugin gives every agent the wiki tools, `wiki_search`, `wiki_match`, and `wiki_lint`, so any conversation can answer from your notes with citations. The wiki module keeps topics in `wiki/topics/` and sources in `wiki/sources/`.
+The library gives every agent the wiki tools, such as `wiki_search`, `wiki_match`, `wiki_lint`, and `wiki_checkout`, so any conversation can answer from your notes with citations. The wiki module keeps topics in `wiki/topics/` and sources in `wiki/sources/`.
 
 The wiki indexes every note except `conversations/` and the folders and files in Obsidian's **Settings → Files and links → Excluded files**. A change in the vault marks the index stale, and the next query reads the vault again.
 
@@ -209,13 +205,22 @@ Commands to try the wiki yourself. In each list, Enter opens the note, Cmd+Enter
 1. **Wiki: ingest this file**, with a note or an attachment open, captures it as a source. Your file stays where it is. Yami keeps a frozen copy in `internal/wiki/originals/`, writes `wiki/sources/<name> (source).md`, which embeds the copy, and creates `internal/wiki/sessions/Ingest <name> <date>.md`, a session that links it. **Wiki: ingest a folder** does the same for every file in a folder you pick.
 2. **Run this session with Claude** or **with Codex**, with the session open, runs the ingest. The agent reads the originals in chunks, with one worker per chunk, matches the subjects against the wiki, drafts the topics, and applies them as one change plan with `wiki_change`. It cannot write the wiki any other way: the session is read-only. The loop checks the `change-applied`, `sources-absorbed`, and `clean-topics` promises after each turn.
 
+### Checkouts
+
+A checkout is a reading list of the wiki's material on a subject, and a copy of each document for you to read and mark up.
+
+- **Wiki: new checkout** creates a checkout session in `internal/wiki/sessions/`. Write your request in its Request section, and run it. Or, in a conversation, `/wiki:checkout <subject>`: the agent calls `wiki_checkout`, which writes `internal/wiki/sessions/<date> <name>.md`.
+- The copies go in the folder of the reading list's name, `<Title> (checkout).md`. A copy holds the original's body, `copy_of`, and `sha256`, the hash of that body. The wiki's search skips copies. Only topics and sources are checked out, at most 60.
+- Mark up the copies, then open the reading list and run **Wiki: return this checkout**. Each copy whose body changed returns its edits as a `modify` with `base`, in one change, "Return <name>"; a copy whose original changed too, is gone, or whose edit the wiki refuses stays, with the reason. Copies that returned or had no edit are removed. The reading list's Return section says what happened.
+
+### Versions
+
 Every change has a version before and after it. **Wiki: take a snapshot** saves the current state as a version when it is not one already. **Wiki: versions** lists them, newest first, each with its change; Enter opens the version's document, which names what changed. **Wiki: restore a version** writes a version back, as a new version, so nothing is lost. The module ledger, `internal/wiki/sessions.base`, has the versions and the changes as tables.
 
 ## Tests
 
-- `npm test` runs the unit tests of the modules in Node, with `testYami`: no Obsidian, no harness. `test/unit/hello.test.ts` copies the Hello fixture into a vault, runs a session through the review to done, and breaks its flow. `test/unit/threads.test.ts` has a scripted thread run that calls the validator through `yami_agent`.
-- `YAMI_LIVE_THREAD=1 npm run test:live` takes one thread from stub to closed with a real Claude Code, on a scratch repository: the skills, the tools, the reviewer and validator agents through `yami_agent`, and the loop. It takes some minutes.
-- `npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the module install, Hello made with **New module** and removed with its folder, the commands, the wiki commands, a journal publish and a checkout return, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, a hello session through its review, a hello session that calls its agent through `yami_agent`, and a session stopped in the middle of a turn and resumed. Your own Obsidian and vaults are not touched. Build the plugin first.
+- `npm test` runs the unit tests in Node, with `testYami`: no Obsidian, no harness. `test/unit/hello.test.ts` copies the Hello fixture into a vault, runs a session through the review to done, and breaks its flow. The tests of the wiki and threads are in the library.
+- `npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the install of the built-in modules, the wiki commands, a checkout made with `wiki_checkout` and returned with your edit, the **Threads: create** commands and a session of your own flow in the panel, Hello made with **New module** and removed with its folder, the commands, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, a hello session through its review, a hello session that calls its agent through `yami_agent`, and a session stopped in the middle of a turn and resumed. Your own Obsidian and vaults are not touched. Build the plugin first.
 
 ## Build a release
 
