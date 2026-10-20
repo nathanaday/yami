@@ -15,13 +15,19 @@ Obsidian suite: a `page.evaluate` that returns a `TFile` (as `vault.create` does
 
 ## Round 2
 
-Library 0.17.1 closed F1.1 to F1.5. Removed both workarounds; `act()` is `await this.yami.runChangeAct(act)` with the refusal caught; `CHANGE_STATUS_LABELS` from `yami/wiki` replaces the panel's table. `applying` (a path) replaced `pending`: the in-progress state shows for approve only, since the reject prompt is inside `runChangeAct` now (F2.1, a nit). The Obsidian test gained an Escape step in the reject prompt. Checks pass; the one Obsidian failure in a full run was the Codex 429 again.
+Library 0.17.1 closed F1.1 to F1.5. Removed both workarounds; `act()` is `await this.yami.runChangeAct(act)` with the refusal caught; `CHANGE_STATUS_LABELS` from `yami/wiki` replaces the panel's table. The Obsidian test gained an Escape step in the reject prompt. Checks pass; the one Obsidian failure in a full run was the Codex 429 again.
 
 The guard blocked me again on `node_modules/yami/package.json`. Do not grep it. `node -e "import('yami').then(m => console.log(m.VERSION))"` in the plugin folder gives the version.
+
+## Round 3
+
+Library 0.17.2 closed F2.1: `runChangeAct(act, { started })`. `act()` sets `pending` (`{ path, kind }`) in `started`, so "Rejecting…" shows after the prompt and "Applying…" at once; `BUSY` holds the two words (F3.1, a nit: the library has no word for a reject in progress). The mark turns with `data-status="applying"` for both kinds. The Obsidian test checks the state label after Escape. README line updated.
+
+The guard blocks `git show <commit>:<path>` without a pathspec: add `-- obsidian_plugin` to every git read.
 
 ## Next round
 
 - `grep -n "library-loop" src/` should stay empty.
-- If F2.1 lands, set the in-progress state for both kinds in `act()` and put the "Rejecting…" label back on the state line and the button.
+- If F3.1 lands (a busy word on the act), delete `BUSY` in `view.ts` and use it in `drawChange`.
 - The Obsidian test depends on the created topic's property order (9 add lines); if the page forms change, that expectation moves.
 - Check the test's `names()` on the Modules page still equals the three modules: a proposal that a test leaves waiting would add a row name.

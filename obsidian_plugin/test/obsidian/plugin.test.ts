@@ -354,6 +354,7 @@ describe("Yami in Obsidian", () => {
     await page().keyboard.press("Escape");
     await page().waitForSelector(".yami-ask", { state: "detached", timeout: 5_000 });
     expect(await page().$$(".yami-panel .yami-change-error")).toHaveLength(0);
+    expect(await page().textContent(".yami-panel .yami-state-label")).toBe("Waiting for approval");
     expect(await acts()).toEqual(["Approve", "Reject"]);
     await page().click('.yami-panel .yami-action:has-text("Reject")');
     await page().waitForSelector(".yami-ask", { timeout: 5_000 });

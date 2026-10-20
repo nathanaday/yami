@@ -30,6 +30,9 @@ const OPS: { op: ChangeWrite["op"]; icon: string; proposed: string; applied: str
   { op: "remove", icon: "minus", proposed: "Removes", applied: "Removed", count: "removes", short: "removed" },
 ];
 
+/** The word while an act runs: the library's for an approval; a reject has no status of its own, so the word is the panel's. */
+const BUSY: Record<ChangeAct["kind"], string> = { approve: CHANGE_STATUS_LABELS.applying, reject: "Rejecting" };
+
 /**
  * A sidebar view of the vault's Yami: the modules, the sessions of a module, and one session with what it
  * links and what a person can do with it, and what keeps a module of the vault out; and the wiki's change
@@ -41,8 +44,8 @@ export class YamiPanel extends ItemView {
   private place: Place = { level: "modules" };
   private ticket = 0;
   private unsubscribe?: () => void;
-  /** The change that an approval applies now, so the page shows it at once, before the document says so. */
-  private applying?: string;
+  /** The act that runs now on a change, so the page shows it at once, before the document says so. */
+  private pending?: { path: string; kind: ChangeAct["kind"] };
   /** The refusal of the last act on a change, which writes nothing, so only the page can show it. */
   private refusal?: { path: string; message: string };
   /** The proposals as the last draw of a waiting list showed them, so a new row enters and a finished one leaves. */
@@ -403,11 +406,13 @@ export class YamiPanel extends ItemView {
     const title = page.createEl("h2", { cls: "yami-panel-title is-link", text: details.title, attr: { tabindex: "0", role: "link", "data-key": "title", "aria-label": `Open the change document of ${details.title}` } });
     ui.activates(title, (evt) => void this.yami.open(details.path, modeOf(evt)));
 
-    const applying = this.applying === details.path;
-    const status: ChangeStatus = applying ? "applying" : details.status;
+    const pending = this.pending?.path === details.path ? this.pending.kind : undefined;
+    // While an act runs, the mark turns as the `applying` status does, for a reject too.
+    const status: ChangeStatus = pending ? "applying" : details.status;
+    const label = pending ? BUSY[pending] : CHANGE_STATUS_LABELS[status];
     const state = page.createDiv({ cls: "yami-state", attr: { "data-status": status } });
-    mark(state, status, CHANGE_STATUS_LABELS[status]);
-    state.createSpan({ cls: "yami-state-label", text: CHANGE_STATUS_LABELS[status] });
+    mark(state, status, label);
+    state.createSpan({ cls: "yami-state-label", text: label });
     const meta = state.createDiv({ cls: "yami-row-meta" });
     meta.createSpan({ text: `Proposed ${when(details.created)}` });
     if (details.session) {
@@ -439,9 +444,9 @@ export class YamiPanel extends ItemView {
 
     const bar = page.createDiv({ cls: "yami-actions" });
     for (const act of this.yami.wiki.changeActs(details)) {
-      const label = applying && act.kind === "approve" ? `${CHANGE_STATUS_LABELS.applying}…` : act.label;
+      const label = pending === act.kind ? `${BUSY[pending]}…` : act.label;
       const button = this.button(bar, `act:${act.kind}`, label, act.kind === "approve" ? "check" : "x", act.kind === "approve", () => this.act(details, act));
-      if (applying) button.ariaDisabled = "true";
+      if (pending) button.ariaDisabled = "true";
     }
     if (!bar.childElementCount) bar.remove();
 
@@ -491,19 +496,22 @@ export class YamiPanel extends ItemView {
   }
 
   /**
-   * Does an act on a change, and shows how it went. An approval shows `Applying` at once, then the result or
-   * the refusal. A reject's feedback is its prompt, which the library shows, and then the document's record.
+   * Does an act on a change, and shows how it went: the act in progress from when its run starts, which for a
+   * reject is after the library's prompt, then the result or the refusal. Escape in the prompt changes nothing.
    */
   private async act(details: ChangeDetails, act: ChangeAct): Promise<void> {
-    if (act.kind === "approve") this.applying = details.path;
     this.refusal = undefined;
-    void this.render();
     try {
-      await this.yami.runChangeAct(act);
+      await this.yami.runChangeAct(act, {
+        started: () => {
+          this.pending = { path: details.path, kind: act.kind };
+          void this.render();
+        },
+      });
     } catch (error) {
       this.refusal = { path: details.path, message: (error as Error).message };
     } finally {
-      this.applying = undefined;
+      this.pending = undefined;
       void this.render();
     }
   }
