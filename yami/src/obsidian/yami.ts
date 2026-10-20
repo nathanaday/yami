@@ -5,6 +5,7 @@ import { basename } from "../document/document.js";
 import { Flow, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
 import type { Session } from "../module/session.js";
 import { Yami } from "../module/yami.js";
+import type { ChangeAct } from "../wiki/change.js";
 import type { WikiOptions } from "../wiki/wiki.js";
 import { noAgentsMessage, vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
@@ -12,7 +13,7 @@ import { ChangeFeed } from "./change-feed.js";
 import { showFolderColors } from "./colors.js";
 import { watchModules } from "./discovery.js";
 import { checkModuleIcons } from "./icons.js";
-import { addConversationCommands, addModuleCommands, addNewModuleCommand, addSessionCommands, addWikiCommands } from "./commands.js";
+import { addConversationCommands, addModuleCommands, addNewModuleCommand, addSessionCommands, addWikiCommands, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
 import { NoteSessions, type AgentWork, type NoteEvents, type NoteSessionsOptions } from "./note-sessions.js";
@@ -336,6 +337,20 @@ export class ObsidianYami extends Yami {
   /** Does an act of a module: creates the session of a `new` act and opens it, or does the action. */
   runModuleAct(act: ModuleAct): Promise<void> {
     return act.kind === "new" ? this.newSession(act.flow) : this.runAction(act.action);
+  }
+
+  /**
+   * Does an act of `wiki.changeActs()`. A reject first asks for the reason with the reject prompt, and
+   * Escape does nothing. Then it runs the act and shows what it said in a notice. A refusal shows no
+   * notice: the promise rejects with it, so a view shows the reasons where the act was. The change
+   * commands use it.
+   * @example
+   * for (const act of wiki.changeActs(change)) button(act.label, () => yami.runChangeAct(act).catch((error) => show(error.message)));
+   */
+  async runChangeAct(act: ChangeAct): Promise<void> {
+    if (act.kind === "approve") return void new Notice(await act.run());
+    const reason = await this.ask(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY });
+    if (reason !== undefined) new Notice(await act.run(reason));
   }
 
   /** Creates a session from a flow, opens it, and says so. */

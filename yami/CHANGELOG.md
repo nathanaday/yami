@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.17.1 · library-loop change-approval round 2
+
+The `changed` flag of a write holds only while the change is proposed; `yami.runChangeAct(act)` does an act on a change in Obsidian, as the commands do; and `CHANGE_STATUS_LABELS` gives the words for each status.
+
+### Added
+- `yami.runChangeAct(act)` in `yami/obsidian`, for an act of `wiki.changeActs()`: a reject first asks for the reason with the reject prompt, and Escape does nothing; then it runs the act and shows what it said in a notice. A refusal shows no notice: the promise rejects with it, so a view shows the reasons where the act was. The four change commands use it, so the sequence is in one place. `act.run` stays for a host that prompts its own way.
+- `CHANGE_STATUS_LABELS` in `yami/wiki`, the words for each `ChangeStatus`, as `STATUS_LABELS` gives a session's: "Waiting for approval", "Applying", "Applied", "Failed", "Rejected". The status line of a change document starts with them, and the notices of the acts use them.
+- The README says that a create's `after` in `changeDetails` holds the form's defaults, since that is what the approval writes, and names `VERSION` under Build and tests.
+
+### Changed
+- The status line of a proposed change document reads `Waiting for approval. A person applies it with …`; before, `Waits for approval. …`. An applying change reads `Applying.`; before, `Being applied.`
+
+### Fixed
+- `changeDetails` set `changed` on every modify and remove of an applied, failed, or rejected change, so a view that warned on the flag warned on every applied change whose note had moved on. The flag means that an approval would overwrite a later edit, which only a proposal can mean, so it is set only while the change is `proposed` and absent otherwise.
+
 ## 0.17.0 · library-loop change-approval round 1
 
 A change plan is a proposal that a person approves. `wiki.change(plan)` and `wiki_change` write the change document and nothing else; `wiki.approve(path)` applies it, `wiki.reject(path, reason)` refuses it, and the reads and the acts of the changes give a view what it needs. An ingest session ends when its plan is proposed.

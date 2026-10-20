@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, PropertiesError, readDocument } from "../../src/document/index.js";
 import { runCheck, Yami, type WikiModule } from "../../src/index.js";
-import { algorithms, bodyHash, captureSource, captureSources, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, normalizeTag, readProposal, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
+import { algorithms, bodyHash, captureSource, captureSources, CHANGE_STATUS_LABELS, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, normalizeTag, readProposal, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
+import { statusText } from "../../src/wiki/change.js";
+import { CHANGE_STATUSES } from "../../src/document/index.js";
 import { FsVault } from "../../src/testing/index.js";
 
 let root = "";
@@ -645,7 +647,7 @@ describe("change", () => {
 
     const change = await readDocument(vault, result.path);
     expect(change.properties).toEqual({ type: "change", module: "wiki", title: "Ingest the codex notes", status: "proposed", creates: 1, modifies: 1, removes: 1, session: link(sessionPath), created: expect.any(String) });
-    expect(change.body).toContain("# Ingest the codex notes\n\nWaits for approval. A person applies it with Wiki: approve this change, or refuses it with Wiki: reject this change.\n\n## Summary");
+    expect(change.body).toContain("# Ingest the codex notes\n\nWaiting for approval. A person applies it with Wiki: approve this change, or refuses it with Wiki: reject this change.\n\n## Summary");
     expect(change.body).toContain("- **create** [[wiki/topics/App-server protocol|App-server protocol]] · the source explains it and no topic does");
     expect(change.body).toContain("- **remove** Sourdough · off topic");
     expect(change.body).toContain("Adds the protocol topic");
@@ -697,13 +699,13 @@ describe("change", () => {
     expect((await readDocument(vault, (await wiki.versions())[1]!.path)).body).toContain("Since version 1: 1 added, 1 changed, 1 removed.");
     expect((await wiki.captured()).captured).toBe(true);
 
-    // The details of an applied change compare with the version before it.
+    // The details of an applied change compare with the version before it, and flag nothing: only a proposal can be overwritten.
     const details = await wiki.changeDetails(path);
     expect(details).toMatchObject({ status: "applied", before: 1, after: 2, session: sessionPath, module: "wiki" });
     expect(details.writes.map((w) => [w.op, w.changed])).toEqual([
       ["create", undefined],
-      ["modify", false],
-      ["remove", false],
+      ["modify", undefined],
+      ["remove", undefined],
     ]);
     expect(details.writes[2]!.before).toContain("A starter of flour and water ferments");
     expect(details.writes[1]!.before).toContain("tags:");
@@ -744,6 +746,16 @@ describe("change", () => {
     await wiki.approve(path);
     expect(await vault.read(`${TOPICS}/Levain.md`)).toContain("The proposal's body.");
     expect(await vault.read(`${TOPICS}/Levain.md`)).not.toContain("hand");
+    expect((await wiki.changeDetails(path)).writes[0]!.changed).toBeUndefined();
+
+    // A rejected change is flagged no more: its `before` is the vault now, and nothing will overwrite it.
+    const { path: refused } = await wiki.change({ title: "Levain again", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, body: "Another body." }] });
+    await note(`${TOPICS}/Levain.md`, { type: "topic", description: "A sourdough starter, in the French usage.", sources: [] }, "Edited after.\n");
+    expect((await wiki.changeDetails(refused)).writes[0]!.changed).toBe(true);
+    await wiki.reject(refused);
+    const after = (await wiki.changeDetails(refused)).writes[0]!;
+    expect(after.changed).toBeUndefined();
+    expect(after.before).toContain("Edited after.");
     expect((await wiki.versions()).map((v) => v.version)).toEqual([1, 2]);
     await wiki.restore(1);
     expect(await vault.read(`${TOPICS}/Levain.md`)).toContain("- hand");
@@ -767,6 +779,14 @@ describe("change", () => {
     expect(await wiki.versions()).toEqual([]);
     await expect(wiki.approve("internal/wiki/changes/none.md")).rejects.toThrow("There is no change document at internal/wiki/changes/none.md.");
     await expect(wiki.approve(`${TOPICS}/Levain.md`)).rejects.toThrow("wiki/topics/Levain.md is not a change document.");
+  });
+
+  it("gives the words for each status, and the document's status line starts with them", () => {
+    expect(CHANGE_STATUS_LABELS).toEqual({ proposed: "Waiting for approval", applying: "Applying", applied: "Applied", failed: "Failed", rejected: "Rejected" });
+    for (const status of CHANGE_STATUSES) {
+      expect(statusText({ status, before: 1, after: 2, error: "disk full", reason: "no" })).toMatch(new RegExp(`^${CHANGE_STATUS_LABELS[status]}[.,:]`));
+    }
+    expect(statusText({ status: "failed", before: 1, error: "disk full" })).toBe("Failed, and the wiki is back at version 1: disk full");
   });
 
   it("rejects a proposal with the reason, which the document shows, and refuses a second act", async () => {

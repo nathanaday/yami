@@ -5,9 +5,13 @@
 - The change document is the one record: `readProposal` in `src/wiki/change.ts` parses the Writes section (`### <op> · <path>`, the why, `<!-- hash: … -->`, a `markdown` block with the note whole). A modify applies the note whole. `changed` in details compares the hash of the note's text at proposal with the text now.
 - Kept the promise name `change-applied` because R8 says it "becomes" the proposed-or-applied promise and old sessions link it. If the consumer finds the name misleading, a rename to `change-proposed` is a small break (session links, install files).
 - `age()`, `REJECT_*` texts, and `AskOptions` are exported from `yami/obsidian`.
-- Proposed a policy line for design.md "The wiki" item 8 about the document as the one record.
+- Proposed a policy line for design.md "The wiki" item 8 about the document as the one record; the overseer put it in.
+
+## Round 2
+- 0.17.1, all five items accepted (the rulings said so). `changed` only while `proposed` (the snapshot before an approval holds the note as edited, so an applied modify read `true`). `ObsidianYami.runChangeAct(act)` in `src/obsidian/yami.ts`; the commands call `yami.notify(yami.runChangeAct(act))`: the notice of success is the act's, the refusal is `notify`'s. `CHANGE_STATUS_LABELS` in `src/wiki/change.ts`, used by `statusText` and the acts' notices.
+- The commands test fakes `runChangeAct`; the sequence's own test is in `test/unit/obsidian/yami.test.ts` over the mocked `Notice`.
 
 ## Watch next round
-- A view will want the diff texts: `before`/`after` are whole serialized documents; a host diffs them itself. If the consumer asks for a line diff, decline: it is a view concern, and `diff-match-patch-es` is already a dependency a plugin can use.
-- `changes()` reads every change document on each call; a vault with hundreds of changes may want the list cached or filtered by folder listing. Measure before adding.
-- The showcase panel (not mine) must take the change API; design.md item 5 expects a use in the showcase.
+- A line diff stays in the consumer (`diff-match-patch-es` is a dependency a plugin can use); decline if asked.
+- `changes()` reads every change document on each call; measure before caching.
+- The consumer's verdict was `done` in round 1; if round 2 feedback is nits only, the session is near its end. Check that the showcase's `library-loop: F1.1` and `F1.2` marks can go.

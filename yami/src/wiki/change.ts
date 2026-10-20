@@ -118,7 +118,10 @@ export interface ChangeWrite {
   before?: string;
   /** create, modify: the note's text after the write, as the change document records it. */
   after?: string;
-  /** modify, remove: the note's text now is not the text the proposal read, so an approval overwrites a later edit. */
+  /**
+   * modify, remove, while the change is proposed: whether the note's text now is not the text the proposal
+   * read, so an approval overwrites a later edit. Absent once the change is applied, failed, or rejected.
+   */
   changed?: boolean;
 }
 
@@ -288,20 +291,30 @@ export async function changePath(vault: Vault, title: string, now: string): Prom
   return path;
 }
 
-/** The line under the title that says where the change stands, from its properties. */
+/** How a person reads each status of a change, in a list, a badge, a notice, or the document's status line. */
+export const CHANGE_STATUS_LABELS: Record<ChangeStatus, string> = {
+  proposed: "Waiting for approval",
+  applying: "Applying",
+  applied: "Applied",
+  failed: "Failed",
+  rejected: "Rejected",
+};
+
+/** The line under the title that says where the change stands, from its properties. It starts with the status's label. */
 export function statusText(properties: Properties): string {
   const { status, before, after, error, reason } = properties;
+  const labels = CHANGE_STATUS_LABELS;
   switch (status) {
     case "applying":
-      return "Being applied.";
+      return `${labels.applying}.`;
     case "applied":
-      return `Applied: version ${before} → ${after}.`;
+      return `${labels.applied}: version ${before} → ${after}.`;
     case "failed":
-      return `Failed, and the wiki is back at version ${before}: ${error}`;
+      return `${labels.failed}, and the wiki is back at version ${before}: ${error}`;
     case "rejected":
-      return typeof reason === "string" && reason ? `Rejected: ${reason}` : "Rejected, with no reason given.";
+      return typeof reason === "string" && reason ? `${labels.rejected}: ${reason}` : `${labels.rejected}, with no reason given.`;
     default:
-      return "Waits for approval. A person applies it with Wiki: approve this change, or refuses it with Wiki: reject this change.";
+      return `${labels.proposed}. A person applies it with Wiki: approve this change, or refuses it with Wiki: reject this change.`;
   }
 }
 
@@ -536,7 +549,7 @@ export async function changeDetails(vault: Vault, path: string): Promise<ChangeD
     if (write.op !== "create") {
       const before = archive ? archive[write.path] : (await vault.exists(write.path)) ? await vault.read(write.path) : undefined;
       if (before !== undefined) out.before = before;
-      out.changed = before === undefined || (await textHash(before)) !== write.hash;
+      if (summary.status === "proposed") out.changed = before === undefined || (await textHash(before)) !== write.hash;
     }
     writes.push(out);
   }

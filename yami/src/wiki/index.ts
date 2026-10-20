@@ -4,6 +4,7 @@ export { Bm25, normalize, type Fields } from "./bm25.js";
 export {
   applyWrites,
   bodyHash,
+  CHANGE_STATUS_LABELS,
   changeDetails,
   describeCounts,
   InvalidPlan,

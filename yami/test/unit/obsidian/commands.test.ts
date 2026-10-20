@@ -17,8 +17,8 @@ vi.mock("obsidian", () => {
 import type { Command } from "obsidian";
 import { readDocument } from "../../../src/document/index.js";
 import type { Properties } from "../../../src/index.js";
-import { addModuleCommands, addNewModuleCommand, addWikiCommands, age, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "../../../src/obsidian/commands.js";
-import { TOPICS } from "../../../src/wiki/index.js";
+import { addModuleCommands, addNewModuleCommand, addWikiCommands, age } from "../../../src/obsidian/commands.js";
+import { TOPICS, type ChangeAct } from "../../../src/wiki/index.js";
 import type { ObsidianYami } from "../../../src/obsidian/yami.js";
 import { testYami, type TestYami } from "../../../src/testing/index.js";
 import { Hello } from "../../fixtures/hello.js";
@@ -180,9 +180,8 @@ describe("the change commands of the wiki", () => {
     await write(`${TOPICS}/Levain.md`, { type: "topic", description: "A starter.", sources: [] }, "x\n");
     const commands = new Map<string, Command>();
     const shown: unknown[] = [];
-    const asked: unknown[][] = [];
+    const ran: string[] = [];
     const picked: string[][] = [];
-    let answer: string | undefined;
     let active: { path: string; basename: string; extension: string } | undefined;
     let done: Promise<void> = Promise.resolve();
     const host = {
@@ -191,9 +190,10 @@ describe("the change commands of the wiki", () => {
       wiki: yami.wiki,
       conversationFolder: "conversations",
       properties: async (path: string) => (await readDocument(vault, path)).properties,
-      ask: async (placeholder: string, hint: string, options: unknown) => (asked.push([placeholder, hint, options]), answer),
       pick: async <T,>(items: T[], label: (item: T) => string, placeholder: string) => (picked.push([placeholder, ...items.map(label)]), items[0]),
-      notify: (work: Promise<unknown>) => (done = work.then((result) => void shown.push(result), (error: Error) => void shown.push(`Yami: ${error.message}`))),
+      // The commands do each act through `runChangeAct`, whose own test is in yami.test.ts; here it runs the act and records what it said.
+      runChangeAct: async (act: ChangeAct) => (ran.push(act.kind), void shown.push(await (act.kind === "reject" ? act.run("C exists.") : act.run()))),
+      notify: (work: Promise<unknown>) => (done = work.then((result) => void (result !== undefined && shown.push(result)), (error: Error) => void shown.push(`Yami: ${error.message}`))),
     } as unknown as ObsidianYami;
     // The commands read the properties from Obsidian's cache, which is synchronous; the test reads the vault.
     const properties = new Map<string, Properties>();
@@ -228,16 +228,10 @@ describe("the change commands of the wiki", () => {
     expect(await run("yami-wiki-approve-this-change", true)).toBe(true);
     expect(await run("yami-wiki-reject-this-change", true)).toBe(true);
 
-    // Reject asks for the reason; Escape rejects nothing.
-    answer = undefined;
     await run("yami-wiki-reject-this-change");
-    expect(asked).toEqual([[REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY }]]);
-    expect(shown).toEqual([undefined]);
-    expect((await readDocument(vault, a.path)).properties.status).toBe("proposed");
-    answer = "";
-    await run("yami-wiki-reject-this-change");
+    expect(ran).toEqual(["reject"]);
     expect(shown.pop()).toBe("Rejected A.");
-    expect((await readDocument(vault, a.path)).properties).toMatchObject({ status: "rejected" });
+    expect((await readDocument(vault, a.path)).properties).toMatchObject({ status: "rejected", reason: "C exists." });
     await refresh(a.path);
     expect(await run("yami-wiki-approve-this-change", true)).toBe(false);
 
@@ -245,6 +239,7 @@ describe("the change commands of the wiki", () => {
     await refresh(b.path);
     active = { path: b.path, basename: "B", extension: "md" };
     await run("yami-wiki-approve-this-change");
+    expect(ran).toEqual(["reject", "approve"]);
     expect(shown.pop()).toBe("Applied B: v1 → v2 · 1 created");
     expect(await vault.exists(`${TOPICS}/B.md`)).toBe(true);
 
@@ -255,11 +250,11 @@ describe("the change commands of the wiki", () => {
     expect(picked.pop()).toEqual(["The change to approve", "C · 1 created · just now"]);
     expect(shown.pop()).toBe("Yami: The change plan is not valid:\n- write 1 (create wiki/topics/C.md): the note exists; use modify");
     expect((await readDocument(vault, c.path)).properties.status).toBe("proposed");
-    answer = "C exists.";
     await run("yami-wiki-reject-change");
     expect(picked.pop()).toEqual(["The change to reject", "C · 1 created · just now"]);
     expect(shown.pop()).toBe("Rejected C.");
     expect((await readDocument(vault, c.path)).properties.reason).toBe("C exists.");
+    expect(ran).toEqual(["reject", "approve", "approve", "reject"]);
   });
 
   it("says how old a change is in words", () => {

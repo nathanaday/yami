@@ -59,8 +59,9 @@ vi.mock("obsidian", () => {
 
 import type { Command, Plugin } from "obsidian";
 import { Menu, Notice } from "obsidian";
-import { COMMAND_PREFIX, createYami, type AgentWork, type ObsidianYami, type YamiPluginOptions } from "../../../src/obsidian/index.js";
+import { COMMAND_PREFIX, createYami, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER, type AgentWork, type ObsidianYami, type YamiPluginOptions } from "../../../src/obsidian/index.js";
 import { ScriptedAgent } from "../../../src/testing/index.js";
+import { InvalidPlan, type ChangeAct } from "../../../src/wiki/index.js";
 
 const shown = () => (Menu as unknown as { shown: string[][] }).shown;
 const notices = () => (Notice as unknown as { messages: string[] }).messages;
@@ -242,6 +243,36 @@ describe("setAgents", () => {
     fake!.vault("modify", { path: "conversations/Chat.md" });
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(heard).toBe(2);
+  });
+
+  it("does an act on a change: asks for the reason of a reject, runs the act, shows the notice, and rejects with a refusal", async () => {
+    const yami = await build();
+    const ask = vi.spyOn(yami, "ask").mockResolvedValue(undefined);
+    const ran: unknown[][] = [];
+    const reject: ChangeAct = { kind: "reject", label: "Reject", run: async (reason) => (ran.push(["reject", reason]), "Rejected A.") };
+    const approve: ChangeAct = { kind: "approve", label: "Approve", run: async () => (ran.push(["approve"]), "Applied A: v1 → v2 · 1 created") };
+
+    // Escape at the reason prompt does nothing.
+    await yami.runChangeAct(reject);
+    expect(ask).toHaveBeenCalledWith(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY });
+    expect(ran).toEqual([]);
+    expect(notices()).toEqual([]);
+
+    // An empty reason is an answer.
+    ask.mockResolvedValue("");
+    await yami.runChangeAct(reject);
+    expect(ran).toEqual([["reject", ""]]);
+    expect(notices()).toEqual(["Rejected A."]);
+
+    // An approve asks nothing.
+    await yami.runChangeAct(approve);
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect(notices()).toEqual(["Rejected A.", "Applied A: v1 → v2 · 1 created"]);
+
+    // A refusal rejects with its reasons, and shows no notice: the view shows it where the act was.
+    const refused: ChangeAct = { kind: "approve", label: "Approve", run: () => Promise.reject(new InvalidPlan(["write 1 (create wiki/topics/A.md): the note exists; use modify"])) };
+    await expect(yami.runChangeAct(refused)).rejects.toThrow("The change plan is not valid:\n- write 1 (create wiki/topics/A.md): the note exists; use modify");
+    expect(notices()).toHaveLength(2);
   });
 
   it("refuses two agents of one name, and changes nothing", async () => {

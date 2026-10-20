@@ -418,56 +418,27 @@ export function addWikiCommands(yami: ObsidianYami): void {
     return properties.type === "change" ? { path: file.path, status: properties.status as ChangeStatus, title: String(properties.title ?? file.basename) } : undefined;
   };
   const act = (change: Pick<ChangeSummary, "path" | "status" | "title">, kind: ChangeAct["kind"]) => wiki.changeActs(change).find((a) => a.kind === kind);
-  const reason = () => yami.ask(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY });
   const describe = (change: ChangeSummary) => `${change.title} · ${describeCounts(change)} · ${age(change.created)}`;
-  addCommand(plugin, {
-    id: "wiki-approve-this-change",
-    name: "Wiki: approve this change",
-    checkCallback: (checking) => {
-      const change = activeChange();
-      const approve = change && act(change, "approve");
-      if (!approve) return false;
-      if (!checking) yami.notify(approve.run());
-      return true;
-    },
-  });
-  addCommand(plugin, {
-    id: "wiki-reject-this-change",
-    name: "Wiki: reject this change",
-    checkCallback: (checking) => {
-      const change = activeChange();
-      const reject = change && act(change, "reject");
-      if (!reject) return false;
-      if (!checking) yami.notify(reason().then((text) => (text === undefined ? undefined : reject.run(text))));
-      return true;
-    },
-  });
-  addCommand(plugin, {
-    id: "wiki-approve-change",
-    name: "Wiki: approve a change",
-    callback: () =>
-      yami.notify(
-        wiki.changes().then(async (proposals) => {
-          if (!proposals.length) return NO_PROPOSAL;
-          const picked = await yami.pick(proposals, describe, "The change to approve");
-          return picked && act(picked, "approve")!.run();
-        }),
-      ),
-  });
-  addCommand(plugin, {
-    id: "wiki-reject-change",
-    name: "Wiki: reject a change",
-    callback: () =>
-      yami.notify(
-        wiki.changes().then(async (proposals) => {
-          if (!proposals.length) return NO_PROPOSAL;
-          const picked = await yami.pick(proposals, describe, "The change to reject");
-          if (!picked) return undefined;
-          const text = await reason();
-          return text === undefined ? undefined : act(picked, "reject")!.run(text);
-        }),
-      ),
-  });
+  // `runChangeAct` shows the notice of success; `notify` shows a refusal.
+  const onActive = (kind: ChangeAct["kind"]) => (checking: boolean) => {
+    const change = activeChange();
+    const found = change && act(change, kind);
+    if (!found) return false;
+    if (!checking) yami.notify(yami.runChangeAct(found));
+    return true;
+  };
+  const onPicked = (kind: ChangeAct["kind"], placeholder: string) => () =>
+    yami.notify(
+      wiki.changes().then(async (proposals) => {
+        if (!proposals.length) return NO_PROPOSAL;
+        const picked = await yami.pick(proposals, describe, placeholder);
+        if (picked) await yami.runChangeAct(act(picked, kind)!);
+      }),
+    );
+  addCommand(plugin, { id: "wiki-approve-this-change", name: "Wiki: approve this change", checkCallback: onActive("approve") });
+  addCommand(plugin, { id: "wiki-reject-this-change", name: "Wiki: reject this change", checkCallback: onActive("reject") });
+  addCommand(plugin, { id: "wiki-approve-change", name: "Wiki: approve a change", callback: onPicked("approve", "The change to approve") });
+  addCommand(plugin, { id: "wiki-reject-change", name: "Wiki: reject a change", callback: onPicked("reject", "The change to reject") });
 }
 
 /** The texts of the reject prompt: public API, as the README table "The prompts" has them. */

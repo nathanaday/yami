@@ -7,6 +7,7 @@ import { algorithms, type Algorithm, type Hit, type Query, type Scored } from ".
 import { Bm25, normalize, type Fields } from "./bm25.js";
 import {
   applyWrites,
+  CHANGE_STATUS_LABELS,
   changeDetails,
   changeDocument,
   changePath,
@@ -546,11 +547,12 @@ export class Wiki {
   /**
    * One change with its writes: the summary, and for each write its `op`, `path`, `why`, the note's text
    * `before` (modify, remove: from the version before for an applied change, else the vault now) and `after`
-   * (create, modify), and `changed` when the note's text now is not the text the proposal read. It throws
+   * (create, modify: the whole note the approval writes, the form's defaults included), and, while the
+   * change is proposed, `changed` when the note's text now is not the text the proposal read. It throws
    * as `approve` does for a document that does not parse.
    * @example
    * const { writes } = await wiki.changeDetails(path);
-   * if (writes.some((w) => w.changed)) warn("A note changed since the proposal.");
+   * if (writes.some((w) => w.changed)) warn("A note changed since the proposal; an approval overwrites it.");
    */
   changeDetails(path: string): Promise<ChangeDetails> {
     return changeDetails(this.vault, path);
@@ -560,7 +562,8 @@ export class Wiki {
    * What a person can do with a change now: `approve` and `reject`, while it is proposed, and nothing
    * otherwise. Each has a `label` and a `run` that resolves with what to tell the person: `Applied Ingest
    * DINOv2: v3 → v4 · 2 created, 1 modified`, or `Rejected Ingest DINOv2.`; the reject's `run` takes the
-   * reason. A refusal throws, with the reasons. The commands and a view both use them.
+   * reason. A refusal throws, with the reasons. The commands and a view both use them; in Obsidian,
+   * `yami.runChangeAct(act)` does the prompt, the run, and the notice.
    * @example
    * for (const act of wiki.changeActs(summary)) button(act.label, () => act.run());
    */
@@ -568,11 +571,11 @@ export class Wiki {
     if (change.status !== "proposed") return [];
     const approve = async () => {
       const result = await this.approve(change.path);
-      return `Applied ${change.title}: v${result.before} → v${result.after} · ${describeCounts(result)}`;
+      return `${CHANGE_STATUS_LABELS.applied} ${change.title}: v${result.before} → v${result.after} · ${describeCounts(result)}`;
     };
     const reject = async (reason?: string) => {
       await this.reject(change.path, reason);
-      return `Rejected ${change.title}.`;
+      return `${CHANGE_STATUS_LABELS.rejected} ${change.title}.`;
     };
     return [
       { kind: "approve", label: "Approve", run: approve },
