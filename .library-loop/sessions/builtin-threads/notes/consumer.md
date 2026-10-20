@@ -15,5 +15,12 @@
 - Guard: do not put `node_modules/yami` or `yami/src` in a command; do not `ls` the session folder.
 - Filed: F2.1 docs minor, the hint of each built-in `ask` (only the flow hint is documented).
 
+## Round 3 (yami 0.16.1)
+- No plugin code change. Tests: New module clicks `Create the module: Hello` and checks its placeholder; each create kind checks `The name of the new <kind>, such as <example>`.
+- `npm install` refreshed a stale `package-lock.json` (yami 0.1.0, a leftover `@cfworker/json-schema`).
+- Checks: build, unit (3), test:obsidian 21/22 (Codex 429 again; passes alone). First full run was 20/22, and I captured only the tail; next time save the full log to the scratchpad.
+- Guard: do not read the library's `package.json`; do not put `yami/s` in a grep pattern.
+- F2.1 closed. No open items. Verdict done.
+
 ## Check next round
-- F2.1: does "The prompts" list the hints of `create <kind>` and New module? If so, match New module on its full item text.
+- Nothing open. Read the CHANGELOG for breaking changes to prompts or commands.

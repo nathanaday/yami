@@ -263,20 +263,21 @@ describe("Yami in Obsidian", () => {
   });
 
   it("creates the forms of threads from the command palette, and a session of the person's own flow, which the panel lists", { timeout: 60_000 }, async () => {
-    const forms: [kind: string, name: string, file: string][] = [
-      ["agent", "Code checker", "internal/threads/agents/code-checker/AGENT.md"],
-      ["flow", "Daily review", "internal/threads/flows/daily-review/FLOW.md"],
-      ["policy", "Plain words", "internal/threads/policies/plain-words/POLICY.md"],
-      ["promise", "Review written", "internal/threads/promises/review-written/PROMISE.md"],
-      ["skill", "Summarize commits", "internal/threads/skills/summarize-commits/SKILL.md"],
+    const forms: [kind: string, name: string, file: string, example: string][] = [
+      ["agent", "Code checker", "internal/threads/agents/code-checker/AGENT.md", "Reviewer"],
+      ["flow", "Daily review", "internal/threads/flows/daily-review/FLOW.md", "Daily review"],
+      ["policy", "Plain words", "internal/threads/policies/plain-words/POLICY.md", "Cite sources"],
+      ["promise", "Review written", "internal/threads/promises/review-written/PROMISE.md", "Summary written"],
+      ["skill", "Summarize commits", "internal/threads/skills/summarize-commits/SKILL.md", "Summarize"],
     ];
-    for (const [kind, name, file] of forms) {
+    for (const [kind, name, file, example] of forms) {
       const id = `yami:yami-threads-create-${kind}`;
       expect(await page().evaluate((command) => (window as any).app.commands.findCommand(command)?.name, id)).toBe(`Yami: Threads: create ${kind}`);
       await run(id);
       await page().waitForSelector(".yami-ask", { timeout: 5_000 });
       expect(await page().textContent(".yami-ask")).toContain("Type a name.");
       expect(await page().$$(".yami-ask .suggestion-item")).toHaveLength(0);
+      expect(await page().getAttribute(".yami-ask input.prompt-input", "placeholder")).toBe(`The name of the new ${kind}, such as ${example}`);
       await page().locator(".yami-ask input.prompt-input").fill(name);
       await page().locator(".yami-ask .suggestion-item", { hasText: `Create the ${kind}: ${name}` }).click();
       await page().waitForFunction((want) => (window as any).app.workspace.getActiveFile()?.path === want, file, { timeout: 10_000 });
@@ -353,8 +354,10 @@ describe("Yami in Obsidian", () => {
     expect(await page().$('.yami-panel [data-key="module:hello"]')).toBeNull();
 
     await run("yami:yami-new-module");
+    await page().waitForSelector(".yami-ask", { timeout: 5_000 });
+    expect(await page().getAttribute(".yami-ask input.prompt-input", "placeholder")).toBe("The name of the new module, such as Code review");
     await page().locator(".yami-ask input.prompt-input").fill("Hello");
-    await page().locator(".yami-ask .suggestion-item", { hasText: "Hello" }).click();
+    await page().locator(".yami-ask .suggestion-item", { hasText: "Create the module: Hello" }).click();
     await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path === "internal/hello/hello.md", undefined, { timeout: 10_000 });
     await page().waitForSelector('.yami-panel [data-key="module:hello"]', { timeout: 10_000 });
 
