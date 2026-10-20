@@ -2,7 +2,6 @@ import { defineTool, z } from "../../agent/index.js";
 import type { AgentTool } from "../../agent/types.js";
 import type { LedgerView } from "../../document/bases.js";
 import { readDocument } from "../../document/document.js";
-import type { Schema } from "../../document/schema.js";
 import type { Check } from "../checks.js";
 import { YamiModule } from "../module.js";
 import { changeThroughTools, reviewerAgent, runSkill, specSkill, stubSkill, threadClosed, validatorAgent } from "./documents.js";
@@ -39,22 +38,6 @@ export class ThreadsModule extends YamiModule {
   readonly vaultFlows = true;
   readonly description =
     "Work on repositories as threads: the idea, a spec with checkable requirements, a plan, validation rounds by a fresh read-only agent, and the outcome, in one document each.";
-  readonly schema: Schema = {
-    /** One line: what the work is, and where it lands. */
-    description: { type: "text" },
-    /** The folders of the repositories the work changes. */
-    repositories: { type: "list", default: [] },
-    /** The threads that come before this one. */
-    after: { type: "links", default: [] },
-    priority: { type: "text", values: ["high", "normal", "low"] },
-    /** The rounds the thread may take before the user decides. */
-    budget: { type: "number" },
-    /** The requirements the spec retired. */
-    retired: { type: "list", default: [] },
-    /** A copy of the derived phase, for the ledger. No code trusts it. */
-    phase: { type: "text" },
-    tags: { type: "list", default: [] },
-  };
   readonly ledgerViews: LedgerView[] = [
     {
       type: "table",
@@ -82,6 +65,22 @@ export class ThreadsModule extends YamiModule {
     name: THREAD_FLOW,
     description: "One piece of validated work on repositories, from the stub to closed.",
     command: false,
+    schema: {
+      /** One line: what the work is, and where it lands. */
+      description: { type: "text" },
+      /** The folders of the repositories the work changes. */
+      repositories: { type: "list", default: [] },
+      /** The threads that come before this one. */
+      after: { type: "links", default: [] },
+      priority: { type: "text", values: ["high", "normal", "low"] },
+      /** The rounds the thread may take before the user decides. */
+      budget: { type: "number" },
+      /** The requirements the spec retired. */
+      retired: { type: "list", default: [] },
+      /** A copy of the derived phase, for the ledger. No code trusts it. */
+      phase: { type: "text" },
+      tags: { type: "list", default: [] },
+    },
     skills: [this.runSkill],
     agents: [this.reviewer, this.validator],
     policies: [this.changeThroughTools],

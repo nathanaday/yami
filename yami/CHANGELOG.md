@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.16.0 · library-loop builtin-threads round 2
+
+A flow can declare the session fields of its own sessions, with `schema`. Threads and the wiki use it, so a session of a person's own flow in threads gets no thread field, and a checkout gets no `sources`. The prompts of `ask` and `pick` and the result of `wiki_checkout` are documented.
+
+### Breaking
+- **The thread's fields are the `thread` flow's, not the threads module's.** `ThreadsModule.schema` is `undefined`; `threads.thread.schema` holds `description`, `repositories`, `after`, `priority`, `budget`, `retired`, `phase`, and `tags`. A thread gets them as before. A session of a person's own flow in `threads/` gets none of them. Migrate: code that read `yami.module("threads").schema` reads `threads.thread.schema`. A session of an own flow written by 0.15.0 keeps its empty thread fields; delete them by hand, or leave them, since no code reads them.
+- **The wiki's `sources` field is the `ingest` flow's, and `status` and `returned` are the `checkout` flow's.** `WikiModule.schema` holds `changes` only. An ingest gets `sources` and `changes`; a checkout gets `status`, `returned`, and `changes`, and no `sources`. Migrate: code that read those fields of `wiki.schema` reads `wiki.ingest.schema` or `wiki.checkout.schema`.
+
+### Added
+- `FlowOptions.schema` and `Flow.schema`: the session fields of one flow's sessions alone, with their types and defaults, beside the module's `schema`. `flow.create` fills in their defaults and validates them, and the first prompt of a run lists them. A session of another flow of the module does not get them. `Yami` refuses a flow's schema that holds a core field (`The <id> module's flow <name> has a schema that holds state, the core session field that Yami sets.`) or a field of the module's schema (`… which the module's schema declares. Declare a field in one of them.`).
+- The prompt of `ask` has the class `yami-ask`, and the prompt of `pick` the class `yami-pick`, so a host's test can tell them apart from the command palette. The README table "The prompts" names the elements of both, and the text of each item in `<Module>: create a flow session`: the flow's `title`.
+- The README and the doc comment of `makeCheckout` say what `wiki_checkout` returns: the `Checkout` as JSON text, `{ session, copies }`; for an order it refuses, the error of `makeCheckout`, with nothing written. The tool's description says so too.
+
+### Fixed
+- The README said that a new session "holds the flow's `fields` and `fields`". It holds the defaults of the module's and the flow's schema, then the flow's `fields`, then the `fields` given.
+
 ## 0.15.0 · library-loop builtin-threads round 1
 
 Yami has two built-in modules: the wiki, which now holds the checkout, and threads. A code module can take flows and forms from the vault, and `createYami` gives such a module commands that write starter forms and create a session of a flow. Threads takes vault flows.

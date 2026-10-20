@@ -401,7 +401,8 @@ export class ObsidianYami extends Yami {
 
   /**
    * Asks the person for a text in a prompt with one field: Enter gives the text, trimmed, and Escape gives
-   * nothing. The commands that create a module or a form ask for its name so.
+   * nothing. The commands that create a module or a form ask for its name so. The prompt has the class
+   * `yami-ask`; its one item reads `<hint>: <text>`. The README table "The prompts" names its elements.
    * @example
    * const name = await yami.ask("The name of the new flow, such as Daily review", "Create the flow");
    */
@@ -409,7 +410,13 @@ export class ObsidianYami extends Yami {
     return askText(this.app, placeholder, hint);
   }
 
-  /** Lets the person pick one item by typing. Resolves with nothing when the person closes the list. */
+  /**
+   * Lets the person pick one item by typing. Resolves with nothing when the person closes the list. The
+   * prompt has the class `yami-pick`, and each item reads `label(item)`. The README table "The prompts"
+   * names its elements.
+   * @example
+   * const flow = await yami.pick(module.flows, (f) => f.title, "The flow of the new Threads session");
+   */
   pick<T>(items: T[], label: (item: T) => string, placeholder: string): Promise<T | undefined> {
     return pickOne(this.app, items, label, placeholder);
   }

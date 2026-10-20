@@ -136,8 +136,14 @@ export interface FlowOptions {
   promises?: DocumentRef<"promise">[];
   /** Notes whose content is context for the agent. */
   articles?: DocumentRef<"article">[];
-  /** The module's session fields of a new session. */
+  /** The values of session fields in a new session: the module's, the flow's own, or new ones. */
   fields?: Properties;
+  /**
+   * The session fields of this flow's sessions alone, beside the module's `schema`: their types and their
+   * defaults. A session of another flow of the module does not get them. A field may not be a core field,
+   * or a field that the module's schema declares.
+   */
+  schema?: Schema;
   /** Agent turns in one run. Default 3. */
   maxIterations?: number;
   /** `read-only`: the agent changes no file except through the tools, and its commands write only a scratch folder of their own. Default `edit`. */
@@ -163,6 +169,8 @@ export class Flow {
   readonly promises: DocumentRef<"promise">[];
   readonly articles: DocumentRef<"article">[];
   readonly fields: Properties;
+  /** The session fields of this flow's sessions alone, beside the module's schema. Empty by default. */
+  readonly schema: Schema;
   readonly maxIterations: number;
   readonly access: "edit" | "read-only";
   readonly instructions: string | undefined;
@@ -181,6 +189,7 @@ export class Flow {
     this.promises = options.promises ?? [];
     this.articles = options.articles ?? [];
     this.fields = options.fields ?? {};
+    this.schema = options.schema ?? {};
     this.maxIterations = options.maxIterations ?? 3;
     this.access = options.access ?? "edit";
     this.instructions = options.instructions;
@@ -288,7 +297,7 @@ export abstract class YamiModule {
   abstract readonly id: string;
   abstract readonly name: string;
   readonly description?: string;
-  /** The module's own session fields, beside the core fields. */
+  /** The session fields of every session of the module, beside the core fields. A flow adds the fields of its sessions alone with its own `schema`. */
   readonly schema?: Schema;
   /**
    * Where the session documents go: the module's folder, for a person to read (default); the internal

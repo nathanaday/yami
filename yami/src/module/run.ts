@@ -435,8 +435,8 @@ async function record(vault: Vault, path: string, promises: Document[], outcome:
  * one; a skill the agent does not have is inlined.
  */
 async function contextPrompt(vault: Vault, agent: Agent, module: YamiModule, flow: Flow | undefined, doc: Document, linked: Linked, path: string, kind: string): Promise<string> {
-  // A flow's own fields are session fields too: a vault flow of a code module can add fields that the module's schema lacks.
-  const fields = [...new Set([...Object.keys(module.schema ?? {}), ...Object.keys(flow?.fields ?? {})])]
+  // A flow's own schema and fields are session fields too: a vault flow of a code module can add fields that the module's schema lacks.
+  const fields = [...new Set([...Object.keys(module.schema ?? {}), ...Object.keys(flow?.schema ?? {}), ...Object.keys(flow?.fields ?? {})])]
     .map((field) => `- ${field}: ${String(doc.properties[field] ?? "")}`)
     .join("\n");
   const section = (title: string, docs: Document[], render: (d: Document) => string) =>

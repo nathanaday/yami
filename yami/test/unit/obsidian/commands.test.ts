@@ -83,6 +83,7 @@ describe("the commands of the modules in Obsidian", () => {
     const commands = new Map<string, Command>();
     const shown: unknown[] = [];
     let answer: string | undefined;
+    const picked: string[][] = [];
     let done: Promise<void> = Promise.resolve();
     const host = {
       get modules() {
@@ -90,7 +91,7 @@ describe("the commands of the modules in Obsidian", () => {
       },
       plugin: { addCommand: (command: Command) => commands.set(command.id, command), removeCommand: (id: string) => commands.delete(id) },
       ask: async () => answer,
-      pick: async <T>(items: T[]) => items[0],
+      pick: async <T>(items: T[], label: (item: T) => string, placeholder: string) => (picked.push([placeholder, ...items.map(label)]), items[0]),
       createForm: yami.createForm.bind(yami),
       notify: (work: Promise<unknown>) => (done = work.then((result) => void shown.push(result), (error: Error) => void shown.push(`Yami: ${error.message}`))),
     } as unknown as ObsidianYami;
@@ -126,6 +127,7 @@ describe("the commands of the modules in Obsidian", () => {
     sync();
     expect(names()).toContain("yami-threads-new-daily-review · Threads: new daily review");
     const created = (await run("yami-threads-create-session")) as { message: string; open: string };
+    expect(picked).toEqual([["The flow of the new Threads session", "Daily review"]]);
     expect(created.open).toMatch(/^threads\/Daily review \d{4}-\d{2}-\d{2} \d{2}-\d{2}\.md$/);
     expect((await readDocument(t.vault, created.open)).properties).toMatchObject({ module: "threads", flow: "daily-review" });
 

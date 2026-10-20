@@ -90,6 +90,14 @@ export class Yami {
       if (ids.has(module.id)) throw new Error(`Two modules have the id ${module.id}.`);
       const core = Object.keys(module.schema ?? {}).filter((field) => field in SESSION);
       if (core.length) throw new Error(`The ${module.id} module's schema holds ${core.join(", ")}, the core session field${core.length === 1 ? "" : "s"} that Yami sets.`);
+      for (const flow of module.flows) {
+        const own = Object.keys(flow.schema);
+        const reserved = own.filter((field) => field in SESSION);
+        const what = `The ${module.id} module's flow ${flow.name} has a schema that holds`;
+        if (reserved.length) throw new Error(`${what} ${reserved.join(", ")}, the core session field${reserved.length === 1 ? "" : "s"} that Yami sets.`);
+        const shared = own.filter((field) => field in (module.schema ?? {}));
+        if (shared.length) throw new Error(`${what} ${shared.join(", ")}, which the module's schema declares. Declare a field in one of them.`);
+      }
       ids.add(module.id);
     }
     const colors = assignColors(this.modules);
@@ -427,7 +435,7 @@ export class Yami {
     const given = { ...flow.fields, ...options.fields };
     const core = Object.keys(given).filter((field) => field in SESSION);
     if (core.length) throw new Error(`A session's ${core.join(", ")} ${core.length === 1 ? "is a core field" : "are core fields"}: the flow's links and Yami set ${core.length === 1 ? "it" : "them"}.`);
-    const schema = { ...SESSION, ...module.schema };
+    const schema = { ...SESSION, ...module.schema, ...flow.schema };
     const properties = withDefaults(
       {
         type: "session",

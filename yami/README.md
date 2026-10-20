@@ -237,7 +237,7 @@ A module is a subclass of `YamiModule`. Its fields declare it, and builders in i
 | Field | What it sets |
 | --- | --- |
 | `id`, `name`, `description` | The module's folder name and tool prefix (lower-case letters, digits, and dashes), and what it is. |
-| `schema` | The module's own session fields, as a `Schema`. Annotate it, `readonly schema: Schema = {…}`, so TypeScript checks the field types. |
+| `schema` | The session fields of every session of the module, as a `Schema`. Annotate it, `readonly schema: Schema = {…}`, so TypeScript checks the field types. A field that only one flow's sessions use goes in that flow's `schema`. |
 | `sessionsIn` | Where the session documents go: `folder` (`<id>/`, the default), `internal` (`internal/<id>/sessions/`, when the module's folder holds its output, as the wiki's does), or `none` (no sessions, and no ledger). |
 | `ledgerIn` | Where the module ledger goes: `internal` (the default) or `folder`. |
 | `ledgerViews` | Tables that the module adds to its ledger. |
@@ -254,7 +254,7 @@ A module is a subclass of `YamiModule`. Its fields declare it, and builders in i
 | `this.policy(form, files?)` | A policy, `POLICY.md`. |
 | `this.promise(form, files?)` | A promise, `PROMISE.md`. Its `check`, and the properties the check reads, go in its header. |
 | `this.article(name, markdown, properties?)` | An article: a note in `articles/`, whose content is context for the agent. |
-| `this.flow(options)` | A kind of session, from the keys of a `FLOW.md`: `name` and `description`, the `skills`, `agents`, `policies`, `promises`, and `articles` that a new session links, `fields`, `maxIterations` (default 3), `access` (`read-only`: the agent changes no file except through the tools, and its commands write only a scratch folder of their own), `instructions`, and `command: false` when the host offers no command to create one. |
+| `this.flow(options)` | A kind of session, from the keys of a `FLOW.md`: `name` and `description`, the `skills`, `agents`, `policies`, `promises`, and `articles` that a new session links, `fields` (values of session fields in a new session), `schema` (the session fields of this flow's sessions alone, beside the module's `schema`), `maxIterations` (default 3), `access` (`read-only`: the agent changes no file except through the tools, and its commands write only a scratch folder of their own), `instructions`, and `command: false` when the host offers no command to create one. |
 | `this.action(options)` | An act of the person that a host offers as a command named `<module name>: <action name>`: on the session open in the editor (`on`, a flow, and `when`, a test of its properties), on one of several things the person picks (`choose`), or with no input. `run` returns a message, or `{ message, open }`. |
 
 A form's builder takes the form's markdown, whose frontmatter holds its `name` and `description`, or its parts, `{ name, description, body, files, ...properties }`. It takes the document's name from the frontmatter. It throws when the name or the description is missing, when the name is not lower-case letters, digits, and dashes, and when the module has a document of that kind and name already. `files` go beside the form's file, such as the briefs of a skill's workers.
@@ -373,7 +373,7 @@ A code module with `readonly vaultFlows = true` takes flows and forms from the v
 
 - **Its vault flows.** Each valid `internal/<id>/flows/<name>/FLOW.md` is a flow of the module, after the flows of its code, in `module.flows`. Yami reads them at `enable` and at each `discover`, as it reads a vault module's flows. `onModulesChange` hears of a flow that is new, changed, or gone, and the commands follow: one `<Module>: new <flow>` for each flow whose `command` is true. A flow that changes is a new `Flow`; a live run keeps the flow it started with.
 - **Names.** A vault flow names forms as a vault module's flow does: a bare name in the module, which finds the forms that the code installs and the person's own, or `<module>:<name>`.
-- **Fields.** The `fields` of a vault flow are session fields of its sessions, and the first prompt of a run lists them with the module's schema.
+- **Fields.** A session of a vault flow gets the core fields, the module's `schema`, and the `fields` of its own flow, and no field of a code flow's `schema`. The first prompt of a run lists them. A field of a vault flow is checked against the module's `schema` only.
 - **Sessions.** Its sessions go in the module's sessions folder and run through the one loop, with the core checks and the module's own `checks`.
 - **Skills.** A skill that a person adds under `internal/<id>/skills/` reaches the agents as `/<id>:<skill>`, also for a module with no skill of its own.
 - **Problems.** These go in `yami.problems`, keep out the flow they name, and never throw or keep out a code flow:
@@ -409,7 +409,7 @@ In Obsidian, such a module gets the commands of [`createYami`](#turning-a-part-o
 
 ### Sessions
 
-`flow.create({ name, exact, request, fields, add })` writes a session document and returns its `Session`. The document links the flow's documents and those in `add`, such as a policy or an agent of another module, holds the flow's `fields` and `fields`, and has the `request` as its Request section (see [The Request section](#the-request-section) for the one line it refuses). Its name defaults to the flow's `title` and the time, such as `Code review 2026-10-17 14-30`. A name that a file cannot take is made safe, and a name in use gets " (2)"; `exact: true` refuses either instead.
+`flow.create({ name, exact, request, fields, add })` writes a session document and returns its `Session`. The document links the flow's documents and those in `add`, such as a policy or an agent of another module, holds the defaults of the module's `schema` and the flow's `schema`, then the flow's `fields`, then the `fields` given, and has the `request` as its Request section (see [The Request section](#the-request-section) for the one line it refuses). Its name defaults to the flow's `title` and the time, such as `Code review 2026-10-17 14-30`. A name that a file cannot take is made safe, and a name in use gets " (2)"; `exact: true` refuses either instead.
 
 `yami.session(path)` gives the handle of any session document. The same path gives the same handle.
 
@@ -659,7 +659,7 @@ The gold file is a list of `{ "query", "expected": ["path or [[name]]"] }`; `ben
 
 A module built into every Yami, `WikiModule` in `yami`: `yami.module("wiki")` returns it. Its folder, `wiki/`, holds the knowledge base, `wiki/topics/` and `wiki/sources/`, for a person to read. Its sessions, ledger, changes, versions, and cache are under `internal/wiki/`.
 
-- Its `ingest` flow makes a session whose `sources` field links the source notes to absorb, and whose `changes` field links the changes it applied. `yami.ingest` captures the files and creates the session; the commands **Wiki: ingest this file** and **Wiki: ingest a folder** call it.
+- Its `ingest` flow makes a session whose `sources` field links the source notes to absorb, and whose `changes` field links the changes it applied. `changes` is in the module's `schema`, for both flows; `sources` is in the `ingest` flow's `schema`, so a checkout does not get it. `yami.ingest` captures the files and creates the session; the commands **Wiki: ingest this file** and **Wiki: ingest a folder** call it.
 - Ingest sessions run with `access: "read-only"`: the agent reads anything and changes nothing except through `wiki_change`. Its policies: `cite-every-claim`, `one-plan` (change the wiki through one plan), and `one-topic` (one subject, one topic). Its promises: `change-applied` (at least one applied change), `sources-absorbed` (each source has `status: absorbed`), and `clean-topics` (`lint` over the sources and the topics that cite them). A module adds its own policies to an ingest as `wiki:` names do: `yami.ingest({ files, policies: [this.ownWords] })`.
 - Its skill, `/wiki:ingest`, is a map-reduce: `wiki_chunks` for each source, one worker per chunk that reads `extractor.md` (an Item Map of subjects and cited claims), `wiki_match` for every subject at once, one worker per slice that reads `drafter.md` (the writes), then one plan for `wiki_change`. `page-forms.md` gives the topic and source forms. The three files sit in the skill's folder, and the lead gives each worker a path, not the text. A long document or a folder of documents costs the same care as one.
 - Its tools, for every agent in the vault: `wiki_search`, `wiki_match`, `wiki_lint`, `wiki_tags`, `wiki_neighbors` (a note's or a tag's place in the tag hierarchy, so an agent can walk a large wiki by subject), `wiki_chunks`, and `wiki_change`. Each but `wiki_change` is `readOnly`, so a reviewer has it. The search tool's description carries the citation procedure, so a plain conversation answers from the wiki without a skill. "Ask the wiki" needs no wiki code: start a conversation with the question.
@@ -670,8 +670,9 @@ A module built into every Yami, `WikiModule` in `yami`: `yami.module("wiki")` re
 A checkout is a reading list of the wiki's material on a subject, with a copy of each document for a person to read and mark up. It is a session of the wiki's `checkout` flow, in `internal/wiki/sessions/`, and the session document is the reading list.
 
 - **Two ways to make one.** A person runs **Wiki: new checkout**, writes the request in the session's Request section, and runs the session: its skill, `/wiki:checkout`, chooses and orders the documents and calls `wiki_checkout` with the session's path. Or a conversation calls `wiki_checkout` with a `name` and no session: it creates `internal/wiki/sessions/<date> <name>.md`, done at once. The date keeps the reading list's name apart from a topic of the same subject.
+- **What `wiki_checkout` returns.** Its input is a `CheckoutOrder`. It returns the `Checkout` of `makeCheckout` as JSON text: `{"session":"internal/wiki/sessions/2026-10-06 RL.md","copies":["internal/wiki/sessions/2026-10-06 RL/Reinforcement learning (checkout).md"]}`, with the copies in reading order. It refuses an order that `makeCheckout` refuses, and writes nothing: its `run` throws that error, and through `runTool`, as an agent calls it, the result is `{ isError: true, text }` with the error's message, such as `Nothing is not a note of wiki/topics/ or wiki/sources/; only knowledge is checked out.` An input that the schema refuses, such as more than 60 documents, gives `The input is not valid:` and the problems.
 - **The copies** go in the folder of the session's name, beside it: `internal/wiki/sessions/2026-10-06 RL/Q-learning (checkout).md`. A copy holds the original's body, `copy_of`, `sha256` (the hash of that body), and `checkout`. The index skips a note with `copy_of`, so search finds each subject once. Only notes of `wiki/topics/` and `wiki/sources/` are checked out, at most 60.
-- **The session's fields**: `status` (`out`, then `returned`), `returned` (when), and `changes` (the change of the return). Its promise, `reading-list-made`, has the check `checked-out`: met when the status is `out` or `returned`.
+- **The session's fields**: `status` (`out`, then `returned`) and `returned` (when), from the `checkout` flow's `schema`, and `changes` (the change of the return), from the module's. Its promise, `reading-list-made`, has the check `checked-out`: met when the status is `out` or `returned`.
 - **The return** is the person's act, **Wiki: return this checkout**, on a checkout that is out. A copy whose body changed returns as a `modify` of its original with `base`, so a change that lands in between is never overwritten. A copy stays, with the reason in the Return section, when its original changed since the checkout, is gone, or the wiki refuses the edit; it holds back no other copy. A link to another copy points back at its original. One change, `Return <name>`, applies the rest, and the copies that returned or had no edit are removed.
 
 | `WikiModule` | What it does |
@@ -690,10 +691,10 @@ const { change, skipped } = await wiki.returnCheckout(session);
 
 A module built into every Yami unless the host sets `threads: false`: validated work on repositories. `yami.module("threads")` returns it, a `ThreadsModule` from `yami/threads`. A thread is one session document in `threads/`: the idea in the user's words as its Request section, then the context, the spec, the plan, the validation rounds, and the outcome, as sections. The policy is in `design.md`, The built-in modules.
 
-- **Its parts.** The `thread` flow, with no command: `/threads:stub` or `threads_stub` plants a thread, and a run takes it to closed. The skills `/threads:stub`, `/threads:spec`, and `/threads:run`; the read-only agents `threads:reviewer` (the spec) and `threads:validator` (the work); the policy `change-through-tools`; the promise `thread-closed` with the check `thread`. Its fields: `description`, `repositories`, `after`, `priority`, `budget`, `retired`, `phase`, and `tags`. Its ledger adds the table `Board`.
+- **Its parts.** The `thread` flow, with no command: `/threads:stub` or `threads_stub` plants a thread, and a run takes it to closed. The skills `/threads:stub`, `/threads:spec`, and `/threads:run`; the read-only agents `threads:reviewer` (the spec) and `threads:validator` (the work); the policy `change-through-tools`; the promise `thread-closed` with the check `thread`. The thread's fields are the `thread` flow's `schema`: `description`, `repositories`, `after`, `priority`, `budget`, `retired`, `phase`, and `tags`. The module has no `schema`, so a session of a person's own flow gets none of them. Its ledger adds the table `Board`.
 - **Its tools**: `threads_stub`, `threads_spec`, `threads_plan`, `threads_round`, `threads_close`, and `threads_status`, the one that is `readOnly`. Only the tools write a thread's structured sections, one write at a time, and they refuse a write that would lose a line they cannot read.
 - **The phase is derived**, never stored: `stub`, `specified`, `planned`, `in progress`, `unvalidated`, `failed`, `validated`, `closed`, or `dropped`. The `phase` property is a copy for the ledger. The `thread` check is met when the thread is closed or dropped, and returns `review` when the user must decide (the budget of rounds is used, or a thread in `after` is not validated or ended), so the run stops for the user.
-- **The person's own flows.** Threads takes [vault flows](#vault-flows-in-a-code-module): a person writes flows and forms under `internal/threads/`, with the commands or by hand. Their sessions go in `threads/` beside the threads and run through the one loop. They are not threads: the board, `status`, and the tools leave them out.
+- **The person's own flows.** Threads takes [vault flows](#vault-flows-in-a-code-module): a person writes flows and forms under `internal/threads/`, with the commands or by hand. Their sessions go in `threads/` beside the threads and run through the one loop. They are not threads: they get no thread field, and the board, `status`, and the tools leave them out.
 
 | `yami/threads` | What it gives |
 | --- | --- |
@@ -1035,12 +1036,33 @@ A conversation note uses the same mechanism for its one agent session, with the 
 - `activeSession(module or flow?)`, the session open in the editor; `activeFile()` and `activeSelection()`; `properties(path)`, a note's properties from Obsidian's cache.
 - `onSessionsChange(listener)`: a call when the sessions or the modules may look different, after a session document or a module's document changes, a run changes its status, or a discovery changes `modules` or `problems`. A view of both needs this feed only. Close calls become one. `onWikiChange(listener)`: a call when a note that the wiki holds, or would hold, changes, for a view of the wiki. A change to a note the index leaves out, such as a conversation, makes no call.
 - `newSession(flow)`: creates a session, opens it, and says so. `runAction(action, session?)`: does a module's action, and first lets the person pick when it has choices. `runModuleAct(act)`: does an act of `module.acts()`.
-- `open(path, mode)`; `pick(items, label, placeholder)`, a list to pick one from; `ask(placeholder, hint)`, a prompt with one text field, which resolves with the text, trimmed, or nothing on Escape, as New module and the create commands ask for a name; and `notify(work)`, which shows the message of a promise, opens the note it names, shows an error in a notice, and resolves when it has.
+- `open(path, mode)`; `pick(items, label, placeholder)`, a list to pick one from, which resolves with the item, or nothing on Escape; `ask(placeholder, hint)`, a prompt with one text field, which resolves with the text, trimmed, or nothing on Escape, as New module and the create commands ask for a name (see [The prompts](#the-prompts) for their elements); and `notify(work)`, which shows the message of a promise, opens the note it names, shows an error in a notice, and resolves when it has.
 - `moduleIcon(module)`, the name of the module's icon, or `MODULE_ICON` when Obsidian does not have it, for `setIcon`.
 - `animate()`, whether an agent's edits play as typing now, by the `animate` option and the system's reduced motion. A host that makes its own `Presence` or `AgentPeer` passes it, so its agents follow the same rule: `new Presence(identity, yami.animate)`.
 - `registered`, the agents with their names and colors, and `setAgents(entries)`, which changes them (see [Agents and options that change while the plugin runs](#agents-and-options-that-change-while-the-plugin-runs)); `agentName(agent)`, the name the agent is registered under, and `agentNamed(name)`, the agent of a name.
 - `addWork(work)`, `works`, and `noteSessions(options)`: see [Agent work and the sessions of a note](#agent-work-and-the-sessions-of-a-note).
 - `hub` and `conversations`, the shared documents and the conversation notes, for other plugins.
+
+### The prompts
+
+`ask` and `pick` open Obsidian's suggest prompt, a `SuggestModal`. Yami adds a class of its own to the prompt's element, `modalEl`, so a host's test can tell it apart from the command palette, which is a prompt too. A change to a name of this table is a breaking change.
+
+| Element | Selector | What it holds |
+| --- | --- | --- |
+| The prompt of `ask` | `.yami-ask` | The prompt of New module and of `<Module>: create <kind>`. Before the person types, it shows `Type a name.` and no item. |
+| The prompt of `pick` | `.yami-pick` | The prompt of `<Module>: create a flow session`, of an action with `choose`, of Wiki: restore a version, and of Wiki: ingest a folder. |
+| The text field | `.yami-ask input.prompt-input`, `.yami-pick input.prompt-input` | Its placeholder is the `placeholder` of the call: `The name of the new flow, such as Daily review`, or `The flow of the new Threads session`. |
+| An item | `.suggestion-item`, the selected one `.suggestion-item.is-selected` | In `ask`, one item when the field holds text: `<hint>: <text>`, such as `Create the flow: Daily review`. In `pick`, one item for each item of the call whose label matches what the person typed, all of them at first, with the text of `label(item)`. |
+
+Enter chooses the selected item, and Escape closes the prompt with no choice. In `<Module>: create a flow session`, the text of each item is the flow's `title`, such as `Daily review` for the flow `daily-review`, and the placeholder is `The flow of the new <Module> session`.
+
+```ts
+// A host's Obsidian test, after it runs Threads: create flow from the command palette:
+await page.locator(".yami-ask input.prompt-input").fill("Daily review");
+await page.locator(".yami-ask .suggestion-item", { hasText: "Create the flow: Daily review" }).click();
+// After it runs Threads: create a flow session:
+await page.locator(".yami-pick .suggestion-item", { hasText: "Daily review" }).click();
+```
 
 The plugin must ship `yami/obsidian/styles.css` as the `styles.css` next to its `main.js`; `copyStyles` in `yami/esbuild` copies it.
 

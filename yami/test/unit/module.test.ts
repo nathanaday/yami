@@ -244,6 +244,42 @@ describe("creating a session from a flow", () => {
     await expect(hello.greet.create({ fields: { greeting: 3 } })).rejects.toThrow("greeting must be text");
   });
 
+  it("gives the fields of a flow's own schema to its sessions alone, beside the module's, and lists them in the first prompt", async () => {
+    class Two extends Hello {
+      readonly id = "two";
+      readonly release = this.flow({ name: "release", description: "A release.", schema: { version: { type: "text", default: "" }, notes: { type: "links", default: [] } } });
+    }
+    const two = new Two();
+    const { vault, agent } = await fresh(two);
+    expect(two.release.schema).toEqual({ version: { type: "text", default: "" }, notes: { type: "links", default: [] } });
+    expect(two.greet.schema).toEqual({});
+    const greet = await two.greet.create({ name: "g" });
+    expect((await readDocument(vault, greet.path)).properties).not.toHaveProperty("version");
+    expect((await readDocument(vault, greet.path)).properties).not.toHaveProperty("notes");
+    const release = await two.release.create({ name: "r", fields: { version: "1.0" } });
+    expect((await readDocument(vault, release.path)).properties).toMatchObject({ greeting: "Hello", version: "1.0", notes: [] });
+    await expect(two.release.create({ fields: { version: 1 } })).rejects.toThrow("version must be text");
+    let prompt = "";
+    agent.queue(async (text) => void (prompt = text));
+    await release.start({ maxIterations: 1 });
+    expect(prompt).toContain("- greeting: Hello");
+    expect(prompt).toContain("- version: 1.0");
+  });
+
+  it("refuses a flow's schema that holds a core field or a field of the module's schema", () => {
+    const vault = new FsVault("/tmp/yami-none");
+    class Core extends Hello {
+      readonly id = "core";
+      readonly other = this.flow({ name: "other", description: "Other.", schema: { state: { type: "text" } } });
+    }
+    expect(() => new Yami({ vault, modules: [new Core()] })).toThrow("The core module's flow other has a schema that holds state, the core session field that Yami sets.");
+    class Twice extends Hello {
+      readonly id = "twice";
+      readonly other = this.flow({ name: "other", description: "Other.", schema: { greeting: { type: "number" } } });
+    }
+    expect(() => new Yami({ vault, modules: [new Twice()] })).toThrow("The twice module's flow other has a schema that holds greeting, which the module's schema declares. Declare a field in one of them.");
+  });
+
   it("finds a flow by its name, the first for no name, and none for a name no flow has", () => {
     class Two extends Hello {
       readonly id = "two";

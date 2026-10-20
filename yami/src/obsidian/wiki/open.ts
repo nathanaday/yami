@@ -45,7 +45,7 @@ export function chooseSelected(modal: object, evt: KeyboardEvent): false {
   return false;
 }
 
-/** Lets the person type one line. Resolves with the text, trimmed, or with nothing when the person closes the prompt. */
+/** Lets the person type one line, in a prompt with the class `yami-ask`. Resolves with the text, trimmed, or with nothing when the person closes the prompt. */
 export function askText(app: App, placeholder: string, hint: string): Promise<string | undefined> {
   return new Promise((resolve) => {
     let given = false;
@@ -66,13 +66,14 @@ export function askText(app: App, placeholder: string, hint: string): Promise<st
         }, 0);
       }
     })(app);
+    modal.modalEl.addClass("yami-ask");
     modal.setPlaceholder(placeholder);
     modal.emptyStateText = "Type a name.";
     modal.open();
   });
 }
 
-/** Lets the user pick one item by typing. Resolves with nothing when the user closes the list. */
+/** Lets the user pick one item by typing, in a prompt with the class `yami-pick`. Resolves with nothing when the user closes the list. */
 export function pickOne<T>(app: App, items: T[], text: (item: T) => string, placeholder: string): Promise<T | undefined> {
   return new Promise((resolve) => {
     let picked = false;
@@ -94,6 +95,7 @@ export function pickOne<T>(app: App, items: T[], text: (item: T) => string, plac
         }, 0);
       }
     })(app);
+    modal.modalEl.addClass("yami-pick");
     modal.setPlaceholder(placeholder);
     modal.open();
   });

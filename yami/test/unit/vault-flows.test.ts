@@ -234,6 +234,19 @@ describe("the built-in threads module", () => {
     expect(await threads.status()).toEqual({ threads: [] });
     await expect(threads.status("Today")).rejects.toThrow('No thread is named "Today"');
   });
+
+  it("gives a session of the person's own flow none of the thread fields, and a thread all of them", async () => {
+    t = await testYami();
+    const threads = t.yami.module("threads") as ThreadsModule;
+    const THREAD_FIELDS = ["description", "repositories", "after", "priority", "budget", "retired", "phase", "tags"];
+    expect(threads.schema).toBeUndefined();
+    expect(Object.keys(threads.thread.schema)).toEqual(THREAD_FIELDS);
+    await t.yami.createForm(threads, "flow", "Daily review");
+    const daily = await readDocument(t.vault, (await threads.flowOf("daily-review")!.create({ name: "Today" })).path);
+    expect(Object.keys(daily.properties).filter((key) => THREAD_FIELDS.includes(key))).toEqual([]);
+    const thread = await readDocument(t.vault, (await threads.thread.create({ name: "Divide" })).path);
+    expect(thread.properties).toMatchObject({ repositories: [], after: [], retired: [], tags: [] });
+  });
 });
 
 describe("the wiki's flows", () => {
@@ -247,5 +260,19 @@ describe("the wiki's flows", () => {
     expect(wiki.flowOf("ingest")!.promises.map((p) => p.name)).toEqual(["change-applied", "sources-absorbed", "clean-topics"]);
     expect(wiki.acts().map((a) => a.label)).toEqual(["New checkout"]);
     expect(await t.vault.read("internal/wiki/sessions.base")).toContain("name: Checkouts");
+  });
+
+  it("give an ingest session its sources, and a checkout its status, each not the other's", async () => {
+    t = await testYami();
+    const wiki = t.yami.module("wiki")!;
+    expect(Object.keys(wiki.schema!)).toEqual(["changes"]);
+    expect(Object.keys(wiki.flowOf("ingest")!.schema)).toEqual(["sources"]);
+    expect(Object.keys(wiki.flowOf("checkout")!.schema)).toEqual(["status", "returned"]);
+    await t.vault.write("notes/A.md", "A note.\n");
+    const ingest = await readDocument(t.vault, (await t.yami.ingest({ files: ["notes/A.md"] })).path);
+    expect(ingest.properties).toMatchObject({ changes: [], sources: [expect.stringContaining("A (source)")] });
+    const checkout = await readDocument(t.vault, (await wiki.flowOf("checkout")!.create({ name: "C" })).path);
+    expect(checkout.properties).toMatchObject({ changes: [] });
+    expect(checkout.properties).not.toHaveProperty("sources");
   });
 });

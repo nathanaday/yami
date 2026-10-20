@@ -88,7 +88,17 @@ describe("checkout", () => {
   it("is a tool of the wiki module, which a plain conversation can call", async () => {
     const tool = checkoutTool();
     const result = await runTool(tool, order, new AbortController().signal);
-    expect(JSON.parse(result.text).session).toBe(SESSION);
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.text)).toEqual({ session: SESSION, copies: [`${FOLDER}/Reinforcement learning (checkout).md`, `${FOLDER}/Q-learning (checkout).md`] });
+  });
+
+  it("as a tool, refuses an order with the error of makeCheckout, and writes nothing", async () => {
+    const tool = checkoutTool();
+    const signal = new AbortController().signal;
+    const bad = { ...order, name: "Other", documents: [{ path: "Nothing", why: "x" }] };
+    await expect(tool.run(bad, { signal })).rejects.toThrow("Nothing is not a note of wiki/topics/ or wiki/sources/; only knowledge is checked out.");
+    expect(await runTool(tool, bad, signal)).toEqual({ isError: true, text: "Nothing is not a note of wiki/topics/ or wiki/sources/; only knowledge is checked out." });
+    expect(await vault.list(SESSIONS)).toEqual([]);
   });
 });
 

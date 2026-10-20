@@ -27,14 +27,8 @@ export class WikiModule extends YamiModule {
   readonly color = WIKI_COLOR;
   readonly icon = "book-open";
   readonly schema: Schema = {
-    /** The source notes this session absorbs. */
-    sources: { type: "links", default: [] },
     /** The changes this session applied: an ingest's plans, or a checkout's return. */
     changes: { type: "links", default: [] },
-    /** A checkout's state: out, then returned. None before the checkout is made. */
-    status: { type: "text", values: ["out", "returned"] },
-    /** When a checkout was returned. */
-    returned: { type: "date" },
   };
   readonly ledgerViews: LedgerView[] = [
     {
@@ -137,6 +131,10 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     description: "Absorb the session's sources into cited topics through one change plan.",
     access: "read-only",
     command: false,
+    schema: {
+      /** The source notes this session absorbs. */
+      sources: { type: "links", default: [] },
+    },
     skills: [this.ingestSkill],
     policies: [this.cite, this.onePlan, this.oneTopic],
     promises: [this.changeApplied, this.absorbed, this.clean],
@@ -149,6 +147,12 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
   readonly checkout = this.flow({
     name: "checkout",
     description: "A reading list of the wiki's material on a subject, with a copy of each document to mark up.",
+    schema: {
+      /** The checkout's state: out, then returned. None before the checkout is made. */
+      status: { type: "text", values: ["out", "returned"] },
+      /** When the checkout was returned. */
+      returned: { type: "date" },
+    },
     skills: [this.checkoutSkill],
     promises: [this.readingListMade],
     maxIterations: 2,
@@ -173,7 +177,8 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
    * `wiki/sources/` are checked out. It throws, and writes nothing, for an empty request or a request or
    * notes with a line that would start a section, no document or more than 60, a note that is not knowledge,
    * a document twice, a why that is empty or more than one line, no session and no name, and a session that is
-   * no checkout session of the wiki or holds a checkout already. `wiki_checkout` calls it.
+   * no checkout session of the wiki or holds a checkout already. `wiki_checkout` calls it, and returns the
+   * `Checkout` as JSON text; its `run` throws the same error, which an agent gets as an error result.
    * @example
    * const { session, copies } = await wiki.makeCheckout({ request: "the basics of RL", name: "RL", documents: [{ path: "Reinforcement learning", why: "the overview" }] });
    */
@@ -437,7 +442,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       }),
       defineTool({
         name: "checkout",
-        description: `Makes a checkout: a reading list, and a copy of each document in the folder of the list's name, for the user to read and mark up. In a checkout session, the session document becomes the reading list; otherwise the reading list is ${this.layout.sessions}/<date> <name>.md. Takes the user's request, the documents in reading order (each a note of ${TOPICS}/ or ${SOURCES}/, with a why of one line), and notes on what was left out. At most ${MAX_DOCUMENTS} documents. The skill /wiki:checkout says how to choose and order them.`,
+        description: `Makes a checkout: a reading list, and a copy of each document in the folder of the list's name, for the user to read and mark up. In a checkout session, the session document becomes the reading list; otherwise the reading list is ${this.layout.sessions}/<date> <name>.md. Takes the user's request, the documents in reading order (each a note of ${TOPICS}/ or ${SOURCES}/, with a why of one line), and notes on what was left out. At most ${MAX_DOCUMENTS} documents. The skill /wiki:checkout says how to choose and order them. Returns the reading list's path as session and the copies' paths in reading order as copies; refuses an order with the reason, and writes nothing.`,
         input: orderShape,
         title: ({ name, session, documents }) => `Check out ${name ?? (session ? basename(session) : "")} (${documents.length} documents)`,
         run: async (order) => JSON.stringify(await this.makeCheckout(order)),
