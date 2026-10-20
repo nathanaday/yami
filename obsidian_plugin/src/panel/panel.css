@@ -457,6 +457,207 @@
   overflow-wrap: anywhere;
 }
 
+/* The changes that wait: a new row enters as a page does, a finished one fades out */
+
+.yami-waiting .yami-row.is-entering {
+  animation: yami-enter-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.yami-waiting .yami-row.is-leaving {
+  animation: yami-leave 150ms ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes yami-leave {
+  to {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+
+.yami-inline-link {
+  cursor: pointer;
+  text-decoration: underline 1px transparent;
+  text-underline-offset: 3px;
+  transition: color 120ms, text-decoration-color 120ms;
+}
+
+.yami-inline-link:hover,
+.yami-inline-link:focus-visible {
+  color: var(--text-normal);
+  text-decoration-color: var(--yami-module-color);
+}
+
+.yami-panel .yami-inline-link:focus-visible {
+  outline: 2px solid var(--yami-module-color);
+  outline-offset: 1px;
+  border-radius: var(--radius-s);
+}
+
+/* One change: where it ended, a refusal, its notes, and each write with its diff */
+
+.yami-change-result,
+.yami-change-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-4-2);
+  margin: 0 0 var(--size-4-2);
+  padding: var(--size-2-3) var(--size-4-2);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  animation: yami-enter-in 180ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.yami-change-result .yami-row-icon,
+.yami-change-error .yami-row-icon {
+  margin-top: 2px;
+  color: inherit;
+}
+
+.yami-change-result.is-applied {
+  background: color-mix(in srgb, var(--color-green) 14%, transparent);
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-green) 70%, var(--text-normal));
+}
+
+.yami-change-result.is-rejected {
+  background: var(--background-secondary);
+  color: var(--text-muted);
+}
+
+.yami-change-result.is-failed,
+.yami-change-error {
+  background: color-mix(in srgb, var(--text-error) 9%, transparent);
+  color: var(--text-error);
+}
+
+.yami-change-error {
+  border-left: 3px solid var(--text-error);
+}
+
+.yami-change-error-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.yami-change-notes {
+  padding: 0 var(--size-4-2);
+  font-size: var(--font-ui-small);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  color: var(--text-muted);
+}
+
+.yami-write {
+  margin-bottom: var(--size-4-2);
+}
+
+.yami-write .yami-row {
+  align-items: flex-start;
+}
+
+.yami-write .yami-row > .yami-row-icon {
+  margin-top: 2px;
+}
+
+.yami-write .yami-row-name {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+}
+
+.yami-write-why {
+  margin-top: 2px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.yami-write-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--size-2-3);
+  margin: 0 var(--size-4-2) var(--size-2-2);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  color: var(--color-orange);
+}
+
+.yami-write-warning .yami-row-icon {
+  margin-top: 1px;
+  color: inherit;
+}
+
+.yami-diff {
+  margin: 0 var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  overflow: hidden;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  line-height: 1.5;
+}
+
+.yami-diff-line {
+  display: flex;
+  padding: 0 var(--size-4-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.yami-diff-line::before {
+  flex: none;
+  width: 1.6em;
+  text-align: center;
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.yami-diff-line[data-kind="same"]::before {
+  content: " ";
+}
+
+.yami-diff-line[data-kind="add"] {
+  background: color-mix(in srgb, var(--color-green) 12%, transparent);
+}
+
+.yami-diff-line[data-kind="add"]::before {
+  content: "+";
+  color: var(--color-green);
+}
+
+.yami-diff-line[data-kind="del"] {
+  background: color-mix(in srgb, var(--color-red) 12%, transparent);
+}
+
+.yami-diff-line[data-kind="del"]::before {
+  content: "−";
+  color: var(--color-red);
+}
+
+.yami-diff-line[data-kind="add"] .is-mark {
+  background: color-mix(in srgb, var(--color-green) 32%, transparent);
+  border-radius: 2px;
+}
+
+.yami-diff-line[data-kind="del"] .is-mark {
+  background: color-mix(in srgb, var(--color-red) 32%, transparent);
+  border-radius: 2px;
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-red) 60%, transparent);
+}
+
+.yami-diff-line[data-kind="skip"] {
+  display: block;
+  padding: 1px var(--size-4-2);
+  background: var(--background-secondary);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  font-style: italic;
+  text-align: center;
+  color: var(--text-faint);
+}
+
 /* The status as a shape, so color is never the only sign */
 
 .yami-mark {
@@ -472,7 +673,8 @@
   color: var(--text-faint);
 }
 
-.yami-mark[data-status="working"] {
+.yami-mark[data-status="working"],
+.yami-mark[data-status="applying"] {
   border-color: color-mix(in srgb, currentColor 22%, transparent);
   border-top-color: currentColor;
   border-right-color: currentColor;
@@ -490,9 +692,15 @@
   color: var(--yami-module-color);
 }
 
-.yami-mark[data-status="done"] {
+.yami-mark[data-status="done"],
+.yami-mark[data-status="applied"] {
   background: currentColor;
   color: var(--color-green);
+}
+
+/* A proposal is hollow in the module's color: it waits for the person. */
+.yami-mark[data-status="proposed"] {
+  color: var(--yami-module-color);
 }
 
 .yami-mark[data-status="needs-attention"] {
@@ -502,7 +710,8 @@
   transform: rotate(45deg) scale(0.8);
 }
 
-.yami-mark[data-status="stopped"] {
+.yami-mark[data-status="stopped"],
+.yami-mark[data-status="rejected"] {
   border-radius: 2px;
   background: currentColor;
   color: var(--text-muted);
@@ -541,7 +750,16 @@
 @media (prefers-reduced-motion: reduce) {
   .yami-panel-page.is-entering-in,
   .yami-panel-page.is-entering-out,
-  .yami-mark[data-status="working"] {
+  .yami-waiting .yami-row.is-entering,
+  .yami-change-result,
+  .yami-change-error,
+  .yami-mark[data-status="working"],
+  .yami-mark[data-status="applying"] {
     animation: none;
+  }
+
+  .yami-waiting .yami-row.is-leaving {
+    animation: none;
+    opacity: 0;
   }
 }

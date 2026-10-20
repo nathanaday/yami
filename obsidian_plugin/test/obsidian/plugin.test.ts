@@ -262,6 +262,140 @@ describe("Yami in Obsidian", () => {
     expect(existsSync(path.join(obsidian.vault, made.copies[0]))).toBe(false);
   });
 
+  it("lists the wiki's proposals in the panel, approves one, rejects one with a reason, refuses one that no longer fits, and runs the commands", { timeout: 120_000 }, async () => {
+    // One ingest session, and its plans proposed through the tool, as the agent proposes them.
+    const session = await page().evaluate(async () => {
+      const app = (window as any).app;
+      if (!app.vault.getFolderByPath("Papers")) await app.vault.createFolder("Papers");
+      await app.vault.create("Papers/Kefir.md", "# Kefir\n\nFermented milk.\n");
+      if (!app.vault.getFolderByPath("wiki/topics")) await app.vault.createFolder("wiki/topics");
+      await app.vault.create("wiki/topics/Yogurt.md", "---\ntype: topic\ndescription: Cultured milk.\n---\nYogurt is cultured milk.\n");
+      return ((await (window as any).yami.ingest({ files: ["Papers/Kefir.md"], name: "Ingest Kefir" })) as { path: string }).path;
+    });
+    const propose = (title: string, writes: Record<string, unknown>[]) =>
+      page().evaluate(
+        async ([title, writes, session]) => {
+          const tool = (window as any).yami.tools().tools.find((t: any) => t.name === "wiki_change");
+          return JSON.parse(await tool.run({ title, notes: "From the test.", session, writes }, { signal: new AbortController().signal })) as { path: string; status: string };
+        },
+        [title, writes, session] as const,
+      );
+    const open = async (file: string) => {
+      await page().evaluate((file) => (window as any).app.workspace.getLeaf().openFile((window as any).app.vault.getFileByPath(file)), file);
+      await page().waitForFunction((file) => (window as any).app.workspace.getActiveFile()?.path === file, file);
+    };
+    const focused = () => page().evaluate(() => document.activeElement?.getAttribute("data-key") ?? document.activeElement?.textContent);
+    const heads = () => page().$$eval(".yami-panel .yami-section-head h3", (els) => els.map((el) => el.textContent));
+    const acts = () => page().$$eval(".yami-panel .yami-action", (els) => els.map((el) => el.textContent));
+
+    const first = await propose("Learn kefir", [
+      { op: "create", path: "wiki/topics/Kefir.md", properties: { description: "Fermented milk with grains." }, body: "Kefir is fermented milk. See [[Yogurt]].", why: "the paper's subject" },
+      { op: "modify", path: "wiki/topics/Yogurt.md", body: "Yogurt is cultured milk. Kefir is its cousin.", why: "names the cousin" },
+    ]);
+    expect(first).toMatchObject({ status: "proposed", creates: 1, modifies: 1, removes: 0 });
+
+    // The waiting list on the Modules page: the row with its counts, its age, and its module; the badge on Wiki.
+    await run("yami:open-panel");
+    await page().evaluate(() => (window as any).app.workspace.getLeavesOfType("yami-panel")[0].view.go({ level: "modules" }));
+    const row = `.yami-panel [data-key="change:${first.path}"]`;
+    await page().waitForSelector(row, { timeout: 10_000 });
+    expect(await page().$$eval(`${row} .yami-row-meta span`, (els) => els.map((el) => el.textContent))).toEqual(["1 new · 1 changed", "just now", "Wiki"]);
+    expect(await page().textContent('.yami-panel .yami-section:has(h3:text-is("Waiting for approval")) .yami-section-count')).toBe("1");
+    expect(await page().textContent('.yami-panel [data-key="module:wiki"] .yami-badge')).toBe("1");
+    expect(await page().$$(".yami-panel .yami-row-desc")).toHaveLength(0);
+
+    // The change page: its status, its session, the writes by op, the diff of the modify, and the acts.
+    await page().click(row);
+    await page().waitForSelector('.yami-panel .yami-state[data-status="proposed"]');
+    expect(await page().textContent(".yami-panel .yami-panel-title")).toBe("Learn kefir");
+    expect(await page().textContent(".yami-panel .yami-state-label")).toBe("Waiting for approval");
+    expect(await page().textContent('.yami-panel [data-key="session"]')).toBe("Ingest Kefir");
+    expect(await heads()).toEqual(["Notes", "Creates", "Changes"]);
+    expect(await page().$$eval('.yami-panel .yami-write[data-op="create"] .yami-diff-line', (els) => els.map((el) => el.getAttribute("data-kind")))).toEqual(["add", "add", "add", "add", "add", "add", "add", "add", "add"]);
+    expect(await page().$$eval('.yami-panel .yami-write[data-op="modify"] .yami-diff-line', (els) => els.map((el) => `${el.getAttribute("data-kind")} ${el.textContent}`))).toEqual([
+      "skip 2 unchanged lines",
+      "same description: Cultured milk.",
+      "same ---",
+      "del Yogurt is cultured milk.",
+      "add Yogurt is cultured milk. Kefir is its cousin.",
+    ]);
+    expect(await page().textContent('.yami-panel .yami-write[data-op="modify"] .yami-diff-line[data-kind="add"] .is-mark')).toBe(" Kefir is its cousin.");
+    expect(await page().$$(".yami-panel .yami-write-warning")).toHaveLength(0);
+    expect(await acts()).toEqual(["Approve", "Reject"]);
+    expect(await page().$$eval(".yami-panel .yami-row-icon, .yami-panel .yami-action-icon, .yami-panel .clickable-icon", (els) => els.filter((el) => !el.querySelector("svg")).length)).toBe(0);
+
+    // Tab reaches the acts; Enter approves. The page shows the result, the wiki holds the note, and the row leaves the list.
+    await page().focus('.yami-panel [data-key="session"]');
+    await page().keyboard.press("Tab");
+    expect(await focused()).toBe("act:approve");
+    await page().keyboard.press("Enter");
+    await page().waitForSelector(".yami-panel .yami-change-result.is-applied", { timeout: 15_000 });
+    expect(await page().textContent(".yami-panel .yami-change-result.is-applied")).toMatch(/^Applied · v\d+ → v\d+ · 1 new · 1 changed$/);
+    expect(await page().textContent(".yami-panel .yami-state-label")).toBe("Applied");
+    expect(await heads()).toEqual(["Notes", "Created", "Changed"]);
+    expect(await page().$$eval(".yami-panel .yami-write .yami-row-note", (els) => els.map((el) => el.textContent))).toEqual(["Done", "Done"]);
+    expect(await acts()).toEqual([]);
+    expect(await obsidian.read("wiki/topics/Kefir.md")).toContain("Kefir is fermented milk.");
+    expect(await obsidian.read("wiki/topics/Yogurt.md")).toContain("Kefir is its cousin.");
+    expect(await obsidian.read(first.path)).toContain("status: applied");
+    await page().keyboard.press("Backspace");
+    await page().waitForSelector('.yami-panel .yami-panel-title:text-is("Wiki")');
+    expect(await page().$(row)).toBeNull();
+    expect(await page().textContent(".yami-panel .yami-waiting .yami-panel-empty")).toBe("Nothing waits for approval.");
+
+    // Reject, with a reason: the prompt is the library's, and the document records the reason.
+    const second = await propose("Learn kefir grains", [{ op: "create", path: "wiki/topics/Kefir grains.md", properties: { description: "The grains." }, body: "Grains.", why: "thin" }]);
+    const row2 = `.yami-panel [data-key="change:${second.path}"]`;
+    await page().waitForSelector(row2, { timeout: 10_000 });
+    await page().click(row2);
+    await page().click('.yami-panel .yami-action:has-text("Reject")');
+    await page().waitForSelector(".yami-ask", { timeout: 5_000 });
+    await page().locator(".yami-ask input.prompt-input").fill("Too thin.");
+    await page().locator(".yami-ask .suggestion-item", { hasText: "Reject the change: Too thin." }).click();
+    await page().waitForSelector(".yami-panel .yami-change-result.is-rejected", { timeout: 15_000 });
+    expect(await page().textContent(".yami-panel .yami-change-result.is-rejected")).toBe("Rejected: Too thin.");
+    expect(await page().textContent(".yami-panel .yami-state-label")).toBe("Rejected");
+    expect(await acts()).toEqual([]);
+    expect(await obsidian.read(second.path)).toContain("reason: Too thin.");
+    expect(existsSync(path.join(obsidian.vault, "wiki/topics/Kefir grains.md"))).toBe(false);
+    await page().click(".yami-panel .yami-back");
+    await page().waitForSelector('.yami-panel .yami-panel-title:text-is("Wiki")');
+
+    // A plan that no longer fits, since the note it creates appeared: the refusal shows inline, and the change stays proposed.
+    const third = await propose("Learn loam", [{ op: "create", path: "wiki/topics/Loam.md", properties: { description: "Loam." }, body: "Loam.", why: "x" }]);
+    await page().evaluate(async () => void (await (window as any).app.vault.create("wiki/topics/Loam.md", "---\ntype: topic\ndescription: Taken.\n---\nTaken.\n")));
+    const row3 = `.yami-panel [data-key="change:${third.path}"]`;
+    await page().waitForSelector(row3, { timeout: 10_000 });
+    await page().click(row3);
+    await page().click('.yami-panel .yami-action:has-text("Approve")');
+    await page().waitForSelector(".yami-panel .yami-change-error", { timeout: 15_000 });
+    expect(await page().textContent(".yami-panel .yami-change-error")).toContain("the note exists");
+    expect(await page().textContent('.yami-panel .yami-state[data-status="proposed"] .yami-state-label')).toBe("Waiting for approval");
+    expect(await acts()).toEqual(["Approve", "Reject"]);
+    expect(await obsidian.read(third.path)).toContain("status: proposed");
+    await page().keyboard.press("Backspace");
+    await page().waitForSelector('.yami-panel .yami-panel-title:text-is("Wiki")');
+    expect(await focused()).toBe(`change:${third.path}`);
+
+    // The commands on the open document: reject this change with no reason, and approve this change.
+    await open(third.path);
+    await run("yami:yami-wiki-reject-this-change");
+    await page().waitForSelector(".yami-ask", { timeout: 5_000 });
+    await page().locator(".yami-ask .suggestion-item", { hasText: "Reject the change with no reason" }).click();
+    await obsidian.waitForNote(third.path, (text) => text.includes("status: rejected"), 15_000);
+    const fourth = await propose("Learn whey", [{ op: "create", path: "wiki/topics/Whey.md", properties: { description: "Whey." }, body: "Whey is the liquid.", why: "x" }]);
+    await open(fourth.path);
+    await run("yami:yami-wiki-approve-this-change");
+    await obsidian.waitForNote(fourth.path, (text) => text.includes("status: applied"), 15_000);
+    expect(await obsidian.read("wiki/topics/Whey.md")).toContain("Whey is the liquid.");
+
+    // Nothing waits any more: the list says so, and the badge is gone.
+    await page().evaluate(() => (window as any).app.workspace.getLeavesOfType("yami-panel")[0].view.go({ level: "modules" }));
+    await page().waitForSelector('.yami-panel [data-key="module:wiki"]:not(:has(.yami-badge))', { timeout: 10_000 });
+    expect(await page().getAttribute('.yami-panel [data-key="module:wiki"]', "aria-label")).not.toContain("approval");
+    expect(await page().textContent(".yami-panel .yami-waiting .yami-panel-empty")).toBe("Nothing waits for approval.");
+  });
+
   it("creates the forms of threads from the command palette, and a session of the person's own flow, which the panel lists", { timeout: 60_000 }, async () => {
     const forms: [kind: string, name: string, file: string, example: string][] = [
       ["agent", "Code checker", "internal/threads/agents/code-checker/AGENT.md", "Reviewer"],

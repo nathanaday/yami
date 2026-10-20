@@ -1,13 +1,15 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
-import { LINKED_KINDS, STATUS_LABELS, type LinkedKind, type ModuleProblem, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
-import { basename } from "yami/document";
-import { modeOf, moduleIcon, type ObsidianYami } from "yami/obsidian";
+import { LINKED_KINDS, STATUS_LABELS, WikiModule, type LinkedKind, type ModuleProblem, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
+import { basename, type ChangeStatus } from "yami/document";
+import { age, modeOf, moduleIcon, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER, type ObsidianYami } from "yami/obsidian";
+import type { ChangeAct, ChangeDetails, ChangeSummary, ChangeWrite, WriteCounts } from "yami/wiki";
 import * as ui from "../ui";
+import { diffLines } from "./diff";
 
 export const PANEL_VIEW = "yami-panel";
 
-/** Where the panel is: the list of modules, one module and its sessions, or one session. */
-type Place = { level: "modules" } | { level: "module"; module: string } | { level: "session"; module: string; path: string };
+/** Where the panel is: the list of modules, one module and its sessions, one session, or one change of the wiki. */
+type Place = { level: "modules" } | { level: "module"; module: string } | { level: "session"; module: string; path: string } | { level: "change"; path: string };
 
 /** How the panel shows each kind of linked document. The library gives the kinds and their order. */
 const KIND_LOOK: Record<LinkedKind, { title: string; icon: string }> = {
@@ -21,16 +23,33 @@ const KIND_LOOK: Record<LinkedKind, { title: string; icon: string }> = {
 /** The order of the status counts on a module's row: what needs a look first. */
 const COUNT_ORDER: SessionStatus[] = ["working", "checking", "reviewing", "needs-attention", "failed", "stopped", "open", "done"];
 
+/** The words for each status of a change. */
+const CHANGE_LABELS: Record<ChangeStatus, string> = { proposed: "Waiting for approval", applying: "Applying", applied: "Applied", failed: "Failed", rejected: "Rejected" };
+
+/** The writes of a change by op, in the order a person reads them, with the heading before and after the change applies. */
+const OPS: { op: ChangeWrite["op"]; icon: string; proposed: string; applied: string; count: keyof WriteCounts; short: string }[] = [
+  { op: "create", icon: "plus", proposed: "Creates", applied: "Created", count: "creates", short: "new" },
+  { op: "modify", icon: "pencil", proposed: "Changes", applied: "Changed", count: "modifies", short: "changed" },
+  { op: "remove", icon: "minus", proposed: "Removes", applied: "Removed", count: "removes", short: "removed" },
+];
+
 /**
  * A sidebar view of the vault's Yami: the modules, the sessions of a module, and one session with what it
- * links and what a person can do with it, and what keeps a module of the vault out. The view only lays out
- * what the library gives: the modules and their problems, the summaries, the details, the acts, and the
- * change feeds.
+ * links and what a person can do with it, and what keeps a module of the vault out; and the wiki's change
+ * plans that wait for a person, each with what it writes and the acts on it. The view only lays out what
+ * the library gives: the modules and their problems, the summaries, the details, the changes, the acts,
+ * and the change feeds.
  */
 export class YamiPanel extends ItemView {
   private place: Place = { level: "modules" };
   private ticket = 0;
   private unsubscribe?: () => void;
+  /** The act that runs on a change now, so the page shows it at once, before the document says so. */
+  private pending?: { path: string; kind: ChangeAct["kind"] };
+  /** The refusal of the last act on a change, which writes nothing, so only the page can show it. */
+  private refusal?: { path: string; message: string };
+  /** The proposals as the last draw of a waiting list showed them, so a new row enters and a finished one leaves. */
+  private shown?: Map<string, ChangeSummary>;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -70,10 +89,11 @@ export class YamiPanel extends ItemView {
     this.unsubscribe?.();
   }
 
-  /** Shows a place: the modules, one module, or one session. `focus` names the element to focus there. */
+  /** Shows a place: the modules, one module, one session, or one change. `focus` names the element to focus there. */
   go(place: Place, focus?: string): void {
     const deeper = depth(place) >= depth(this.place);
     this.place = place;
+    this.refusal = undefined;
     void this.render(deeper ? "in" : "out", focus ?? (deeper ? "back" : undefined));
   }
 
@@ -81,7 +101,13 @@ export class YamiPanel extends ItemView {
   private up(): void {
     const place = this.place;
     if (place.level === "session") this.go({ level: "module", module: place.module }, `session:${place.path}`);
+    else if (place.level === "change") this.go({ level: "module", module: this.wikiModule()?.id ?? "" }, `change:${place.path}`);
     else if (place.level === "module") this.go({ level: "modules" }, `module:${place.module}`);
+  }
+
+  /** The module whose changes the panel shows: the wiki. */
+  private wikiModule(): YamiModule | undefined {
+    return this.yami.modules.find((module) => module instanceof WikiModule);
   }
 
   /**
@@ -90,6 +116,8 @@ export class YamiPanel extends ItemView {
    */
   private async render(direction?: "in" | "out", focus?: string): Promise<void> {
     const ticket = ++this.ticket;
+    // A page that enters as a whole animates no row of its own.
+    if (direction) this.shown = undefined;
     const page = createDiv({ cls: "yami-panel-page" });
     let drawn: Place = this.place;
     try {
@@ -115,7 +143,7 @@ export class YamiPanel extends ItemView {
 
   /** Draws a place, or the nearest place above it that still exists, and says which it drew. */
   private async draw(page: HTMLElement, place: Place): Promise<Place> {
-    const module = place.level === "modules" ? undefined : this.yami.module(place.module);
+    const module = place.level === "modules" ? undefined : place.level === "change" ? this.wikiModule() : this.yami.module(place.module);
     if (!module) {
       await this.drawModules(page);
       return { level: "modules" };
@@ -126,14 +154,20 @@ export class YamiPanel extends ItemView {
       this.drawSession(page, module, await this.yami.session(place.path).details());
       return place;
     }
+    if (place.level === "change" && (await this.yami.vault.exists(place.path))) {
+      this.drawChange(page, module, await this.yami.wiki.changeDetails(place.path));
+      return place;
+    }
     await this.drawModule(page, module);
     return { level: "module", module: module.id };
   }
 
   private async drawModules(page: HTMLElement): Promise<void> {
     const summaries = await this.yami.summaries();
+    const proposals = await this.yami.wiki.changes();
     this.breadcrumb(page, []);
     page.createEl("h2", { cls: "yami-panel-title", text: "Modules" });
+    this.waiting(page, proposals);
 
     const live = summaries.filter((s) => s.session.running);
     if (live.length) {
@@ -142,7 +176,7 @@ export class YamiPanel extends ItemView {
         const row = ui.row(group, `live:${summary.path}`, () => this.go({ level: "session", module: summary.module.id, path: summary.path }));
         row.setAttribute("aria-label", `${summary.name}, ${summary.module.name}, ${STATUS_LABELS[summary.status].toLowerCase()}`);
         row.style.setProperty("--yami-module-color", summary.module.colors.folder);
-        mark(row, summary.status);
+        mark(row, summary.status, STATUS_LABELS[summary.status]);
         const text = row.createDiv({ cls: "yami-row-text" });
         text.createDiv({ cls: "yami-row-name", text: summary.name });
         text.createDiv({ cls: "yami-row-meta yami-module-name", text: summary.module.name });
@@ -152,20 +186,66 @@ export class YamiPanel extends ItemView {
     const list = page.createDiv({ cls: "yami-module-list" });
     for (const module of this.yami.modules) {
       const mine = summaries.filter((s) => s.module === module);
-      // The badge counts the sessions that wait for the person, so the line under the name leaves them out.
+      // The badge counts what waits for the person: the sessions that need attention, and on the wiki its
+      // proposals. The line under the name leaves the sessions out.
       const waiting = mine.filter((s) => s.status === "needs-attention").length;
+      const proposed = module instanceof WikiModule ? proposals.length : 0;
+      const proposedLine = proposed ? `${proposed} ${proposed === 1 ? "change waits" : "changes wait"} for approval` : "";
       const row = ui.row(list, `module:${module.id}`, () => this.go({ level: "module", module: module.id }));
       row.addClass("yami-module-row");
-      row.setAttribute("aria-label", `${module.name}: ${moduleLine(module, mine, COUNT_ORDER)}`);
+      row.setAttribute("aria-label", `${module.name}: ${[proposedLine, moduleLine(module, mine, COUNT_ORDER)].filter(Boolean).join(" · ")}`);
       row.style.setProperty("--yami-module-color", module.colors.folder);
       setIcon(row.createSpan({ cls: "yami-module-icon" }), moduleIcon(module));
       const text = row.createDiv({ cls: "yami-row-text" });
       text.createDiv({ cls: "yami-row-name", text: module.name });
       text.createDiv({ cls: "yami-row-sub", text: moduleLine(module, mine, waiting ? COUNT_ORDER.filter((s) => s !== "needs-attention") : COUNT_ORDER) });
-      if (waiting) row.createSpan({ cls: "yami-badge", text: `${waiting}`, attr: { title: counts(mine, ["needs-attention"]), "aria-hidden": "true" } });
+      if (waiting + proposed) row.createSpan({ cls: "yami-badge", text: `${waiting + proposed}`, attr: { title: [proposedLine, waiting && counts(mine, ["needs-attention"])].filter(Boolean).join(" · "), "aria-hidden": "true" } });
       setIcon(row.createSpan({ cls: "yami-row-chevron" }), "chevron-right");
     }
     this.problems(page, this.yami.problems);
+  }
+
+  /** The proposals that wait for the person, one row each. A new one enters; one that is done leaves. */
+  private waiting(page: HTMLElement, proposals: ChangeSummary[]): void {
+    const group = ui.section(page, "Waiting for approval", proposals.length ? `${proposals.length}` : undefined);
+    group.addClass("yami-waiting");
+    if (!proposals.length) group.createDiv({ cls: "yami-panel-empty", text: "Nothing waits for approval." });
+    const now = new Map(proposals.map((p) => [p.path, p]));
+    const before = this.shown;
+    // The rows in the order of the last draw, with a ghost that fades for each that is gone, then the new ones.
+    const order = [...(before?.keys() ?? []), ...proposals.map((p) => p.path).filter((path) => !before?.has(path))];
+    for (const path of order) {
+      const proposal = now.get(path);
+      if (proposal) {
+        const row = this.changeRow(group, proposal);
+        if (before && !before.has(path)) row.addClass("is-entering");
+      } else if (before) {
+        const row = this.changeRow(group, before.get(path)!);
+        row.addClass("is-leaving");
+        row.tabIndex = -1;
+        row.setAttribute("aria-hidden", "true");
+        window.setTimeout(() => row.remove(), 300);
+      }
+    }
+    this.shown = now;
+  }
+
+  private changeRow(parent: HTMLElement, change: ChangeSummary): HTMLElement {
+    const module = change.module ? this.yami.module(change.module) : undefined;
+    const row = ui.row(parent, `change:${change.path}`, () => this.go({ level: "change", path: change.path }));
+    row.addClass("yami-change-row");
+    row.setAttribute("aria-label", `${change.title}, ${countsLine(change)}, ${age(change.created)}${module ? `, ${module.name}` : ""}`);
+    mark(row, change.status, CHANGE_LABELS[change.status]);
+    const text = row.createDiv({ cls: "yami-row-text" });
+    text.createDiv({ cls: "yami-row-name", text: change.title, attr: { title: change.title } });
+    const meta = text.createDiv({ cls: "yami-row-meta" });
+    meta.createSpan({ text: countsLine(change) });
+    meta.createSpan({ text: age(change.created) });
+    if (module) {
+      const name = meta.createSpan({ cls: "yami-module-name", text: module.name });
+      name.style.setProperty("--yami-module-color", module.colors.folder);
+    }
+    return row;
   }
 
   /** What a person must fix or know: a vault module or a flow that stays out, or an edited base skill, with the file to open. */
@@ -202,6 +282,8 @@ export class YamiPanel extends ItemView {
     if (!bar.childElementCount) bar.remove();
     const news = acts.filter((act) => act.kind === "new");
 
+    if (module instanceof WikiModule) this.waiting(page, await this.yami.wiki.changes());
+
     if (module.sessionsIn === "none") {
       page.createDiv({ cls: "yami-panel-empty", text: `${module.name} keeps no sessions.` });
       return;
@@ -222,7 +304,7 @@ export class YamiPanel extends ItemView {
     const row = ui.row(item, `session:${summary.path}`, () => this.go({ level: "session", module: summary.module.id, path: summary.path }));
     row.addClass("yami-session-row");
     row.setAttribute("aria-label", `${summary.name}, ${STATUS_LABELS[summary.status].toLowerCase()}`);
-    mark(row, summary.status);
+    mark(row, summary.status, STATUS_LABELS[summary.status]);
     const text = row.createDiv({ cls: "yami-row-text" });
     text.createDiv({ cls: "yami-row-name", text: summary.name, attr: { title: summary.name } });
     const meta = text.createDiv({ cls: "yami-row-meta" });
@@ -246,7 +328,7 @@ export class YamiPanel extends ItemView {
     ui.activates(title, (evt) => void this.yami.open(details.path, modeOf(evt)));
 
     const state = page.createDiv({ cls: "yami-state" });
-    mark(state, details.status);
+    mark(state, details.status, STATUS_LABELS[details.status]);
     state.createSpan({ cls: "yami-state-label", text: STATUS_LABELS[details.status] });
     const meta = state.createDiv({ cls: "yami-row-meta" });
     if (details.flow) meta.createSpan({ text: details.flow.title });
@@ -318,7 +400,123 @@ export class YamiPanel extends ItemView {
     if (note) row.createDiv({ cls: "yami-row-note", text: note });
   }
 
-  /** The path back up: Modules, then the module, then the session. The last part is where the panel is. */
+  /** One change of the wiki: where it stands, the acts on it, its notes, and each write with its diff. */
+  private drawChange(page: HTMLElement, module: YamiModule, details: ChangeDetails): void {
+    this.breadcrumb(page, [module.name, details.title]);
+    const title = page.createEl("h2", { cls: "yami-panel-title is-link", text: details.title, attr: { tabindex: "0", role: "link", "data-key": "title", "aria-label": `Open the change document of ${details.title}` } });
+    ui.activates(title, (evt) => void this.yami.open(details.path, modeOf(evt)));
+
+    const pending = this.pending?.path === details.path ? this.pending.kind : undefined;
+    const status: ChangeStatus = pending === "approve" ? "applying" : details.status;
+    const state = page.createDiv({ cls: "yami-state", attr: { "data-status": status } });
+    mark(state, status, CHANGE_LABELS[status]);
+    state.createSpan({ cls: "yami-state-label", text: pending === "reject" ? "Rejecting" : CHANGE_LABELS[status] });
+    const meta = state.createDiv({ cls: "yami-row-meta" });
+    meta.createSpan({ text: `Proposed ${when(details.created)}` });
+    if (details.session) {
+      const session = details.session;
+      const link = meta.createSpan({ cls: "yami-inline-link", text: basename(session), attr: { tabindex: "0", role: "link", "data-key": "session", "aria-label": `The session ${basename(session)}` } });
+      ui.activates(link, () => this.go({ level: "session", module: details.module ?? module.id, path: session }));
+    }
+
+    // Where it ended: the versions and the counts, the reason, or the error.
+    if (details.status === "applied") {
+      const result = page.createDiv({ cls: "yami-change-result is-applied" });
+      ui.icon(result, "check");
+      result.createSpan({ text: `Applied · v${details.before} → v${details.after} · ${countsLine(details)}` });
+    } else if (details.status === "rejected") {
+      const result = page.createDiv({ cls: "yami-change-result is-rejected" });
+      ui.icon(result, "ban");
+      result.createSpan({ text: details.reason ? `Rejected: ${details.reason}` : "Rejected, with no reason given." });
+    } else if (details.status === "failed") {
+      const result = page.createDiv({ cls: "yami-change-result is-failed" });
+      ui.icon(result, "alert-triangle");
+      result.createSpan({ text: `Failed: ${details.error ?? "no reason recorded"}` });
+    }
+    const refusal = this.refusal?.path === details.path ? this.refusal.message : undefined;
+    if (refusal) {
+      const error = page.createDiv({ cls: "yami-change-error", attr: { role: "alert" } });
+      ui.icon(error, "alert-triangle");
+      error.createDiv({ cls: "yami-change-error-text", text: refusal });
+    }
+
+    const bar = page.createDiv({ cls: "yami-actions" });
+    for (const act of this.yami.wiki.changeActs(details)) {
+      const label = pending === act.kind ? (act.kind === "approve" ? "Applying…" : "Rejecting…") : act.label;
+      const button = this.button(bar, `act:${act.kind}`, label, act.kind === "approve" ? "check" : "x", act.kind === "approve", () => this.act(details, act));
+      if (pending) button.ariaDisabled = "true";
+    }
+    if (!bar.childElementCount) bar.remove();
+
+    if (details.notes) {
+      const group = ui.section(page, "Notes");
+      group.createDiv({ cls: "yami-change-notes", text: details.notes });
+    }
+
+    for (const look of OPS) {
+      const writes = details.writes.filter((w) => w.op === look.op);
+      if (!writes.length) continue;
+      const group = ui.section(page, details.status === "applied" ? look.applied : look.proposed, `${writes.length}`);
+      for (const write of writes) this.writeRow(group, details, write, look.icon);
+    }
+  }
+
+  private writeRow(group: HTMLElement, details: ChangeDetails, write: ChangeWrite, opIcon: string): void {
+    const item = group.createDiv({ cls: "yami-write", attr: { "data-op": write.op } });
+    // A create's note exists only once the change applies; until then its text is in the change document.
+    const target = write.op === "create" && details.status !== "applied" ? details.path : write.path;
+    const row = ui.row(item, `write:${write.path}`, (evt) => void this.yami.open(target, modeOf(evt)));
+    const done = details.status === "applied";
+    const glyph = ui.icon(row, done ? "check" : opIcon);
+    if (done) glyph.addClass("is-met");
+    const text = row.createDiv({ cls: "yami-row-text" });
+    text.createDiv({ cls: "yami-row-name", text: write.path, attr: { title: write.path } });
+    if (write.why) text.createDiv({ cls: "yami-write-why", text: write.why });
+    if (done) row.createDiv({ cls: "yami-row-note", text: "Done" });
+
+    // library-loop: F1.1 — `changed` reads true on an applied change, since the note now holds the write; only a proposal can warn.
+    if (write.changed && details.status === "proposed") {
+      const warning = item.createDiv({ cls: "yami-write-warning" });
+      ui.icon(warning, "alert-triangle");
+      warning.createSpan({ text: "This note changed since the proposal. An approval overwrites that edit; the version before keeps it." });
+    }
+
+    if (write.op === "remove" && write.before === undefined) return;
+    const diff = item.createDiv({ cls: "yami-diff", attr: { "data-op": write.op } });
+    for (const line of diffLines(write.before ?? "", write.after ?? "")) {
+      if (line.kind === "skip") {
+        diff.createDiv({ cls: "yami-diff-line", attr: { "data-kind": "skip" }, text: `${line.count} unchanged ${line.count === 1 ? "line" : "lines"}` });
+        continue;
+      }
+      const el = diff.createDiv({ cls: "yami-diff-line", attr: { "data-kind": line.kind } });
+      // Inside a create or a remove every piece is new or gone, so only a modify marks the pieces of a line.
+      for (const part of line.parts) el.createSpan({ cls: part.mark && write.op === "modify" ? "is-mark" : undefined, text: part.text });
+    }
+  }
+
+  /** Does an act on a change, and shows how it went: the page says that it works, then the result or the refusal. */
+  private async act(details: ChangeDetails, act: ChangeAct): Promise<void> {
+    let reason: string | undefined;
+    if (act.kind === "reject") {
+      // library-loop: F1.2 — the reason prompt is the library's; the panel repeats what the reject commands do.
+      reason = await this.yami.ask(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY });
+      if (reason === undefined) return;
+    }
+    this.pending = { path: details.path, kind: act.kind };
+    this.refusal = undefined;
+    void this.render();
+    try {
+      const said = act.kind === "reject" ? await act.run(reason) : await act.run();
+      void this.yami.notify(Promise.resolve(said));
+    } catch (error) {
+      this.refusal = { path: details.path, message: (error as Error).message };
+    } finally {
+      this.pending = undefined;
+      void this.render();
+    }
+  }
+
+  /** The path back up: Modules, then the module, then the session or the change. The last part is where the panel is. */
   private breadcrumb(page: HTMLElement, parts: string[]): void {
     if (!parts.length) return;
     const nav = page.createEl("nav", { cls: "yami-breadcrumb", attr: { "aria-label": "Where you are" } });
@@ -334,11 +532,12 @@ export class YamiPanel extends ItemView {
       }
       const link = nav.createEl("button", { cls: "yami-breadcrumb-part", text: part, attr: { "data-key": `crumb:${i}` } });
       const place = this.place;
-      link.addEventListener("click", () => this.go(i === 0 || place.level === "modules" ? { level: "modules" } : { level: "module", module: place.module }));
+      const module = place.level === "modules" ? undefined : place.level === "change" ? this.wikiModule()?.id : place.module;
+      link.addEventListener("click", () => this.go(i === 0 || !module ? { level: "modules" } : { level: "module", module }));
     });
   }
 
-  private button(parent: HTMLElement, key: string, label: string, iconName: string | undefined, primary: boolean, run: () => Promise<void>, warning = false): void {
+  private button(parent: HTMLElement, key: string, label: string, iconName: string | undefined, primary: boolean, run: () => Promise<void>, warning = false): HTMLButtonElement {
     const button = parent.createEl("button", { cls: ["yami-action", ...(primary ? ["mod-cta"] : []), ...(warning ? ["mod-warning"] : [])], attr: { "data-key": key } });
     if (iconName) setIcon(button.createSpan({ cls: "yami-action-icon" }), iconName);
     button.createSpan({ text: label });
@@ -349,6 +548,7 @@ export class YamiPanel extends ItemView {
       button.ariaDisabled = "true";
       void Promise.race([run(), new Promise((resolve) => window.setTimeout(resolve, 600))]).finally(() => (button.ariaDisabled = null));
     });
+    return button;
   }
 }
 
@@ -357,8 +557,13 @@ function depth(place: Place): number {
 }
 
 /** The status as a shape: hollow before a run, turning while it works, filled when done, and a sign of its own for each other end. */
-function mark(parent: HTMLElement, status: SessionStatus): HTMLElement {
-  return parent.createSpan({ cls: "yami-mark", attr: { "data-status": status, role: "img", "aria-label": STATUS_LABELS[status] } });
+function mark(parent: HTMLElement, status: SessionStatus | ChangeStatus, label: string): HTMLElement {
+  return parent.createSpan({ cls: "yami-mark", attr: { "data-status": status, role: "img", "aria-label": label } });
+}
+
+/** The counts of a change in a short line: `2 new · 1 changed · 1 removed`. */
+function countsLine(counts: WriteCounts): string {
+  return OPS.flatMap((look) => (counts[look.count] ? [`${counts[look.count]} ${look.short}`] : [])).join(" · ");
 }
 
 /**
