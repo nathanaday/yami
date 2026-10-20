@@ -1054,12 +1054,26 @@ A conversation note uses the same mechanism for its one agent session, with the 
 | The text field | `.yami-ask input.prompt-input`, `.yami-pick input.prompt-input` | Its placeholder is the `placeholder` of the call: `The name of the new flow, such as Daily review`, or `The flow of the new Threads session`. |
 | An item | `.suggestion-item`, the selected one `.suggestion-item.is-selected` | In `ask`, one item when the field holds text: `<hint>: <text>`, such as `Create the flow: Daily review`. In `pick`, one item for each item of the call whose label matches what the person typed, all of them at first, with the text of `label(item)`. |
 
+Each `ask` prompt of the library has its own placeholder and hint, and both are public API:
+
+| Command | Placeholder | Hint, so the item reads `<hint>: <text>` |
+| --- | --- | --- |
+| New module | `The name of the new module, such as Code review` | `Create the module` |
+| `<Module>: create agent` | `The name of the new agent, such as Reviewer` | `Create the agent` |
+| `<Module>: create flow` | `The name of the new flow, such as Daily review` | `Create the flow` |
+| `<Module>: create policy` | `The name of the new policy, such as Cite sources` | `Create the policy` |
+| `<Module>: create promise` | `The name of the new promise, such as Summary written` | `Create the promise` |
+| `<Module>: create skill` | `The name of the new skill, such as Summarize` | `Create the skill` |
+
 Enter chooses the selected item, and Escape closes the prompt with no choice. In `<Module>: create a flow session`, the text of each item is the flow's `title`, such as `Daily review` for the flow `daily-review`, and the placeholder is `The flow of the new <Module> session`.
 
 ```ts
 // A host's Obsidian test, after it runs Threads: create flow from the command palette:
 await page.locator(".yami-ask input.prompt-input").fill("Daily review");
 await page.locator(".yami-ask .suggestion-item", { hasText: "Create the flow: Daily review" }).click();
+// After it runs New module:
+await page.locator(".yami-ask input.prompt-input").fill("Hello");
+await page.locator(".yami-ask .suggestion-item", { hasText: "Create the module: Hello" }).click();
 // After it runs Threads: create a flow session:
 await page.locator(".yami-pick .suggestion-item", { hasText: "Daily review" }).click();
 ```

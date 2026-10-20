@@ -12,6 +12,12 @@
 - F1.3: README bullet, tool description, and makeCheckout doc: JSON `{session, copies}`; a refusal throws from `run`, and `runTool` gives `{isError, text}`. Test in checkout.test.ts.
 - Policy proposal: design.md Modules flow bullet (flow schema), Threads item 7 ("no thread field").
 
+## Round 3 (0.16.1)
+- F2.1 (ruled docs): the README table of each `ask` prompt, with its placeholder and hint, under "The prompts". `FORM_EXAMPLES` in `src/obsidian/commands.ts` gives an example name for each kind. Tests in commands.test.ts pin every placeholder and hint, New module too.
+- Version bump touches package.json, package-lock.json, and src/version.ts (a test checks this).
+- One `npm test` run failed 1 test right after the version bump, and its name was not captured. The next 20 runs passed. If it shows up again, find the test.
+- `npx vitest run` with no path runs the live tests too. Always use `test/unit`.
+
 ## Watch next round
 - I did not document `.suggestion-empty` (Obsidian's class, not verified in the real app). If the consumer's Obsidian test shows that `.yami-ask` is not on the element it expects, check `modalEl` in the real app.
 - `FLOW.md` has no `schema` key. A vault flow's `fields` are values only. Add a key only if a consumer asks for one.

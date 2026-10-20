@@ -17,7 +17,7 @@ vi.mock("obsidian", () => {
 import type { Command } from "obsidian";
 import { readDocument } from "../../../src/document/index.js";
 import type { Properties } from "../../../src/index.js";
-import { addModuleCommands } from "../../../src/obsidian/commands.js";
+import { addModuleCommands, addNewModuleCommand } from "../../../src/obsidian/commands.js";
 import type { ObsidianYami } from "../../../src/obsidian/yami.js";
 import { testYami, type TestYami } from "../../../src/testing/index.js";
 import { Hello } from "../../fixtures/hello.js";
@@ -83,6 +83,7 @@ describe("the commands of the modules in Obsidian", () => {
     const commands = new Map<string, Command>();
     const shown: unknown[] = [];
     let answer: string | undefined;
+    const asked: string[][] = [];
     const picked: string[][] = [];
     let done: Promise<void> = Promise.resolve();
     const host = {
@@ -90,7 +91,7 @@ describe("the commands of the modules in Obsidian", () => {
         return yami.modules;
       },
       plugin: { addCommand: (command: Command) => commands.set(command.id, command), removeCommand: (id: string) => commands.delete(id) },
-      ask: async () => answer,
+      ask: async (placeholder: string, hint: string) => (asked.push([placeholder, hint]), answer),
       pick: async <T>(items: T[], label: (item: T) => string, placeholder: string) => (picked.push([placeholder, ...items.map(label)]), items[0]),
       createForm: yami.createForm.bind(yami),
       notify: (work: Promise<unknown>) => (done = work.then((result) => void shown.push(result), (error: Error) => void shown.push(`Yami: ${error.message}`))),
@@ -115,6 +116,15 @@ describe("the commands of the modules in Obsidian", () => {
       "yami-hello-pr-comment · Hello world: PR comment",
     ]);
 
+    for (const kind of ["agent", "flow", "policy", "promise", "skill"]) await run(`yami-threads-create-${kind}`);
+    expect(asked).toEqual([
+      ["The name of the new agent, such as Reviewer", "Create the agent"],
+      ["The name of the new flow, such as Daily review", "Create the flow"],
+      ["The name of the new policy, such as Cite sources", "Create the policy"],
+      ["The name of the new promise, such as Summary written", "Create the promise"],
+      ["The name of the new skill, such as Summarize", "Create the skill"],
+    ]);
+
     expect(await run("yami-threads-create-session")).toBe("Threads has no flow that a person starts. Create one with Threads: create flow.");
     answer = undefined;
     expect(await run("yami-threads-create-policy")).toBeUndefined();
@@ -135,6 +145,21 @@ describe("the commands of the modules in Obsidian", () => {
     await yami.discover();
     sync();
     expect(names()).not.toContain("yami-threads-new-daily-review · Threads: new daily review");
+  });
+
+  it("asks New module for a name with the documented placeholder and hint", async () => {
+    const commands = new Map<string, Command>();
+    const asked: string[][] = [];
+    let done: Promise<unknown> = Promise.resolve();
+    const host = {
+      plugin: { addCommand: (command: Command) => commands.set(command.id, command) },
+      ask: async (placeholder: string, hint: string) => void asked.push([placeholder, hint]),
+      notify: (work: Promise<unknown>) => (done = work),
+    } as unknown as ObsidianYami;
+    addNewModuleCommand(host);
+    commands.get("yami-new-module")!.callback!();
+    await done;
+    expect(asked).toEqual([["The name of the new module, such as Code review", "Create the module"]]);
   });
 
   it("gives no such command to the threads module that a host leaves out, or to a vault module", async () => {

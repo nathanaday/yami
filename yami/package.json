@@ -1,6 +1,6 @@
 {
   "name": "yami",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "private": true,
   "description": "Yami: build agent workflows on session documents in an Obsidian vault. The agent harnesses, the documents, the wiki, the session runtime, and the Obsidian layer.",
   "type": "module",

@@ -16,7 +16,15 @@ const title = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
 const after = (name: string) => (/^\p{Lu}\p{Lu}/u.test(name) ? name : name.charAt(0).toLowerCase() + name.slice(1));
 
 /** The kinds of form that the commands of a module that takes vault flows create. */
-const FORM_KINDS: FormKind[] = ["agent", "flow", "policy", "promise", "skill"];
+/** An example name for each kind of form, in the placeholder of `<Module>: create <kind>`. */
+const FORM_EXAMPLES: Record<FormKind, string> = {
+  agent: "Reviewer",
+  flow: "Daily review",
+  policy: "Cite sources",
+  promise: "Summary written",
+  skill: "Summarize",
+};
+const FORM_KINDS = Object.keys(FORM_EXAMPLES) as FormKind[];
 
 /** Every command id of the library starts with it, so a host's own command never has the id of one of the library's. */
 export const COMMAND_PREFIX = "yami-";
@@ -224,7 +232,7 @@ function vaultFlowCommands(yami: ObsidianYami, module: YamiModule): [string, Omi
       name: `${module.name}: create ${kind}`,
       callback: () =>
         void yami.notify(
-          yami.ask(`The name of the new ${kind}, such as Daily review`, `Create the ${kind}`).then(async (name) => {
+          yami.ask(`The name of the new ${kind}, such as ${FORM_EXAMPLES[kind]}`, `Create the ${kind}`).then(async (name) => {
             if (!name) return;
             const path = await yami.createForm(module, kind, name);
             return { message: `Created ${path}.`, open: path };

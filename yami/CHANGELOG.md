@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.1 · library-loop builtin-threads round 3
+
+The README gives the placeholder and the hint of each `ask` prompt of the library.
+
+### Added
+- The README section "The prompts" has a table of each `ask` prompt: New module and `<Module>: create <kind>`, with its placeholder and its hint. The item of New module reads `Create the module: <name>`, and the item of `<Module>: create <kind>` reads `Create the <kind>: <name>`. A test holds each one.
+
+### Changed
+- The placeholder of `<Module>: create <kind>` gives an example name for its kind: `Reviewer` for an agent, `Cite sources` for a policy, `Summary written` for a promise, and `Summarize` for a skill. Before, every kind gave `Daily review`. The flow keeps `Daily review`, and the hints do not change.
+
 ## 0.16.0 · library-loop builtin-threads round 2
 
 A flow can declare the session fields of its own sessions, with `schema`. Threads and the wiki use it, so a session of a person's own flow in threads gets no thread field, and a checkout gets no `sources`. The prompts of `ask` and `pick` and the result of `wiki_checkout` are documented.
