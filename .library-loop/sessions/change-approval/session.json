@@ -1,0 +1,14 @@
+{
+  "slug": "change-approval",
+  "created": "2026-10-20T07:17:58.823Z",
+  "first": "creator",
+  "max_rounds": 5,
+  "consumer_terms": [
+    "showcase",
+    "navigator",
+    "YamiPanel",
+    "obsidian_plugin",
+    "panel"
+  ],
+  "rounds": []
+}
