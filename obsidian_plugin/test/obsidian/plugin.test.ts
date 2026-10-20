@@ -348,6 +348,13 @@ describe("Yami in Obsidian", () => {
     const row2 = `.yami-panel [data-key="change:${second.path}"]`;
     await page().waitForSelector(row2, { timeout: 10_000 });
     await page().click(row2);
+    // Escape in the prompt does nothing: no refusal on the page, and the acts stay.
+    await page().click('.yami-panel .yami-action:has-text("Reject")');
+    await page().waitForSelector(".yami-ask", { timeout: 5_000 });
+    await page().keyboard.press("Escape");
+    await page().waitForSelector(".yami-ask", { state: "detached", timeout: 5_000 });
+    expect(await page().$$(".yami-panel .yami-change-error")).toHaveLength(0);
+    expect(await acts()).toEqual(["Approve", "Reject"]);
     await page().click('.yami-panel .yami-action:has-text("Reject")');
     await page().waitForSelector(".yami-ask", { timeout: 5_000 });
     await page().locator(".yami-ask input.prompt-input").fill("Too thin.");

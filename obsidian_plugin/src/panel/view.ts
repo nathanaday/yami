@@ -1,8 +1,8 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
 import { LINKED_KINDS, STATUS_LABELS, WikiModule, type LinkedKind, type ModuleProblem, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
 import { basename, type ChangeStatus } from "yami/document";
-import { age, modeOf, moduleIcon, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER, type ObsidianYami } from "yami/obsidian";
-import type { ChangeAct, ChangeDetails, ChangeSummary, ChangeWrite, WriteCounts } from "yami/wiki";
+import { age, modeOf, moduleIcon, type ObsidianYami } from "yami/obsidian";
+import { CHANGE_STATUS_LABELS, type ChangeAct, type ChangeDetails, type ChangeSummary, type ChangeWrite, type WriteCounts } from "yami/wiki";
 import * as ui from "../ui";
 import { diffLines } from "./diff";
 
@@ -23,9 +23,6 @@ const KIND_LOOK: Record<LinkedKind, { title: string; icon: string }> = {
 /** The order of the status counts on a module's row: what needs a look first. */
 const COUNT_ORDER: SessionStatus[] = ["working", "checking", "reviewing", "needs-attention", "failed", "stopped", "open", "done"];
 
-/** The words for each status of a change. */
-const CHANGE_LABELS: Record<ChangeStatus, string> = { proposed: "Waiting for approval", applying: "Applying", applied: "Applied", failed: "Failed", rejected: "Rejected" };
-
 /** The writes of a change by op, in the order a person reads them, with the heading before and after the change applies. */
 const OPS: { op: ChangeWrite["op"]; icon: string; proposed: string; applied: string; count: keyof WriteCounts; short: string }[] = [
   { op: "create", icon: "plus", proposed: "Creates", applied: "Created", count: "creates", short: "new" },
@@ -44,8 +41,8 @@ export class YamiPanel extends ItemView {
   private place: Place = { level: "modules" };
   private ticket = 0;
   private unsubscribe?: () => void;
-  /** The act that runs on a change now, so the page shows it at once, before the document says so. */
-  private pending?: { path: string; kind: ChangeAct["kind"] };
+  /** The change that an approval applies now, so the page shows it at once, before the document says so. */
+  private applying?: string;
   /** The refusal of the last act on a change, which writes nothing, so only the page can show it. */
   private refusal?: { path: string; message: string };
   /** The proposals as the last draw of a waiting list showed them, so a new row enters and a finished one leaves. */
@@ -235,7 +232,7 @@ export class YamiPanel extends ItemView {
     const row = ui.row(parent, `change:${change.path}`, () => this.go({ level: "change", path: change.path }));
     row.addClass("yami-change-row");
     row.setAttribute("aria-label", `${change.title}, ${countsLine(change)}, ${age(change.created)}${module ? `, ${module.name}` : ""}`);
-    mark(row, change.status, CHANGE_LABELS[change.status]);
+    mark(row, change.status, CHANGE_STATUS_LABELS[change.status]);
     const text = row.createDiv({ cls: "yami-row-text" });
     text.createDiv({ cls: "yami-row-name", text: change.title, attr: { title: change.title } });
     const meta = text.createDiv({ cls: "yami-row-meta" });
@@ -406,11 +403,11 @@ export class YamiPanel extends ItemView {
     const title = page.createEl("h2", { cls: "yami-panel-title is-link", text: details.title, attr: { tabindex: "0", role: "link", "data-key": "title", "aria-label": `Open the change document of ${details.title}` } });
     ui.activates(title, (evt) => void this.yami.open(details.path, modeOf(evt)));
 
-    const pending = this.pending?.path === details.path ? this.pending.kind : undefined;
-    const status: ChangeStatus = pending === "approve" ? "applying" : details.status;
+    const applying = this.applying === details.path;
+    const status: ChangeStatus = applying ? "applying" : details.status;
     const state = page.createDiv({ cls: "yami-state", attr: { "data-status": status } });
-    mark(state, status, CHANGE_LABELS[status]);
-    state.createSpan({ cls: "yami-state-label", text: pending === "reject" ? "Rejecting" : CHANGE_LABELS[status] });
+    mark(state, status, CHANGE_STATUS_LABELS[status]);
+    state.createSpan({ cls: "yami-state-label", text: CHANGE_STATUS_LABELS[status] });
     const meta = state.createDiv({ cls: "yami-row-meta" });
     meta.createSpan({ text: `Proposed ${when(details.created)}` });
     if (details.session) {
@@ -442,9 +439,9 @@ export class YamiPanel extends ItemView {
 
     const bar = page.createDiv({ cls: "yami-actions" });
     for (const act of this.yami.wiki.changeActs(details)) {
-      const label = pending === act.kind ? (act.kind === "approve" ? "Applying…" : "Rejecting…") : act.label;
+      const label = applying && act.kind === "approve" ? `${CHANGE_STATUS_LABELS.applying}…` : act.label;
       const button = this.button(bar, `act:${act.kind}`, label, act.kind === "approve" ? "check" : "x", act.kind === "approve", () => this.act(details, act));
-      if (pending) button.ariaDisabled = "true";
+      if (applying) button.ariaDisabled = "true";
     }
     if (!bar.childElementCount) bar.remove();
 
@@ -474,8 +471,7 @@ export class YamiPanel extends ItemView {
     if (write.why) text.createDiv({ cls: "yami-write-why", text: write.why });
     if (done) row.createDiv({ cls: "yami-row-note", text: "Done" });
 
-    // library-loop: F1.1 — `changed` reads true on an applied change, since the note now holds the write; only a proposal can warn.
-    if (write.changed && details.status === "proposed") {
+    if (write.changed) {
       const warning = item.createDiv({ cls: "yami-write-warning" });
       ui.icon(warning, "alert-triangle");
       warning.createSpan({ text: "This note changed since the proposal. An approval overwrites that edit; the version before keeps it." });
@@ -494,24 +490,20 @@ export class YamiPanel extends ItemView {
     }
   }
 
-  /** Does an act on a change, and shows how it went: the page says that it works, then the result or the refusal. */
+  /**
+   * Does an act on a change, and shows how it went. An approval shows `Applying` at once, then the result or
+   * the refusal. A reject's feedback is its prompt, which the library shows, and then the document's record.
+   */
   private async act(details: ChangeDetails, act: ChangeAct): Promise<void> {
-    let reason: string | undefined;
-    if (act.kind === "reject") {
-      // library-loop: F1.2 — the reason prompt is the library's; the panel repeats what the reject commands do.
-      reason = await this.yami.ask(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY });
-      if (reason === undefined) return;
-    }
-    this.pending = { path: details.path, kind: act.kind };
+    if (act.kind === "approve") this.applying = details.path;
     this.refusal = undefined;
     void this.render();
     try {
-      const said = act.kind === "reject" ? await act.run(reason) : await act.run();
-      void this.yami.notify(Promise.resolve(said));
+      await this.yami.runChangeAct(act);
     } catch (error) {
       this.refusal = { path: details.path, message: (error as Error).message };
     } finally {
-      this.pending = undefined;
+      this.applying = undefined;
       void this.render();
     }
   }
