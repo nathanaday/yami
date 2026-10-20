@@ -197,9 +197,7 @@ describe("Yami in Obsidian", () => {
     // Restore: a hand edit is kept as version 2 before version 1 comes back as version 3.
     await page().evaluate(async () => void (await (window as any).app.vault.create("wiki/topics/Spelt.md", "---\ntype: topic\ndescription: Spelt.\n---\nAdded by hand.\n")));
     await command("yami:yami-wiki-restore");
-    await page().waitForSelector(".prompt-input");
-    await page().keyboard.type("Version 1");
-    await page().keyboard.press("Enter");
+    await page().locator(".yami-pick .suggestion-item", { hasText: "Version 1" }).click();
     const restored = await obsidian.waitForNote("internal/wiki/snapshots/v3.md", (text) => text.includes("restored:"), 15_000);
     expect(restored).toContain("restored: 1");
     expect(await obsidian.read("internal/wiki/snapshots/v2.md")).toContain("notes: 4");
@@ -213,11 +211,10 @@ describe("Yami in Obsidian", () => {
       await vault.create("Papers/Diffusion.md", "# Diffusion\n\nDenoising models.\n");
     });
     await command("yami:yami-wiki-ingest-folder");
-    await page().waitForSelector(".prompt-input");
+    await page().waitForSelector(".yami-pick .suggestion-item");
     // The vault root is not a choice.
-    expect(await page().$$eval(".suggestion-item", (els) => els.map((el) => el.textContent))).not.toContain("/");
-    await page().keyboard.type("Papers");
-    await page().keyboard.press("Enter");
+    expect(await page().$$eval(".yami-pick .suggestion-item", (els) => els.map((el) => el.textContent))).not.toContain("/");
+    await page().locator(".yami-pick .suggestion-item", { hasText: /^Papers$/ }).click();
     await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path.startsWith("internal/wiki/sessions/Ingest Papers (2 files)"), undefined, { timeout: 10_000 });
     const session = await obsidian.read(await activePath());
     expect(session).toContain("type: session");
@@ -277,9 +274,11 @@ describe("Yami in Obsidian", () => {
       const id = `yami:yami-threads-create-${kind}`;
       expect(await page().evaluate((command) => (window as any).app.commands.findCommand(command)?.name, id)).toBe(`Yami: Threads: create ${kind}`);
       await run(id);
-      await page().waitForSelector(".modal-container input", { timeout: 5_000 });
-      await page().keyboard.type(name);
-      await page().keyboard.press("Enter");
+      await page().waitForSelector(".yami-ask", { timeout: 5_000 });
+      expect(await page().textContent(".yami-ask")).toContain("Type a name.");
+      expect(await page().$$(".yami-ask .suggestion-item")).toHaveLength(0);
+      await page().locator(".yami-ask input.prompt-input").fill(name);
+      await page().locator(".yami-ask .suggestion-item", { hasText: `Create the ${kind}: ${name}` }).click();
       await page().waitForFunction((want) => (window as any).app.workspace.getActiveFile()?.path === want, file, { timeout: 10_000 });
       expect(await obsidian.read(file), file).toMatch(/^---\nname: [a-z-]+\ndescription: /);
     }
@@ -293,11 +292,11 @@ describe("Yami in Obsidian", () => {
 
     // Create a flow session: pick the person's flow, and its session opens in threads/.
     await run("yami:yami-threads-create-session");
-    await page().waitForSelector(".prompt-input", { timeout: 5_000 });
-    const offered = await page().$$eval(".suggestion-item", (els) => els.map((el) => el.textContent ?? ""));
-    expect(offered.some((text) => /daily review/i.test(text)), offered.join(" | ")).toBe(true);
-    await page().keyboard.type("daily review");
-    await page().keyboard.press("Enter");
+    await page().waitForSelector(".yami-pick", { timeout: 5_000 });
+    expect(await page().getAttribute(".yami-pick input.prompt-input", "placeholder")).toBe("The flow of the new Threads session");
+    const offered = await page().$$eval(".yami-pick .suggestion-item", (els) => els.map((el) => el.textContent ?? ""));
+    expect(offered).toContain("Daily review");
+    await page().locator(".yami-pick .suggestion-item", { hasText: "Daily review" }).click();
     await page().waitForFunction(
       () => {
         const app = (window as any).app;
@@ -311,6 +310,29 @@ describe("Yami in Obsidian", () => {
     const doc = await obsidian.read(session);
     expect(doc).toContain("type: session");
     expect(doc).toContain("module: threads");
+    // A session of the person's own flow is not a thread: it carries no field of the thread flow's schema.
+    const { threadFields, properties } = await page().evaluate((file) => {
+      const app = (window as any).app;
+      return {
+        threadFields: Object.keys((window as any).yami.module("threads").thread.schema),
+        properties: Object.keys(app.metadataCache.getFileCache(app.vault.getFileByPath(file))?.frontmatter ?? {}),
+      };
+    }, session);
+    expect(threadFields).toEqual(expect.arrayContaining(["repositories", "after", "retired", "tags"]));
+    expect(properties.filter((key) => threadFields.includes(key)), doc).toEqual([]);
+    // A new thread carries the thread fields that have a default.
+    const threadProperties = await page().evaluate(async () => {
+      const app = (window as any).app;
+      const thread = await (window as any).yami.module("threads").thread.create({ name: "Contrast", request: "A thread to compare." });
+      await new Promise<void>((resolve) => {
+        const check = () => (app.metadataCache.getFileCache(app.vault.getFileByPath(thread.path))?.frontmatter ? resolve() : setTimeout(check, 50));
+        check();
+      });
+      const keys = Object.keys(app.metadataCache.getFileCache(app.vault.getFileByPath(thread.path)).frontmatter);
+      await app.vault.delete(app.vault.getFileByPath(thread.path));
+      return keys;
+    });
+    expect(threadProperties).toEqual(expect.arrayContaining(["repositories", "after", "retired", "tags"]));
 
     // The panel lists it under Threads, as any session.
     await run("yami:open-panel");
@@ -331,9 +353,8 @@ describe("Yami in Obsidian", () => {
     expect(await page().$('.yami-panel [data-key="module:hello"]')).toBeNull();
 
     await run("yami:yami-new-module");
-    await page().waitForSelector(".modal-container input", { timeout: 5_000 });
-    await page().keyboard.type("Hello");
-    await page().keyboard.press("Enter");
+    await page().locator(".yami-ask input.prompt-input").fill("Hello");
+    await page().locator(".yami-ask .suggestion-item", { hasText: "Hello" }).click();
     await page().waitForFunction(() => (window as any).app.workspace.getActiveFile()?.path === "internal/hello/hello.md", undefined, { timeout: 10_000 });
     await page().waitForSelector('.yami-panel [data-key="module:hello"]', { timeout: 10_000 });
 

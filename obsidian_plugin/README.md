@@ -177,7 +177,7 @@ For a repository outside the vault, let the agent edit there and run its tests i
 
 ### Your own flows in threads
 
-Threads takes flows and forms from the vault, so you can add your own kinds of work to it with no code. Their sessions go in `threads/` beside the threads, and the panel lists them under Threads. They are not threads: the board and the thread tools leave them out.
+Threads takes flows and forms from the vault, so you can add your own kinds of work to it with no code. Their sessions go in `threads/` beside the threads, and the panel lists them under Threads. They are not threads: they get no thread field, such as `repositories` or `after`, and the board and the thread tools leave them out.
 
 1. Run **Threads: create flow** and give a name, such as `Daily review`. Yami writes a starter flow at `internal/threads/flows/daily-review/FLOW.md`, valid as written, and opens it. Its comments say what each key takes.
 2. Write the forms that the flow names with **Threads: create agent**, **create policy**, **create promise**, and **create skill**. Each writes a starter in `internal/threads/<agents|policies|promises|skills>/<name>/` and opens it. A name that a form of that kind has already shows the reason in a notice.
@@ -220,7 +220,7 @@ Every change has a version before and after it. **Wiki: take a snapshot** saves 
 ## Tests
 
 - `npm test` runs the unit tests in Node, with `testYami`: no Obsidian, no harness. `test/unit/hello.test.ts` copies the Hello fixture into a vault, runs a session through the review to done, and breaks its flow. The tests of the wiki and threads are in the library.
-- `npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the install of the built-in modules, the wiki commands, a checkout made with `wiki_checkout` and returned with your edit, the **Threads: create** commands and a session of your own flow in the panel, Hello made with **New module** and removed with its folder, the commands, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, a hello session through its review, a hello session that calls its agent through `yami_agent`, and a session stopped in the middle of a turn and resumed. Your own Obsidian and vaults are not touched. Build the plugin first.
+- `npm run test:obsidian` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents: the install of the built-in modules, the wiki commands, a checkout made with `wiki_checkout` and returned with your edit, the **Threads: create** commands and a session of your own flow, with no thread field, in the panel, Hello made with **New module** and removed with its folder, the commands, conversations with approvals and questions, an edit to an open note while the user types in it, a Codex conversation, the conversation API, a hello session through its review, a hello session that calls its agent through `yami_agent`, and a session stopped in the middle of a turn and resumed. Your own Obsidian and vaults are not touched. Build the plugin first.
 
 ## Build a release
 
