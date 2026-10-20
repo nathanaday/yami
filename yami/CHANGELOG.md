@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.2 · library-loop change-approval round 3
+
+`yami.runChangeAct` says when the run of an act starts.
+
+### Added
+- `yami.runChangeAct(act, { started? })` in `yami/obsidian`: `started` is called when the run starts, after the prompt for a reject, at once for an approve, and never on Escape. A view shows the act in progress from then, and not under the reject prompt. The call without the option is unchanged.
+
 ## 0.17.1 · library-loop change-approval round 2
 
 The `changed` flag of a write holds only while the change is proposed; `yami.runChangeAct(act)` does an act on a change in Obsidian, as the commands do; and `CHANGE_STATUS_LABELS` gives the words for each status.

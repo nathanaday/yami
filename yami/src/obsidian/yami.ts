@@ -342,15 +342,18 @@ export class ObsidianYami extends Yami {
   /**
    * Does an act of `wiki.changeActs()`. A reject first asks for the reason with the reject prompt, and
    * Escape does nothing. Then it runs the act and shows what it said in a notice. A refusal shows no
-   * notice: the promise rejects with it, so a view shows the reasons where the act was. The change
+   * notice: the promise rejects with it, so a view shows the reasons where the act was. `started` is
+   * called when the run starts: after the prompt for a reject, at once for an approve, and never on
+   * Escape, so a view shows the act in progress from then, and not under the prompt. The change
    * commands use it.
    * @example
-   * for (const act of wiki.changeActs(change)) button(act.label, () => yami.runChangeAct(act).catch((error) => show(error.message)));
+   * button(act.label, () => yami.runChangeAct(act, { started: () => showBusy(act) }).catch((error) => show(error.message)).finally(showIdle));
    */
-  async runChangeAct(act: ChangeAct): Promise<void> {
-    if (act.kind === "approve") return void new Notice(await act.run());
-    const reason = await this.ask(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY });
-    if (reason !== undefined) new Notice(await act.run(reason));
+  async runChangeAct(act: ChangeAct, options: { started?: () => void } = {}): Promise<void> {
+    const reason = act.kind === "reject" ? await this.ask(REJECT_PLACEHOLDER, REJECT_HINT, { empty: REJECT_EMPTY }) : undefined;
+    if (act.kind === "reject" && reason === undefined) return;
+    options.started?.();
+    new Notice(await act.run(reason));
   }
 
   /** Creates a session from a flow, opens it, and says so. */
