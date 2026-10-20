@@ -96,9 +96,9 @@ export function link(path: string): string {
   return `[[${path.replace(/\.md$/, "")}|${documentName(path)}]]`;
 }
 
-/** The target name of a link: `[[Name|alias]]` gives `Name`. A plain name passes through. */
+/** The target name of a link: `[[Name|alias]]` and the table form `[[Name\|alias]]` give `Name`. A plain name passes through. */
 export function linkTarget(value: string): string {
-  return value.replace(/^\[\[|\]\]$/g, "").split(/[|#]/)[0].trim();
+  return value.replace(/^\[\[|\]\]$/g, "").split(/\\?\||#/)[0].trim();
 }
 
 /** The link targets in a property that holds one link or a list of links. */
@@ -118,8 +118,11 @@ export async function resolveLink(vault: Vault, name: string, folders: string[])
   return undefined;
 }
 
-/** A wiki link, `[[target#heading|alias]]`, or an embed with `!`. Group 1 is the target; group 2 the heading and the alias. */
-export const LINK = /!?\[\[([^\]|#]+)((?:#[^\]|]*)?(?:\|[^\]]*)?)\]\]/g;
+/**
+ * A wiki link, `[[target#heading|alias]]`, or an embed with `!`. Group 1 is the target; group 2 the heading and the alias.
+ * In a table the alias pipe is escaped, `[[target\|alias]]`: the escape stays in group 2, so a rewritten link stays valid.
+ */
+export const LINK = /!?\[\[((?:[^\]|#\\]|\\(?!\|))+)((?:#(?:[^\]|\\]|\\(?!\|))*)?(?:\\?\|[^\]]*)?)\]\]/g;
 
 /** A level-2 heading line, as Markdown reads it: up to three spaces, `##`, and a space, a tab, or the end of the line. */
 const LEVEL_2 = /^ {0,3}##(?:[ \t].*)?$/m;

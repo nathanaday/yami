@@ -815,6 +815,24 @@ describe("the forms of the modules", () => {
   });
 });
 
+describe("links in a table", () => {
+  it("resolve with the escaped alias pipe, as Obsidian resolves them", async () => {
+    const wiki = await fixture();
+    const table = "| Starter | Step |\n| --- | --- |\n| [[Levain\\|the starter]] | [[Sourdough#Bake\\|bake]] |\n| [[Nowhere\\|gone]] | x |\n";
+    await note(`${TOPICS}/Table.md`, { type: "topic", description: "Links in a table." }, table);
+    await wiki.refresh();
+    const findings = (await wiki.lint({ paths: [`${TOPICS}/Table.md`] })).filter((f) => f.check === "dead-link");
+    expect(findings.map((f) => f.message)).toEqual(["links [[Nowhere]], which is not a note"]);
+    expect(wiki.note(`${TOPICS}/Table.md`)!.links.sort()).toEqual([`${TOPICS}/Levain.md`, `${TOPICS}/Sourdough.md`]);
+
+    const result = await wiki.change({
+      title: "Add a table",
+      writes: [{ op: "create", path: `${TOPICS}/Steps.md`, properties: { description: "Steps." }, body: table }],
+    });
+    expect(result.warnings).toEqual(["wiki/topics/Steps.md links [[Nowhere]], which is not a note"]);
+  });
+});
+
 describe("links to notes the index leaves out", () => {
   it("are not dead and not edges, and a name resolves as Obsidian resolves it, over every note", async () => {
     const wiki = await fixture();

@@ -4,4 +4,4 @@
  * import { VERSION } from "yami";
  * console.log(`yami ${VERSION}`); // yami 0.14.0
  */
-export const VERSION = "0.14.0";
+export const VERSION = "0.14.1";

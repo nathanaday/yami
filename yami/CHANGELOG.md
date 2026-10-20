@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.1 · links in tables
+
+A link in a Markdown table resolves as Obsidian resolves it. No change breaks a host.
+
+### Fixed
+- `LINK` and `linkTarget` read the table form of an aliased link, `[[Note\|alias]]`, where the pipe is escaped so the table keeps its columns. Before, the target was `Note\`: lint reported the link as dead, the wiki graph had no edge for it, and `wiki_change` warned about it. Now the target is `Note`, and group 2 of `LINK` keeps the escape, `\|alias`, so a host that rewrites a link inside a table, such as the librarian's return, keeps the table valid.
+
 ## 0.14.0 · library-loop runtime agents and options round 5
 
 The form of the agent's questions and the agent's presence in a note have documented names, as the message box has since 0.13.0. The README states what another plugin can depend on in `start`, `status`, and `onTurnEnd` of the conversations, and a test holds each fact. No change breaks a host.

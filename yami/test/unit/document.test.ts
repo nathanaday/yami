@@ -2,13 +2,35 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkSection, readDocument, replaceSection, sectionText, updateDocument, writeDocument } from "../../src/document/index.js";
+import { checkSection, LINK, linkTarget, readDocument, replaceSection, sectionText, updateDocument, writeDocument } from "../../src/document/index.js";
 import { FsVault } from "../../src/testing/index.js";
 
 let root: string | undefined;
 afterEach(() => {
   if (root) rmSync(root, { recursive: true, force: true });
   root = undefined;
+});
+
+describe("links", () => {
+  const groups = (text: string) => [...text.matchAll(LINK)].map((match) => [match[1], match[2]]);
+
+  it("split a link into its target and the rest, with the alias pipe escaped or not", () => {
+    expect(groups("[[Note]] ![[a.png]] [[Note|alias]] [[Note#Part|alias]] [[dir/Note#Part]]")).toEqual([
+      ["Note", ""],
+      ["a.png", ""],
+      ["Note", "|alias"],
+      ["Note", "#Part|alias"],
+      ["dir/Note", "#Part"],
+    ]);
+    expect(groups("| [[Note\\|alias]] | [[Note#Part\\|alias]] |")).toEqual([
+      ["Note", "\\|alias"],
+      ["Note", "#Part\\|alias"],
+    ]);
+  });
+
+  it("give the target of a link in any form", () => {
+    for (const value of ["Note", "[[Note]]", "[[Note|alias]]", "[[Note\\|alias]]", "[[Note#Part\\|alias]]"]) expect(linkTarget(value)).toBe("Note");
+  });
 });
 
 describe("replaceSection", () => {
