@@ -1,10 +1,12 @@
+import { readdir, readFile } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
 import type { Agent } from "../agent/agent.js";
 import type { Harness, ToolSet } from "../agent/types.js";
 import { CONVERSATION_FOLDER, FileConversations, type Conversation, type Conversations, type OpenConversation } from "../conversation/conversations.js";
 import { basename, checkSection, link, readDocument, writeDocument, type Document } from "../document/document.js";
 import { SESSION, timestamp, validate, withDefaults, type FormKind } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
-import { captureSource, captureSources, readSources } from "../wiki/source.js";
+import { captureSource, captureSources, isAbsolute, readSources, type OutsideFile } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
 import { installBaseSkill, YAMI_ID, YAMI_SKILLS } from "./base-skill.js";
 import { assignColors } from "./colors.js";
@@ -34,15 +36,30 @@ export interface YamiOptions {
   conversationFolder?: string | (() => string);
 }
 
+/** The files of a folder outside the vault and of its subfolders, as absolute paths, with no hidden file or folder. */
+async function filesOutside(folder: string): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(folder, { withFileTypes: true, recursive: true });
+  } catch (error) {
+    throw new Error(`Yami cannot read the folder ${folder}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return entries
+    .filter((e) => e.isFile())
+    .map((e) => join(e.parentPath, e.name))
+    .filter((file) => !relative(folder, file).split(sep).some((part) => part.startsWith(".")))
+    .sort();
+}
+
 /** The id of the built-in threads module. */
 const THREADS = "threads";
 
 export type SessionListener = (session: Session, status: SessionStatus) => void;
 
 export interface IngestOptions {
-  /** Files to learn from, as vault paths. */
+  /** Files to learn from: vault paths, or absolute paths, also of files outside the vault. */
   files?: string[];
-  /** A folder to learn from: every file in it and its subfolders, except the wiki's own. */
+  /** A folder to learn from: every file in it and its subfolders, except the wiki's own. A vault path, or an absolute path, also of a folder outside the vault, whose hidden files are left out. */
   folder?: string;
   /** The session name. Default: `Ingest <what> <date>`. */
   name?: string;
@@ -67,6 +84,8 @@ export class Yami {
   readonly #code: YamiModule[];
   #vault: VaultModule[] = [];
   #problems: ModuleProblem[] = [];
+  /** The documents that the last `enable` kept for a person, since they differ from the text that the code module installs. */
+  #installProblems: ModuleProblem[] = [];
   readonly #definitions = new Map<string, string>();
   /** What the last `discover` found for each code module that takes vault flows, as text. */
   readonly #extended = new Map<string, string>();
@@ -152,8 +171,9 @@ export class Yami {
   /**
    * What a person must fix or know, from the last `discover`: each problem with its module, its file, and
    * what to do. A problem of a vault module or a flow keeps it out. A problem of the module `yami` says
-   * that the base skill holds a person's edits, so it lacks this version's text. Code modules have none: a
-   * code module that is not valid throws when it is built.
+   * that the base skill holds a person's edits, so it lacks this version's text; a problem of a code module
+   * says the same of one of its documents, from the last `enable`. A code module that is not valid throws
+   * when it is built.
    */
   get problems(): readonly ModuleProblem[] {
     return this.#problems;
@@ -210,7 +230,7 @@ export class Yami {
   async #discover(): Promise<void> {
     const skill = await installBaseSkill(this.vault);
     const { definitions, extended, problems: found } = await readVaultModules(this.vault, this.#code);
-    const problems = skill ? [skill, ...found] : found;
+    const problems = [...(skill ? [skill] : []), ...this.#installProblems, ...found];
     let changed = JSON.stringify(problems) !== JSON.stringify(this.#problems) || definitions.length !== this.#vault.length;
     for (const module of this.#code.filter((m) => m.vaultFlows)) {
       const none = { id: module.id, flows: [], skills: false };
@@ -325,13 +345,15 @@ export class Yami {
    */
   async enable(): Promise<void> {
     const failed: string[] = [];
+    const kept: ModuleProblem[] = [];
     for (const module of this.#code) {
       try {
-        await module.install();
+        kept.push(...(await module.install()));
       } catch (error) {
         failed.push(`${module.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    this.#installProblems = kept;
     try {
       await this.discover();
     } catch (error) {
@@ -462,31 +484,52 @@ export class Yami {
 
   /**
    * Captures files as sources of the wiki, and creates an ingest session that links them, for an agent to
-   * absorb them into topics. A file whose latest source holds its content keeps that source.
+   * absorb them into topics. A file is named by its vault path, or by its absolute path: one inside the
+   * vault counts as its vault path, and one outside is read from the disk. A file whose latest source holds
+   * its content keeps that source. It throws, and creates no session, for a file that is not there.
    */
   async ingest(options: IngestOptions): Promise<Session> {
     let sources: string[];
     let what: string;
-    if (options.folder) {
-      sources = await captureSources(this.vault, options.folder);
-      what = `${basename(options.folder.replace(/\/$/, ""))} (${sources.length} files)`;
+    const folder = options.folder === undefined ? undefined : this.#vaultPath(options.folder);
+    if (options.folder && folder !== undefined) {
+      sources = await captureSources(this.vault, folder);
+      what = `${basename(folder.replace(/\/$/, ""))} (${sources.length} files)`;
     } else {
-      const files = options.files ?? [];
-      if (!files.length) throw new Error("Name a file or a folder to ingest.");
+      const files = options.folder ? await filesOutside(options.folder) : (options.files ?? []);
+      if (!files.length) throw new Error(options.folder ? `No files under ${options.folder}.` : "Name a file or a folder to ingest.");
       const index = await readSources(this.vault);
       sources = [];
       for (const file of files) {
-        const source = await captureSource(this.vault, file, index);
+        const source = await captureSource(this.vault, await this.#fileToCapture(file), index);
         if (!sources.includes(source)) sources.push(source);
       }
       const first = basename(sources[0]!).replace(/ \(source( \d+)?\)$/, "");
-      what = files.length === 1 ? first : `${first} and ${files.length - 1} more`;
+      what = options.folder ? `${basename(options.folder.replace(/[\\/]$/, ""))} (${sources.length} files)` : files.length === 1 ? first : `${first} and ${files.length - 1} more`;
     }
     return this.#wikiModule.ingest.create({
       name: options.name ?? `Ingest ${what} ${timestamp().slice(0, 10)}`,
       fields: { sources: sources.map(link) },
       add: options.policies,
     });
+  }
+
+  /** The vault path of a path that names a file or a folder of the vault: a vault path, or an absolute path inside the vault. None for a path outside it. */
+  #vaultPath(path: string): string | undefined {
+    if (!isAbsolute(path)) return path;
+    const inside = relative(this.vault.root, path);
+    return inside.startsWith("..") || isAbsolute(inside) ? undefined : inside.split(sep).join("/");
+  }
+
+  /** A file to capture: the vault path of a file in the vault, or the content of a file outside it. */
+  async #fileToCapture(file: string): Promise<string | OutsideFile> {
+    const inside = this.#vaultPath(file);
+    if (inside !== undefined) return inside;
+    try {
+      return { path: file, data: new Uint8Array(await readFile(file)) };
+    } catch (error) {
+      throw new Error(`Yami cannot read ${file}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** Kills every live run, waits for the harness sessions of every run to close, and closes every agent session, also of an agent that `setAgents` removed. */

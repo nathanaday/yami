@@ -1,12 +1,15 @@
 import type { AgentTool } from "../agent/types.js";
 import { type LedgerView, moduleLedger, vaultLedger } from "../document/bases.js";
-import { link, parseDocument, writeDocument } from "../document/document.js";
+import { link, parseDocument, serializeDocument, writeDocument } from "../document/document.js";
 import { FORMS, timestamp, type FormKind, type Schema } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
+import { VERSION } from "../version.js";
+import { hashBytes } from "../wiki/source.js";
 import type { Wiki } from "../wiki/wiki.js";
 import type { Check } from "./checks.js";
 import { mute, type ModuleColors } from "./colors.js";
 import type { NewSession, Session } from "./session.js";
+import type { ModuleProblem } from "./vault-module.js";
 import type { Yami } from "./yami.js";
 
 export const VAULT_LEDGER = "Yami.base";
@@ -75,7 +78,8 @@ export interface FormParts {
 
 /**
  * A document that a module installs into its internal folder: an agent, a policy, a promise, a skill, or an
- * article. The module writes it only when no file is at its path, so the user can edit it in the vault.
+ * article. The module writes it when no file is at its path, and replaces a file that holds a text it wrote
+ * before, so a person's edits stay and an unedited document follows the module's code.
  */
 export class ModuleDocument<K extends DocumentKind = DocumentKind> implements DocumentRef<K> {
   constructor(
@@ -101,22 +105,18 @@ export class ModuleDocument<K extends DocumentKind = DocumentKind> implements Do
     return link(this.path);
   }
 
-  /** Writes the document and its files, each one only when no file is at its path. */
-  async install(vault: Vault): Promise<void> {
+  /** The text of each file that the document installs, by vault path: the document, then the files beside it. */
+  texts(vault: Vault): Map<string, string> {
     const path = this.path;
-    if (!(await vault.exists(path))) {
-      // A form's folder and file give its kind and its module, so it has no Yami properties.
-      const own = this.kind === "article" ? { type: this.kind, module: this.module.id } : {};
-      if (!Object.keys({ ...own, ...this.properties }).length) await vault.write(path, this.text);
-      else {
-        const doc = parseDocument(vault, path, this.text);
-        await writeDocument(vault, { path, properties: { ...own, ...doc.properties, ...this.properties, ...own }, body: doc.body });
-      }
+    // A form's folder and file give its kind and its module, so it has no Yami properties.
+    const own = this.kind === "article" ? { type: this.kind, module: this.module.id } : {};
+    let text = this.text;
+    if (Object.keys({ ...own, ...this.properties }).length) {
+      const doc = parseDocument(vault, path, this.text);
+      text = serializeDocument(vault, { path, properties: { ...own, ...doc.properties, ...this.properties, ...own }, body: doc.body });
     }
     const folder = path.slice(0, path.lastIndexOf("/"));
-    for (const [name, text] of Object.entries(this.files)) {
-      if (!(await vault.exists(`${folder}/${name}`))) await vault.write(`${folder}/${name}`, text);
-    }
+    return new Map([[path, text], ...Object.entries(this.files).map(([name, file]): [string, string] => [`${folder}/${name}`, file])]);
   }
 }
 
@@ -407,10 +407,15 @@ export abstract class YamiModule {
   }
 
   /**
-   * Writes the vault ledger, the module ledger, the module document, and the module's documents. It writes
-   * only files that do not exist, so the user's edits stay, and a host calls it on every start.
+   * Writes the vault ledger, the module ledger, the module document, and the module's documents, and returns
+   * the documents it kept for a person. A host calls it on every start. The ledgers and the module document
+   * are written once, so a person's edits stay. A file of the module's documents is written when it is
+   * missing, and replaced when it holds the text that Yami wrote last; a file with any other text holds a
+   * person's edits, so it stays, and a problem says so. A file that Yami wrote and the module no longer has
+   * is removed, unless a person edited it. `internal/<id>/installed.json` records the hash of each text that
+   * Yami wrote, of its properties and its body, so two hosts that write YAML in their own ways agree.
    */
-  async install(): Promise<void> {
+  async install(): Promise<ModuleProblem[]> {
     const vault = this.vault;
     const lay = this.layout;
     const sessions = this.sessionsIn !== "none";
@@ -424,7 +429,34 @@ export abstract class YamiModule {
         body: `${this.description ?? ""}${ledger}\n`,
       });
     }
-    for (const doc of this.documents) await doc.install(vault);
+    const record = installedPath(lay);
+    const before: Record<string, string> = (await vault.exists(record)) ? JSON.parse(await vault.read(record)) : {};
+    const after: Record<string, string> = {};
+    const problems: ModuleProblem[] = [];
+    const texts = new Map(this.documents.flatMap((doc) => [...doc.texts(vault)]));
+    for (const [path, text] of texts) {
+      const hash = await fingerprint(vault, path, text);
+      const current = (await vault.exists(path)) ? await fingerprint(vault, path, await vault.read(path)) : undefined;
+      if (current === hash) after[path] = hash;
+      else if (current === undefined || current === before[path]) {
+        await vault.write(path, text);
+        after[path] = hash;
+      } else {
+        if (before[path] !== undefined) after[path] = before[path];
+        problems.push({
+          module: this.id,
+          path,
+          document: path,
+          message: `${path} differs from the text that the ${this.name} module of Yami ${VERSION} installs, so Yami keeps your edits. To get the new text, delete the file: Yami writes it again at the next start. Then copy back the edits you want.`,
+        });
+      }
+    }
+    for (const [path, hash] of Object.entries(before)) {
+      if (texts.has(path) || !(await vault.exists(path))) continue;
+      if ((await fingerprint(vault, path, await vault.read(path))) === hash) await vault.remove(path);
+    }
+    if (JSON.stringify(after) !== JSON.stringify(before)) await vault.write(record, `${JSON.stringify(after, null, 2)}\n`);
+    return problems;
   }
 
   /**
@@ -520,6 +552,25 @@ export function setFromVault(module: YamiModule, found: FromVault): void {
 /** Whether a flow of a code module came from the vault. */
 export function isVaultFlow(flow: Flow): boolean {
   return fromVault.get(flow.module)?.flows.includes(flow) ?? false;
+}
+
+/** The record of what Yami wrote for a module's documents: each vault path with the SHA-256 of its text. */
+export function installedPath(lay: Layout): string {
+  return `${lay.internal}/installed.json`;
+}
+
+/**
+ * The SHA-256 of a file's properties and body, so a text that a host writes its own way, such as YAML with
+ * its long lines wrapped, has the hash of the same text written another way. A file whose properties do not
+ * parse is hashed as it is.
+ */
+async function fingerprint(vault: Vault, path: string, text: string): Promise<string> {
+  let form = text;
+  try {
+    const { properties, body } = parseDocument(vault, path, text);
+    form = JSON.stringify([properties, body]);
+  } catch {}
+  return hashBytes(new TextEncoder().encode(form));
 }
 
 /** The vault paths of a module with an id, from where it keeps its sessions and its ledger. */

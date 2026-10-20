@@ -78,6 +78,67 @@ describe("a module's files", () => {
     expect(await vault.read("internal/files/skills/toned/tone.md")).toBe("Edited.");
   });
 
+  it("replaces a document that holds the text it wrote last, keeps an edited one with a problem, and removes one the module no longer has", async () => {
+    const skill = (body: string, files?: Record<string, string>) =>
+      class extends Hello {
+        readonly id = "versions";
+        readonly toned = this.skill({ name: "toned", description: "Greets in a tone.", body, files });
+        readonly kind = this.policy({ name: "kind", description: "Be kind.", body: body.toUpperCase() });
+      };
+    const First = skill("First text.", { "tone.md": "Warm.", "old.md": "Gone soon." });
+    const { vault, root } = await fresh(new First());
+    const path = "internal/versions/skills/toned/SKILL.md";
+    const policy = "internal/versions/policies/kind/POLICY.md";
+    const record = JSON.parse(await vault.read("internal/versions/installed.json"));
+    expect(Object.keys(record)).toEqual(expect.arrayContaining([path, policy, "internal/versions/skills/toned/tone.md", "internal/versions/skills/toned/old.md"]));
+
+    // The person edits the policy and a file; the next version of the code changes every text, and drops old.md and keeps tone.md.
+    await vault.write(policy, "---\nname: kind\ndescription: Be kind.\n---\nMy own words.\n");
+    await vault.write("internal/versions/skills/toned/tone.md", "Mine.");
+    const Second = skill("Second text.", { "tone.md": "Cool." });
+    const next = new Yami({ vault: new FsVault(root), modules: [new Second()] });
+    await next.enable();
+    expect(await vault.read(path)).toBe("---\nname: toned\ndescription: Greets in a tone.\n---\nSecond text.");
+    expect(await vault.read(policy)).toContain("My own words.");
+    expect(await vault.read("internal/versions/skills/toned/tone.md")).toBe("Mine.");
+    expect(await vault.exists("internal/versions/skills/toned/old.md")).toBe(false);
+    expect(next.problems.map((problem) => [problem.module, problem.document])).toEqual([
+      ["versions", "internal/versions/skills/toned/tone.md"],
+      ["versions", policy],
+    ]);
+    expect(next.problems[0]!.message).toContain("differs from the text that the Hello world module of Yami");
+    expect(next.problems[0]!.message).toContain("delete the file: Yami writes it again at the next start");
+
+    // Deleted, the policy comes back with the new text, and its problem goes.
+    await vault.remove(policy);
+    const third = new Yami({ vault: new FsVault(root), modules: [new Second()] });
+    await third.enable();
+    expect(await vault.read(policy)).toContain("SECOND TEXT.");
+    expect(third.problems.map((problem) => problem.document)).toEqual(["internal/versions/skills/toned/tone.md"]);
+    await next.close();
+    await third.close();
+  });
+
+  it("keeps a file that it has no record of and that differs, as in a vault an earlier Yami set up, and takes one that holds its text", async () => {
+    const { vault, root } = await fresh();
+    await vault.remove("internal/hello/installed.json");
+    await vault.write("internal/hello/policies/always-say-hello/POLICY.md", "An older text.");
+    // The same properties in another YAML style, as another host writes them, are the same text.
+    const skill = await vault.read("internal/hello/skills/greeting/SKILL.md");
+    const restyled = skill.replace(/^description: (.*)$/m, (_, value: string) => `description: >-\n  ${value}`);
+    expect(restyled).not.toBe(skill);
+    await vault.write("internal/hello/skills/greeting/SKILL.md", restyled);
+    const again = new Yami({ vault: new FsVault(root), modules: [new Hello()] });
+    await again.enable();
+    expect(await vault.read("internal/hello/policies/always-say-hello/POLICY.md")).toBe("An older text.");
+    expect(again.problems.map((problem) => problem.document)).toEqual(["internal/hello/policies/always-say-hello/POLICY.md"]);
+    const record = JSON.parse(await vault.read("internal/hello/installed.json"));
+    expect(record["internal/hello/skills/greeting/SKILL.md"]).toMatch(/^[0-9a-f]{64}$/);
+    expect(await vault.read("internal/hello/skills/greeting/SKILL.md")).toBe(restyled);
+    expect(record["internal/hello/policies/always-say-hello/POLICY.md"]).toBeUndefined();
+    await again.close();
+  });
+
   it("installs an agent, a policy, and a promise from their parts, with every other property in the header", async () => {
     class Parts extends Hello {
       readonly id = "parts";
@@ -327,7 +388,7 @@ describe("the tools and skills of the modules", () => {
     const set = yami.tools();
     expect(set.name).toBe("yami");
     expect(set.description).toBe("Tools of Yami. Tools of the Yami modules in this vault: Wiki, Threads, Hello world, Two.");
-    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_agent", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_checkout", "threads_stub", "threads_spec", "threads_plan", "threads_round", "threads_close", "threads_status", "hello_greet_user", "hello_two_greet_user"]);
+    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_agent", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_checkout", "threads_stub", "threads_spec", "threads_plan", "threads_round", "threads_close", "threads_status", "hello_greet_user", "hello_two_greet_user"]);
     expect(await runTool(set.tools.find((tool: AgentTool) => tool.name === "hello_greet_user")!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
     expect(agent.preferences.cwd).toBe(root);
     expect(agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(set.tools.map((tool) => tool.name));

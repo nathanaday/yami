@@ -228,7 +228,7 @@ describe("the agent tool", () => {
       await greet("unknown");
     });
     expect(await session.start()).toMatchObject({ state: "done" });
-    const list = "The agents: reader, writer, other:helper.";
+    const list = "The agents: reader, writer, other:helper, wiki:drafter, wiki:extractor.";
     expect(results).toEqual([
       { isError: true, text: `No agent is named "nobody". ${list}` },
       { isError: true, text: `No agent is named "missing:helper". ${list}` },
@@ -259,7 +259,7 @@ describe("the agent tool", () => {
       () => ({ text: "Read." }),
     );
     await conversation.send("Ask the reader.");
-    expect(results[1]).toEqual({ isError: true, text: 'No agent is named "helper". A conversation has no module, so name an agent as <module>:<name>. The agents: other:helper, team:reader, team:writer.' });
+    expect(results[1]).toEqual({ isError: true, text: 'No agent is named "helper". A conversation has no module, so name an agent as <module>:<name>. The agents: other:helper, team:reader, team:writer, wiki:drafter, wiki:extractor.' });
     expect(reply(results[2]!)).toMatchObject({ agent: "team:reader", conversation: "conversations/team reader.md", message: "Read." });
     const note = await readDocument(t!.vault, reply(results[2]!).conversation);
     expect(note.properties.module).toBeUndefined();

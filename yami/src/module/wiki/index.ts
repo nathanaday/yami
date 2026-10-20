@@ -11,7 +11,7 @@ import { normalizeTag } from "../../wiki/wiki.js";
 import { WIKI_COLOR } from "../colors.js";
 import { YamiModule } from "../module.js";
 import { checkedOut, checkoutSkill, COPY, MAX_DOCUMENTS, orderShape, readingListMade, type Checkout, type CheckoutOrder, type ReturnedCheckout } from "./checkout.js";
-import { absorbed, drafterBrief, extractorBrief, INGEST, pageForms, proposed } from "./ingest.js";
+import { absorbed, drafterAgent, extractorAgent, INGEST, pageForms, proposed } from "./ingest.js";
 
 /**
  * The wiki module, built into every Yami: ingest sessions that turn sources into cited topics through
@@ -88,32 +88,32 @@ export class WikiModule extends YamiModule {
     description: "The sources and the topics that cite them pass lint once the plan is applied.",
     body: "Once the plan is applied, the sources of this session and every topic that cites them pass lint with no error: no dead link, and a description on each. The wiki holds the result only after a person approves, so the review judges this from the change document: `wiki_lint` over the topics that exist, and the warnings that `wiki_change` returned for links to no note.",
   });
+  readonly extractor = this.agent(extractorAgent);
+  readonly drafter = this.agent(drafterAgent);
   readonly ingestSkill = this.skill({
     name: "ingest",
     description:
-      "Absorb the sources of a session into cited topics through one change plan that a person approves: chunk, extract, match, draft, propose.",
+      "Absorb the sources of an ingest session into cited topics through one change plan that a person approves: chunk, extract, match, draft, propose. To ingest files from a conversation, call wiki_ingest, which starts an ingest session.",
     body: `# Ingest
 
-The session's \`sources\` property links the source notes to absorb. You cannot write under \`${TOPICS}/\` or \`${SOURCES}/\` yourself: the session is read-only, and every change to the wiki goes through \`wiki_change\` as one plan. Work map-reduce, so a long document or many documents cost the same care as one.
+**In a conversation**, with no ingest session, do not ingest the files yourself. Call \`wiki_ingest\` with the files or the folder that the user names, as vault paths or absolute paths: it captures them as sources and starts an ingest session, which runs this skill. Tell the user the session's name, and that they approve its change in Obsidian when it is proposed. Then end.
 
-This skill's folder, \`${INGEST}/\`, holds three files. Workers read them themselves, so give each worker the path, never the text:
+**In an ingest session**, the session's \`sources\` property links the source notes to absorb. You cannot write under \`${TOPICS}/\` or \`${SOURCES}/\` yourself: the session is read-only, and every change to the wiki goes through \`wiki_change\` as one plan. Work map-reduce, so a long document or many documents cost the same care as one.
 
-- \`extractor.md\`: the brief of an extraction worker.
-- \`drafter.md\`: the brief of a drafting worker.
-- \`page-forms.md\`: the properties and sections of a topic and a source. Read it before you assemble the plan.
+Two agents of the session do the reading and the drafting, each in a fresh context: \`extractor\` reads one chunk, and \`drafter\` drafts the writes of one slice. Run each with \`yami_agent\`; calls in one turn run at the same time. An agent knows only its brief and your task, so give it everything in the task. \`page-forms.md\`, in this skill's folder \`${INGEST}/\`, gives the properties and the sections of a topic and a source: read it before you assemble the plan.
 
-1. **Chunks.** Call \`wiki_chunks\` for each source. It names the original file and its chunks: line ranges, page ranges, or the whole file. Call \`wiki_tags\` once for the tag list.
-2. **Extract.** For each chunk, send one worker with your subagent tool, in waves of at most eight. Tell it to read \`${INGEST}/extractor.md\` first, and give it the source path, the file, the range, the source's tags, and the tag list. Without a subagent tool, read \`extractor.md\` yourself and extract each chunk in turn, writing its Item Map in your reply before the next. A \`partial\` chunk goes again, narrower.
+1. **Chunks.** Call \`wiki_chunks\` for each source. It names the file to read and its chunks: line ranges, page ranges, or the whole file. Call \`wiki_tags\` once for the tag list.
+2. **Extract.** For each chunk, call \`yami_agent\` with the agent \`extractor\`, in waves of at most eight, also when you could read the chunk yourself: each worker reads with a fresh context, so the last chunk gets the care of the first. Only when the sources hold one chunk in all, extract it yourself from the extractor's brief, \`${this.layout.folders.agents}/extractor/AGENT.md\`. The task gives the source note's path, the file and the range from \`wiki_chunks\`, the source's tags, and the tag list. Each returns an Item Map. A \`partial\` chunk goes again, narrower.
 3. **Match.** Call \`wiki_match\` with every subject's name at once, aliases included, so a subject named in three chunks is one subject.
 4. **Slice.** Put every subject that hits or nears one topic into the same slice, so two drafters never write one topic. At most eight subjects per slice.
-5. **Draft.** Send one worker per slice. Tell it to read \`${INGEST}/drafter.md\` first, and give it the slice, the sources, their tags, and the tag list. Draft yourself, from \`drafter.md\`, when there are one or two slices. Each returns writes.
+5. **Draft.** For each slice, call \`yami_agent\` with the agent \`drafter\`. The task gives the slice (each subject with its items and its match), the source notes, their tags, and the tag list. Each returns writes. With one or two slices, draft them yourself from the drafter's brief, \`${this.layout.folders.agents}/drafter/AGENT.md\`.
 6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
 7. **Propose.** Call \`wiki_change\`. It validates the plan, writes it as a change document that waits for a person's approval, and links the change from this session. Nothing in the wiki changes until a person approves it in Obsidian. When the tool refuses, fix the writes it names and call it again. When it returns warnings, links to no note, fix those writes and propose the plan again; the person approves the last proposal and rejects the rest.
 8. **End.** Your work ends when the plan is proposed and covers every source. Do not wait for the approval, and do not lint the wiki for the plan's effect: the wiki holds it only after the approval. When a change of this session was rejected, the session's feedback holds the reason: read it, and propose a new plan that answers it.
 
 One plan holds at most 100 writes, about ten sources, or forty chunks. More is several plans, one after another.
 `,
-    files: { "extractor.md": extractorBrief, "drafter.md": drafterBrief, "page-forms.md": pageForms },
+    files: { "page-forms.md": pageForms },
   });
 
   /** A session that absorbs its sources into the wiki. Read-only: the agent changes the wiki only through `wiki_change`, and the run ends when the plan is proposed. */
@@ -127,6 +127,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       sources: { type: "links", default: [] },
     },
     skills: [this.ingestSkill],
+    agents: [this.extractor, this.drafter],
     policies: [this.cite, this.onePlan, this.oneTopic],
     promises: [this.changeApplied, this.absorbed, this.clean],
   });
@@ -394,7 +395,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       defineTool({
         name: "chunks",
         readOnly: true,
-        description: `Splits a source's original for the workers of an ingest: a text file into runs of at most 800 lines, a PDF into 20 pages at a time, any other file whole. Returns the file and each chunk's range and locator. Workers read a range with their Read tool.`,
+        description: `Splits a source's original for the workers of an ingest: a text file into runs of at most 800 lines, a PDF into 20 pages at a time, any other file whole. A source with a text, such as the slides of a .pptx, is split as that text. Returns the file to read and each chunk's range and locator. Workers read a range with their Read tool.`,
         input: {
           source: z.string().describe("The source note, as a path or a [[link]] name."),
         },
@@ -431,6 +432,23 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
             if (error instanceof InvalidPlan) return { text: error.message, isError: true };
             throw error;
           }
+        },
+      }),
+      defineTool({
+        name: "ingest",
+        description: `Ingests files into the wiki: captures each file as a source, creates an ingest session that links the sources, and starts its run, which reads them with workers and ends when it proposes one change plan for a person to approve. Name the files as vault paths or as absolute paths, also of files outside the vault, or name one folder, whose every file it takes. A .pptx or a .docx is captured with its text, so the run can read it. Returns the session's path and its sources at once: the run goes on in its own session, so do not wait for it, and do not read or ingest the files yourself. Refuses a file it cannot read, and creates nothing then.`,
+        input: {
+          files: z.array(z.string()).optional().describe("The files: vault paths, or absolute paths."),
+          folder: z.string().optional().describe("A folder instead of files: a vault path, or an absolute path."),
+          name: z.string().optional().describe("The session's name. Default: Ingest <what> <date>."),
+        },
+        title: ({ files, folder }) => `Ingest ${folder ?? (files ?? []).map((f) => f.slice(f.lastIndexOf("/") + 1)).join(", ").slice(0, 60)}`,
+        run: async ({ files, folder, name }) => {
+          if (!folder === !files?.length) return { text: "Name the files, or one folder.", isError: true };
+          const session = await this.yami.ingest({ files, folder, name });
+          const sources = (await session.read()).properties.sources;
+          void session.start().catch((error: unknown) => console.error(`yami: the run of ${session.path} failed`, error));
+          return JSON.stringify({ session: session.path, sources, run: "started" });
         },
       }),
       defineTool({

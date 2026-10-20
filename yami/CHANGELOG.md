@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.18.0 · ingest from a conversation
+
+A conversation hands an ingest to its own session with `wiki_ingest`, also for files outside the vault; the ingest's workers are module agents; a `.pptx` or a `.docx` is captured with its text; and a module's unedited documents follow the code.
+
+### Breaking
+- **The workers of an ingest are agents.** The briefs `internal/wiki/skills/ingest/extractor.md` and `drafter.md` are now the read-only agents `internal/wiki/agents/extractor/AGENT.md` and `drafter/AGENT.md`, and the `ingest` flow lists them. The skill runs them with `yami_agent` (`extractor` per chunk, `drafter` per slice), and no longer tells the lead to send its harness's own subagent with a path to read. `extractorBrief` and `drafterBrief` are `extractorAgent` and `drafterAgent`.
+- **`module.install()` replaces an unedited document.** It writes a file of the module's documents when it is missing, and replaces a file that holds the text Yami wrote last; before, it never wrote a file that existed. It records the hash of each text it wrote in `internal/<id>/installed.json`, removes a file that it wrote and the module no longer has, unless a person edited it, and returns a `ModuleProblem` for each file that it kept since a person edited it. `yami.problems` holds these problems from the last `enable`. Migrate: a vault that an earlier Yami set up has no record, so each document that differs from this version's text is kept with a problem; check that you did not edit it, delete it, and the next start writes the new text.
+- **The ingest skill's text changed**: it starts with what a conversation does (call `wiki_ingest`, and end), and then the session's steps. Its description says so, so a conversation that finds the skill by its description goes to the tool.
+
+### Added
+- The tool `wiki_ingest({ files | folder, name? })`: captures files or one folder with `yami.ingest`, creates the ingest session, starts its run on the Yami's first agent, and returns `{ session, sources, run: "started" }` at once. It is not `readOnly`, so an ingest session and a reviewer do not get it. It refuses both files and a folder, or neither, and a file it cannot read.
+- `yami.ingest` takes absolute paths: one inside the vault counts as its vault path, and a file outside the vault is read from the disk. A folder outside the vault gives every file in it and its subfolders but the hidden ones. A source of a file outside the vault has its absolute path in `from`.
+- `captureSource(vault, file)` takes an `OutsideFile`, `{ path, data }`. `isAbsolute(path)` and the type `OutsideFile` in `yami/wiki`.
+- A capture of a `.pptx` or a `.docx` writes its text beside the copy, `<hash>.md`, and the pictures it shows in `<hash>/`. The source note's new property `text` links the text, and the note embeds the text in place of the copy. `sourceChunks` splits a source with a `text` as that text, by lines. `officeText(data, extension, title, folder)` and `OFFICE_EXTENSIONS` in `yami/wiki` make the text: see the README for what it holds. A damaged file is captured with no text, as before.
+- The extractor reads the pictures that a captured text links when the text around them needs them, cites a slide by its number, and claims nothing about a drawing that the text marks as not shown.
+
+### Changed
+- The design and the README say that a module keeps a person's edits, not that it never writes a file that exists.
+
 ## 0.17.2 · library-loop change-approval round 3
 
 `yami.runChangeAct` says when the run of an act starts.

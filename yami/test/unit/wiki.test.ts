@@ -1,14 +1,16 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, PropertiesError, readDocument } from "../../src/document/index.js";
 import { runCheck, Yami, type WikiModule } from "../../src/index.js";
 import { algorithms, bodyHash, captureSource, captureSources, CHANGE_STATUS_LABELS, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, normalizeTag, readProposal, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
 import { statusText } from "../../src/wiki/change.js";
 import { CHANGE_STATUSES } from "../../src/document/index.js";
-import { FsVault } from "../../src/testing/index.js";
+import { FsVault, testYami } from "../../src/testing/index.js";
+
+const linksOfSession = (value: unknown) => (value as string[]).map(linkTarget);
 
 let root = "";
 let vault: FsVault;
@@ -509,13 +511,13 @@ describe("the wiki module", () => {
   it("installs its documents and serves search, match, and lint as tools", async () => {
     await fixture();
     const { yami, ingest } = await enabled();
-    for (const file of ["internal/wiki/skills/ingest/SKILL.md", "internal/wiki/skills/ingest/extractor.md", "internal/wiki/skills/ingest/drafter.md", "internal/wiki/skills/ingest/page-forms.md", "internal/wiki/promises/sources-absorbed/PROMISE.md"]) {
+    for (const file of ["internal/wiki/skills/ingest/SKILL.md", "internal/wiki/agents/extractor/AGENT.md", "internal/wiki/agents/drafter/AGENT.md", "internal/wiki/skills/ingest/page-forms.md", "internal/wiki/promises/sources-absorbed/PROMISE.md"]) {
       expect(await vault.exists(file), file).toBe(true);
     }
     const { path } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`)] } });
     expect((await readDocument(vault, path)).properties.sources).toEqual([link(`${SOURCES}/codex-notes.md`)]);
     const set = { tools: yami.tools().tools.filter((t) => t.name.startsWith("wiki_")) };
-    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_checkout"]);
+    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_checkout"]);
     const signal = new AbortController().signal;
     const search = JSON.parse((await runTool(set.tools[0]!, { text: "codex harness", limit: 1 }, signal)).text);
     expect(search.hits[0].path).toBe(`${TOPICS}/Codex harness.md`);
@@ -983,6 +985,84 @@ describe("source chunks", () => {
       [1502, 1700],
     ]);
     expect(lineChunks([""])).toEqual([{ index: 1, count: 1, kind: "lines", from: 1, to: 1, locator: "lines 1-1" }]);
+  });
+});
+
+describe("ingest from anywhere", () => {
+  let outside = "";
+  beforeEach(async () => {
+    outside = await mkdtemp(join(tmpdir(), "yami-outside-"));
+    await mkdir(join(outside, "deep", ".hidden"), { recursive: true });
+    await writeFile(join(outside, "lecture.md"), "# Lecture\n\nModel checking.\n");
+    await writeFile(join(outside, "deep", "scan.pdf"), "%PDF-1.4\n");
+    await writeFile(join(outside, "deep", ".hidden", "x.md"), "hidden");
+  });
+  afterEach(async () => {
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("captures a file outside the vault by its absolute path, and a path inside the vault as its vault path", async () => {
+    const { yami } = await enabled();
+    await vault.write("papers/inside.md", "Inside.");
+    const file = join(outside, "lecture.md");
+    const session = await yami.ingest({ files: [file, join(root, "papers/inside.md")] });
+    const sources = linksOfSession((await session.read()).properties.sources);
+    expect(sources).toEqual([`${SOURCES}/lecture (source)`, `${SOURCES}/inside (source)`]);
+    const lecture = await readDocument(vault, `${SOURCES}/lecture (source).md`);
+    expect(lecture.properties.from).toBe(file);
+    expect(await vault.read(linkTarget(String(lecture.properties.file)))).toBe("# Lecture\n\nModel checking.\n");
+    expect((await readDocument(vault, `${SOURCES}/inside (source).md`)).properties.from).toBe(link("papers/inside.md"));
+    // The same content again keeps its source; a change gets a new one.
+    expect(linksOfSession((await (await yami.ingest({ files: [file] })).read()).properties.sources)).toEqual([`${SOURCES}/lecture (source)`]);
+    await writeFile(file, "# Lecture\n\nChanged.\n");
+    expect(linksOfSession((await (await yami.ingest({ files: [file] })).read()).properties.sources)).toEqual([`${SOURCES}/lecture (source 2)`]);
+    await expect(yami.ingest({ files: [join(outside, "missing.pdf")] })).rejects.toThrow(`Yami cannot read ${join(outside, "missing.pdf")}`);
+  });
+
+  it("captures every file of a folder outside the vault, but its hidden ones", async () => {
+    const { yami } = await enabled();
+    const session = await yami.ingest({ folder: outside });
+    expect(session.path).toMatch(new RegExp(`Ingest ${outside.slice(outside.lastIndexOf("/") + 1)} \\(2 files\\) \\d{4}-\\d\\d-\\d\\d\\.md$`));
+    expect(linksOfSession((await session.read()).properties.sources)).toEqual([`${SOURCES}/scan (source)`, `${SOURCES}/lecture (source)`]);
+    await expect(yami.ingest({ folder: join(outside, "none") })).rejects.toThrow("Yami cannot read the folder");
+  });
+
+  it("is a tool for a conversation: wiki_ingest captures, and starts the ingest session, whose run lists the extractor and the drafter", async () => {
+    const t = await testYami();
+    try {
+      const prompts: string[] = [];
+      t.agent.queue((prompt) => {
+        prompts.push(prompt);
+      });
+      const tool = t.yami.tools().tools.find((x) => x.name === "wiki_ingest")!;
+      expect(tool.readOnly).toBeFalsy();
+      const signal = new AbortController().signal;
+      const result = JSON.parse((await runTool(tool, { files: [join(outside, "lecture.md")] }, signal)).text);
+      expect(result).toMatchObject({ session: expect.stringMatching(/^internal\/wiki\/sessions\/Ingest lecture \d{4}-\d\d-\d\d\.md$/), sources: [link(`${SOURCES}/lecture (source).md`)], run: "started" });
+      await vi.waitFor(() => expect(prompts).toHaveLength(1));
+      expect(prompts[0]).toContain("extractor");
+      expect(prompts[0]).toContain("drafter");
+      expect(await runTool(tool, {}, signal)).toEqual({ isError: true, text: "Name the files, or one folder." });
+      expect(await runTool(tool, { files: ["a.md"], folder: "b" }, signal)).toEqual({ isError: true, text: "Name the files, or one folder." });
+    } finally {
+      await t.dispose();
+    }
+  });
+
+  it("gives an ingest session its read-only extractor and drafter, and a skill that runs them with yami_agent and sends a conversation to wiki_ingest", async () => {
+    const { yami, ingest } = await enabled();
+    expect(ingest.agents?.map((a) => a.name)).toEqual(["extractor", "drafter"]);
+    for (const name of ["extractor", "drafter"]) {
+      const { properties } = await readDocument(vault, `internal/wiki/agents/${name}/AGENT.md`);
+      expect(properties, name).toMatchObject({ name, access: "read-only", description: expect.stringContaining("It writes nothing.") });
+    }
+    const skill = await vault.read("internal/wiki/skills/ingest/SKILL.md");
+    expect(skill).toContain("call `yami_agent` with the agent `extractor`");
+    expect(skill).toContain("call `yami_agent` with the agent `drafter`");
+    expect(skill).toContain("Only when the sources hold one chunk in all, extract it yourself from the extractor's brief, `internal/wiki/agents/extractor/AGENT.md`.");
+    expect(skill).toContain("Call `wiki_ingest`");
+    expect(await vault.exists("internal/wiki/skills/ingest/extractor.md")).toBe(false);
+    expect(yami.problems).toEqual([]);
   });
 });
 

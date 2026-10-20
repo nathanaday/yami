@@ -129,6 +129,9 @@ describe("what a Yami adds to the vault and to its agents", () => {
       .map((entry) => join(entry.parentPath, entry.name).slice(root.length + 1))
       .sort();
   const WIKI_FILES = [
+    "internal/wiki/agents/drafter/AGENT.md",
+    "internal/wiki/agents/extractor/AGENT.md",
+    "internal/wiki/installed.json",
     "internal/wiki/policies/cite-every-claim/POLICY.md",
     "internal/wiki/policies/one-plan/POLICY.md",
     "internal/wiki/policies/one-topic/POLICY.md",
@@ -139,12 +142,10 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/sessions.base",
     "internal/wiki/skills/checkout/SKILL.md",
     "internal/wiki/skills/ingest/SKILL.md",
-    "internal/wiki/skills/ingest/drafter.md",
-    "internal/wiki/skills/ingest/extractor.md",
     "internal/wiki/skills/ingest/page-forms.md",
     "internal/wiki/wiki.md",
   ];
-  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_checkout"];
+  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_checkout"];
 
   it("writes the vault ledger, the base skill, and the documents of the wiki and threads, and gives each agent its tools and three skill sets, as the README lists them", async () => {
     t = await testYami();
@@ -153,6 +154,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
       "Yami.base",
       "internal/threads/agents/reviewer/AGENT.md",
       "internal/threads/agents/validator/AGENT.md",
+      "internal/threads/installed.json",
       "internal/threads/policies/change-through-tools/POLICY.md",
       "internal/threads/promises/thread-closed/PROMISE.md",
       "internal/threads/sessions.base",

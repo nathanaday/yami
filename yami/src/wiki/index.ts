@@ -38,12 +38,15 @@ export {
   type Sources,
   countPages,
   hashBytes,
+  isAbsolute,
   lineChunks,
   LINES_PER_CHUNK,
   PAGES_PER_CHUNK,
   sourceChunks,
+  type OutsideFile,
   type SourceChunk,
   type SourceChunks,
 } from "./source.js";
+export { OFFICE_EXTENSIONS, officeText, type OfficeText } from "./office.js";
 export { hash, normalizeName, stem, tokens } from "./tokens.js";
 export { captured, gunzip, gzip, hashOf, knowledge, readArchive, snapshot, versions, writeArchive, type Archive, type Captured, type SnapshotOptions, type Version } from "./versions.js";

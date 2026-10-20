@@ -162,7 +162,9 @@ export const SOURCE: Schema = {
   aliases: { type: "list", default: [] },
   /** The frozen copy that the source stands for, in `internal/wiki/originals/`. */
   file: { type: "link", required: true },
-  /** Where the copy was captured from. That file can change later; the copy does not. */
+  /** The text of the copy, for a file that a reader cannot open, such as the slides of a `.pptx`. The ingest reads and cites it. */
+  text: { type: "link" },
+  /** Where the copy was captured from: a link to a file of the vault, or the absolute path of a file outside it. That file can change later; the copy does not. */
   from: { type: "link" },
   /** The SHA-256 of the captured content. */
   sha256: { type: "text" },

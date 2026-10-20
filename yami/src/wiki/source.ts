@@ -2,6 +2,7 @@ import { link, linkTarget, readDocument, writeDocument } from "../document/docum
 import { timestamp } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import { ORIGINALS, SOURCES, WIKI, WIKI_INTERNAL } from "./folders.js";
+import { OFFICE_EXTENSIONS, officeText } from "./office.js";
 import type { Wiki } from "./wiki.js";
 
 /** How many hex characters of the content hash name a copy in the originals folder. */
@@ -46,46 +47,75 @@ export function sourceOf(sources: Sources, file: string, sha256: string): string
   return sources.byHash.get(sha256);
 }
 
+/** A file from outside the vault, which a capture reads through the host: its absolute path and its content. */
+export interface OutsideFile {
+  path: string;
+  data: Uint8Array;
+}
+
 /**
- * Captures a file of the vault as a source. The file stays where it is. Yami copies it into
- * `internal/wiki/originals/`, named by its content hash, and writes the source note
- * `<name> (source).md`, which embeds the copy and links the file in `from`. The copy is what the
- * wiki reads and cites, so a later edit of the file does not change what a source said; and the
- * source note never shares a name with the file, so a link by name is never ambiguous.
+ * Captures a file as a source: a file of the vault by its vault path, or a file from outside the vault
+ * with its content. The file stays where it is. Yami copies it into `internal/wiki/originals/`, named by
+ * its content hash, and writes the source note `<name> (source).md`, which embeds the copy and names the
+ * file in `from`: a link for a file of the vault, the absolute path for one outside. The copy is what the
+ * wiki reads and cites, so a later edit of the file does not change what a source said; and the source
+ * note never shares a name with the file, so a link by name is never ambiguous. For a `.pptx` or a `.docx`,
+ * which a reader cannot open, Yami also writes its text beside the copy, `<hash>.md`, with the pictures it
+ * shows in the folder `<hash>/`; the note's `text` links it and the note embeds it, and the ingest reads it.
  * Returns the note's path: a new one, or the source that holds the file's content already (`sourceOf`).
  */
-export async function captureSource(vault: Vault, file: string, sources?: Sources): Promise<string> {
-  if (!(await vault.exists(file))) throw new Error(`No file at ${file}.`);
-  if (isWikiFile(file)) throw new Error(`${file} is part of the wiki itself; capture a file from elsewhere in the vault.`);
+export async function captureSource(vault: Vault, file: string | OutsideFile, sources?: Sources): Promise<string> {
+  const outside = typeof file !== "string";
+  const path = outside ? file.path : file;
+  if (!outside && !(await vault.exists(path))) throw new Error(`No file at ${path}.`);
+  if (!outside && isWikiFile(path)) throw new Error(`${path} is part of the wiki itself; capture a file from elsewhere in the vault.`);
   sources ??= await readSources(vault);
-  const data = await vault.readBinary(file);
+  const data = outside ? file.data : await vault.readBinary(path);
   const sha256 = await hashBytes(data);
-  const existing = sourceOf(sources, file, sha256);
+  const existing = sourceOf(sources, path, sha256);
   if (existing) return existing;
-  const name = file.slice(file.lastIndexOf("/") + 1);
+  const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
   const extension = dot > 0 ? name.slice(dot).toLowerCase() : "";
   const stem = dot > 0 ? name.slice(0, dot) : name;
-  const copy = `${ORIGINALS}/${sha256.slice(0, HASH_NAME)}${extension}`;
+  const base = `${ORIGINALS}/${sha256.slice(0, HASH_NAME)}`;
+  const copy = `${base}${extension}`;
   if (!(await vault.exists(copy))) await vault.writeBinary(copy, data);
-  let path = `${sources.folder}/${stem} (source).md`;
-  for (let n = 2; await vault.exists(path); n++) path = `${sources.folder}/${stem} (source ${n}).md`;
+  const text = OFFICE_EXTENSIONS.includes(extension.slice(1)) ? await writeOfficeText(vault, data, extension.slice(1), stem, base) : undefined;
+  let note = `${sources.folder}/${stem} (source).md`;
+  for (let n = 2; await vault.exists(note); n++) note = `${sources.folder}/${stem} (source ${n}).md`;
   await writeDocument(vault, {
-    path,
+    path: note,
     properties: {
       type: "source",
       description: "",
       tags: [],
       file: `[[${copy}]]`,
-      from: file.endsWith(".md") ? link(file) : `[[${file}]]`,
+      ...(text && { text: `[[${text}]]` }),
+      from: outside ? path : path.endsWith(".md") ? link(path) : `[[${path}]]`,
       sha256,
       status: "pending",
       created: timestamp(),
     },
-    body: `![[${copy}]]\n\n## Summary\n\n## Structure\n\n## Notes\n`,
+    body: `![[${text ?? copy}]]\n\n## Summary\n\n## Structure\n\n## Notes\n`,
   });
-  sources.latest.set(fromKey(file), { path, sha256 });
-  if (!sources.byHash.has(sha256)) sources.byHash.set(sha256, path);
+  sources.latest.set(fromKey(path), { path: note, sha256 });
+  if (!sources.byHash.has(sha256)) sources.byHash.set(sha256, note);
+  return note;
+}
+
+/** Writes the text of an Office file at `<base>.md`, and its pictures in `<base>/`. Returns the text's path, or nothing for a file whose text Yami cannot read. */
+async function writeOfficeText(vault: Vault, data: Uint8Array, extension: string, title: string, base: string): Promise<string | undefined> {
+  const path = `${base}.md`;
+  if (await vault.exists(path)) return path;
+  let office;
+  try {
+    office = await officeText(data, extension, title, base);
+  } catch {
+    return undefined;
+  }
+  for (const [name, picture] of office.pictures) await vault.writeBinary(`${base}/${name}`, picture);
+  await vault.write(path, office.text);
   return path;
 }
 
@@ -107,9 +137,14 @@ function fromTarget(from: string): string {
   return from.replace(/^\[\[|\]\]$/g, "").split("|")[0]!.trim();
 }
 
-/** How a source's `from` link names its file: a note by its path without `.md`, any other file with its extension. */
+/** How a source's `from` names its file: a note of the vault by its path without `.md`, any other file of the vault with its extension, and a file outside the vault by its absolute path. */
 function fromKey(file: string): string {
-  return file.endsWith(".md") ? file.slice(0, -3) : file;
+  return isAbsolute(file) || !file.endsWith(".md") ? file : file.slice(0, -3);
+}
+
+/** Whether a path is absolute, on macOS, Linux, or Windows, and so names a file outside the vault. */
+export function isAbsolute(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
 }
 
 /** The knowledge base and what the wiki keeps for itself: nothing there is a source to capture. */
@@ -141,7 +176,7 @@ export interface SourceChunk {
 export interface SourceChunks {
   /** The source note. */
   source: string;
-  /** The original the source stands for, as a vault path. */
+  /** The file the workers read, as a vault path: the frozen copy, or its text when the source has one. */
   file: string;
   kind: SourceChunk["kind"];
   chunks: SourceChunk[];
@@ -150,7 +185,8 @@ export interface SourceChunks {
 /**
  * Splits a source's original for the workers of an ingest: a text file into runs of at most
  * 800 lines, cut at a heading or a blank line; a PDF into 20 pages at a time; any other file
- * whole. The workers read the ranges with their own Read tool.
+ * whole. A source with a `text`, such as the slides of a `.pptx`, is split as that text. The
+ * workers read the ranges with their own Read tool.
  */
 export async function sourceChunks(vault: Vault, wiki: Wiki, source: string): Promise<SourceChunks> {
   const named = wiki.resolve(source);
@@ -158,7 +194,7 @@ export async function sourceChunks(vault: Vault, wiki: Wiki, source: string): Pr
   if (!(await vault.exists(path))) throw new Error(`${source} is neither a source note nor a file that a source was captured from.`);
   const doc = await readDocument(vault, path);
   if (doc.properties.type !== "source") throw new Error(`${path} is not a source note.`);
-  const target = linkTarget(String(doc.properties.file ?? ""));
+  const target = linkTarget(String(doc.properties.text ?? doc.properties.file ?? ""));
   if (!target) throw new Error(`${path} names no file.`);
   const file = await resolveFile(vault, wiki, target);
   if (!file) throw new Error(`${path} links ${target}, which is not in the vault.`);
