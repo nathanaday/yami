@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.18.1 · the fix of a flat form
+
+A problem of a form in a file of its own, where a folder belongs, gives a fix that does not duplicate a form.
+
+### Fixed
+- When the folder form of the same name exists, the problem says that it replaces the file: copy any edits into it, and delete the file. Before, it said to move the file onto the folder form.
+- When a code module's earlier layout wrote the file (the properties `type` and `module: <id>`), the problem says that the module now installs its forms as folders: delete the file. Before, it said to move the file to a folder with a new name, beside the module's own form.
+- The message reads "An agent is a folder with an AGENT.md in it", not "A agent … a AGENT.md".
+
 ## 0.18.0 · ingest from a conversation
 
 A conversation hands an ingest to its own session with `wiki_ingest`, also for files outside the vault; the ingest's workers are module agents; a `.pptx` or a `.docx` is captured with its text; and a module's unedited documents follow the code.

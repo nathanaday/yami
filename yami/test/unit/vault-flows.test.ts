@@ -130,6 +130,19 @@ describe("vault flows of a code module", () => {
     ]);
   });
 
+  it("says to delete a flat form that its folder form replaces, or that the module's earlier layout wrote, and to move any other", async () => {
+    t = await testYami({ modules: [new Journal()] });
+    await write("internal/journal/promises/Mood recorded.md", { name: "mood-recorded" }, "Set the mood.\n");
+    await write("internal/journal/policies/Be kind.md", { type: "policy", module: "journal" }, "Be kind.\n");
+    await write("internal/journal/agents/Helper.md", { name: "helper", description: "Helps." }, "Help.\n");
+    await t.yami.discover();
+    expect(messages()).toEqual([
+      "journal · internal/journal/agents/Helper.md · An agent is a folder with an AGENT.md in it. Move this file to internal/journal/agents/helper/AGENT.md, and set name: helper.",
+      "journal · internal/journal/policies/Be kind.md · An earlier Yami wrote this file. The Journal module now installs its policies as folders, in internal/journal/policies/<name>/POLICY.md, and does not read this file. Copy any edits you want into the matching policy, then delete this file.",
+      "journal · internal/journal/promises/Mood recorded.md · internal/journal/promises/mood-recorded/PROMISE.md replaces this file, and Yami reads only that one. Copy any edits you want into it, then delete this file.",
+    ]);
+  });
+
   it("lets a live run keep the vault flow it started with", async () => {
     const journal = new Journal();
     t = await testYami({ modules: [journal] });

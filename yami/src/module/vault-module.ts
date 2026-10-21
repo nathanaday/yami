@@ -158,11 +158,9 @@ export async function readVaultModules(
   // Every form of every vault module first, so that a flow of one module can name a form of another.
   const broken = new Set<string>();
   const docs = new Map<string, Document>();
+  for (const { folder, problem } of modules) for (const flat of folder.flat) problem(flat.path, flatForm(flat, files));
+  for (const { module, folder, problem } of open) for (const flat of folder.flat) problem(flat.path, flatForm(flat, files, module, await installedByModule(vault, flat.path, module.id)));
   for (const { folder, problem } of [...modules, ...open]) {
-    for (const { kind, path } of folder.flat) {
-      const name = idFromName(basename(path)) || "name";
-      problem(path, `A ${kind} is a folder with a ${FORMS[kind].file} in it. Move this file to ${path.slice(0, path.lastIndexOf("/"))}/${name}/${FORMS[kind].file}, and set name: ${name}.`);
-    }
     for (const { kind, path } of folder.forms) {
       const doc = await checkForm(vault, kind, path, problem);
       if (doc) docs.set(path, doc);
@@ -259,6 +257,34 @@ export async function readVaultModules(
 export function definesModule(path: string): boolean {
   const parts = path.split("/");
   return parts[0] === INTERNAL && path.endsWith(".md") && ((parts.length === 3 && parts[2] === `${parts[1]}.md`) || (parts.length >= 4 && FORM_OF.has(parts[2]!)));
+}
+
+/**
+ * The problem of a form in a file of its own, where a folder belongs. When the folder form of the same name
+ * exists, or a code module's earlier layout wrote the file, moving it would duplicate a form: the fix is to delete it.
+ */
+function flatForm({ kind, path }: { kind: FormKind; path: string }, files: readonly string[], owner?: YamiModule, installed = false): string {
+  const { folder, file } = FORMS[kind];
+  const name = idFromName(basename(path)) || "name";
+  const target = `${path.slice(0, path.lastIndexOf("/"))}/${name}/${file}`;
+  if (files.includes(target)) return `${target} replaces this file, and Yami reads only that one. Copy any edits you want into it, then delete this file.`;
+  if (owner && installed) return `An earlier Yami wrote this file. The ${owner.name} module now installs its ${folder} as folders, in ${moduleLayout(owner.id).folders[folder]}/<name>/${file}, and does not read this file. Copy any edits you want into the matching ${kind}, then delete this file.`;
+  const a = article(kind);
+  return `${a[0]!.toUpperCase()}${a.slice(1)} ${kind} is a folder with ${article(file)} ${file} in it. Move this file to ${target}, and set name: ${name}.`;
+}
+
+/** Whether a flat form holds the properties `type` and `module: <id>` that a code module's earlier layout wrote. */
+async function installedByModule(vault: Vault, path: string, id: string): Promise<boolean> {
+  try {
+    const { properties } = parseDocument(vault, path, await vault.read(path));
+    return properties.module === id && typeof properties.type === "string";
+  } catch {
+    return false;
+  }
+}
+
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? "an" : "a";
 }
 
 /** Reads a document. Properties that do not parse are a problem, and give nothing. */
