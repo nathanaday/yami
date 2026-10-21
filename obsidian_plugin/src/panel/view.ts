@@ -1,4 +1,4 @@
-import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import { LINKED_KINDS, STATUS_LABELS, WikiModule, type LinkedKind, type ModuleProblem, type SessionAct, type SessionDetails, type SessionDocument, type SessionStatus, type SessionSummary, type YamiModule } from "yami";
 import { basename, type ChangeStatus } from "yami/document";
 import { age, modeOf, moduleIcon, type ObsidianYami } from "yami/obsidian";
@@ -248,20 +248,39 @@ export class YamiPanel extends ItemView {
     return row;
   }
 
-  /** What a person must fix or know: a vault module or a flow that stays out, or an edited base skill, with the file to open. */
+  /**
+   * What a person must fix or know: a vault module or a flow that stays out, or an edited base skill, with the
+   * file to open. Each problem copies as its path and message, to paste where a person or an agent fixes it.
+   */
   private problems(page: HTMLElement, problems: readonly ModuleProblem[]): void {
     if (!problems.length) return;
     const group = ui.section(page, "Problems", `${problems.length}`);
     group.addClass("yami-problems");
+    const all = group.querySelector(".yami-section-head")!.createEl("button", { cls: "clickable-icon", attr: { "aria-label": "Copy all problems", "data-key": "copy-problems" } });
+    setIcon(all, "copy");
+    all.addEventListener("click", () => void copy(problems.map((p) => `- ${problemText(p)}`).join("\n"), problems.length === 1 ? "Copied the problem." : `Copied ${problems.length} problems.`));
     for (const problem of problems) {
       const document = problem.document;
-      const row = ui.row(group, `problem:${problem.path}:${problem.message}`, (evt) => document && void this.yami.open(document, modeOf(evt)));
+      // The row and its copy button sit side by side: a button never holds another.
+      const item = group.createDiv({ cls: "yami-problem-item" });
+      const row = ui.row(item, `problem:${problem.path}:${problem.message}`, (evt) => document && void this.yami.open(document, modeOf(evt)));
       row.addClass("yami-problem-row");
       if (!document) row.addClass("is-missing");
       ui.icon(row, "alert-triangle");
       const text = row.createDiv({ cls: "yami-row-text" });
-      text.createDiv({ cls: "yami-row-name", text: problem.path, attr: { title: problem.path } });
-      text.createDiv({ cls: "yami-row-desc", text: problem.message });
+      breakAtSlashes(text.createDiv({ cls: "yami-row-name" }), problem.path);
+      breakAtSlashes(text.createDiv({ cls: "yami-row-desc" }), problem.message);
+      row.addEventListener("contextmenu", (evt) => {
+        evt.preventDefault();
+        const menu = new Menu();
+        menu.addItem((i) => i.setTitle("Copy problem").setIcon("copy").onClick(() => void copy(problemText(problem), "Copied the problem.")));
+        menu.addItem((i) => i.setTitle("Copy path").setIcon("link").onClick(() => void copy(problem.path, "Copied the path.")));
+        if (document) menu.addItem((i) => i.setTitle("Open file").setIcon("file").onClick(() => void this.yami.open(document)));
+        menu.showAtMouseEvent(evt);
+      });
+      const button = item.createEl("button", { cls: "yami-quick clickable-icon", attr: { "aria-label": `Copy problem: ${problem.path}`, "data-key": `copy:${problem.path}:${problem.message}` } });
+      setIcon(button, "copy");
+      button.addEventListener("click", () => void copy(problemText(problem), "Copied the problem."));
     }
   }
 
@@ -610,4 +629,26 @@ function iterations(n: number): string {
 
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A problem as one line of text, with the path that its message speaks of as "this file". */
+function problemText(problem: ModuleProblem): string {
+  return `${problem.path}: ${problem.message}`;
+}
+
+/** Writes text in which a long path wraps after a slash, not inside a name. */
+function breakAtSlashes(el: HTMLElement, text: string): void {
+  text.split("/").forEach((part, i) => {
+    if (i) el.append("/", createEl("wbr"));
+    el.append(part);
+  });
+}
+
+async function copy(text: string, done: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    new Notice(done);
+  } catch (error) {
+    new Notice(`Yami could not copy: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }

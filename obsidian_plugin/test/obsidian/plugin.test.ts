@@ -1077,6 +1077,23 @@ describe("Yami in Obsidian", () => {
     await edit("name: greeting\n", "name: greeting\naccess: readonly\n");
     await page().waitForSelector(`.yami-panel .yami-problem-row[data-key^="problem:${flow}:"]`, { timeout: 10_000 });
     expect(await page().textContent(".yami-panel .yami-problem-row .yami-row-desc")).toContain("access");
+
+    // The whole message shows, and the copy buttons and the menu copy the problem with its path.
+    const desc = await page().$eval(".yami-panel .yami-problem-row .yami-row-desc", (el) => ({ clipped: el.scrollHeight > el.clientHeight + 1, clamp: getComputedStyle(el).getPropertyValue("-webkit-line-clamp") }));
+    expect(desc).toEqual({ clipped: false, clamp: "none" });
+    const clipboard = () => page().evaluate(() => (window as any).require("electron").clipboard.readText() as string);
+    const problem = await page().evaluate((path) => (window as any).yami.problems.find((p: any) => p.path === path), flow);
+    await page().hover(`.yami-panel .yami-problem-row[data-key^="problem:${flow}:"]`);
+    await page().click(`.yami-panel .yami-quick[data-key^="copy:${flow}:"]`);
+    await page().waitForFunction((text) => (window as any).require("electron").clipboard.readText() === text, `${flow}: ${problem.message}`, { timeout: 5_000 });
+    expect(await page().evaluate(() => (window as any).app.workspace.getActiveFile()?.path)).not.toBe(flow);
+    await page().click('.yami-panel [data-key="copy-problems"]');
+    expect(await clipboard()).toBe(`- ${flow}: ${problem.message}`);
+    await page().evaluate(() => (window as any).app.vault.setConfig("nativeMenus", false));
+    await page().click(`.yami-panel .yami-problem-row[data-key^="problem:${flow}:"]`, { button: "right" });
+    await page().click('.menu .menu-item:has-text("Copy path")');
+    await page().waitForFunction((text) => (window as any).require("electron").clipboard.readText() === text, flow, { timeout: 5_000 });
+
     await page().waitForFunction(() => !(window as any).app.commands.commands["yami:yami-hello-new-greeting"], undefined, { timeout: 10_000 });
     expect(await page().$('.yami-panel [data-key="module:threads"]')).not.toBeNull();
     await edit("access: readonly\n", "");

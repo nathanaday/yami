@@ -240,12 +240,46 @@
   color: var(--color-orange);
 }
 
-.yami-problem-row {
+.yami-problems .yami-section-head h3 {
+  flex: 1;
+}
+
+.yami-problems .yami-section-head .clickable-icon {
+  align-self: center;
+}
+
+.yami-problem-item {
+  display: flex;
   align-items: flex-start;
+  gap: var(--size-2-2);
+  border-radius: var(--radius-s);
+}
+
+.yami-problem-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+.yami-problem-row {
+  flex: 1;
+  align-items: flex-start;
+}
+
+.yami-problem-row:hover {
+  background: none;
 }
 
 .yami-problem-row .yami-row-icon {
   color: var(--color-orange);
+}
+
+/* The fix is at the end of a problem, so the whole path and message show. */
+.yami-problem-row .yami-row-name,
+.yami-problem-row .yami-row-desc {
+  display: block;
+  overflow: visible;
+  overflow-wrap: break-word;
+  white-space: normal;
+  -webkit-line-clamp: unset;
 }
 
 /* Small text in a module's color mixes with the theme's text color, so it reads in light and dark themes. */
@@ -380,6 +414,8 @@
 
 .yami-session-item:hover .yami-quick,
 .yami-session-item:focus-within .yami-quick,
+.yami-problem-item:hover .yami-quick,
+.yami-problem-item:focus-within .yami-quick,
 .yami-session-item.is-live .yami-quick {
   opacity: 1;
 }
