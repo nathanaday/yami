@@ -43,3 +43,12 @@ features:
     covers: Shared notes, hub, presence, agent peer.
     tests:
       - {suite: unit, files: [test/unit/obsidian/collab.test.ts, test/unit/obsidian/presence.test.ts]}
+  testing:
+    covers: testYami makes and removes a vault, copies files, runs scripted turns, review refuses non-review sessions, markdownText.
+    tests:
+      - {suite: unit, files: [test/unit/testing.test.ts]}
+  build:
+    covers: pluginBuild options, a real esbuild bundle with markdown text and external obsidian, copyStyles.
+    tests:
+      - {suite: unit, files: [test/unit/esbuild.test.ts]}
+    gaps: ["The bundle is not loaded in real Obsidian."]

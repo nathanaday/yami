@@ -100,7 +100,8 @@ describe("claude adapter", () => {
       expect(existsSync(scratch)).toBe(true);
       // Each folder beside the path from the root to the scratch folder is denied by name, so no setting lets a command write there.
       const real = realpathSync(scratch);
-      const beside = (folder: string) => readdirSync(folder).map((name) => join(folder, name));
+      // Other tests make and remove their own yami-* folders in /tmp meanwhile, so those say nothing about this session.
+      const beside = (folder: string) => readdirSync(folder).filter((name) => !name.startsWith("yami-")).map((name) => join(folder, name));
       const tmp = realpathSync("/tmp");
       const open = new Set(["/dev", "/tmp", tmp, real, ...(tmp === "/private/tmp" ? ["/private"] : [])]);
       expect(filesystem.denyWrite).toEqual(expect.arrayContaining([cwd, homedir(), "/tmp/claude", "/private/tmp/claude"]));
@@ -152,7 +153,10 @@ describe("claude adapter", () => {
       await expect(open({ sandbox: { filesystem: { allowWrite: ["/tmp"] } } })).rejects.toThrow(
         `A read-only session does not start: "/tmp" in sandbox.filesystem.allowWrite of ${file} lets commands write /tmp, which holds the session's scratch folder, and the sandbox cannot deny a folder there that does not exist yet. Remove the entry or name a folder that does not hold /tmp, or give the session access "edit".`,
       );
-      await expect(open({ permissions: { allow: ["Edit(//private/**)"] } })).rejects.toThrow(`"Edit(//private/**)" in permissions.allow of ${file} lets commands write /private,`);
+      // Only where /tmp is a link into /private, as on macOS, does a rule for /private hold the scratch folder.
+      if (realpathSync("/tmp") === "/private/tmp") {
+        await expect(open({ permissions: { allow: ["Edit(//private/**)"] } })).rejects.toThrow(`"Edit(//private/**)" in permissions.allow of ${file} lets commands write /private,`);
+      }
       await expect(open({ sandbox: { filesystem: { allowWrite: ["//"] } } })).rejects.toThrow(`"//" in sandbox.filesystem.allowWrite`);
       await expect(open({ sandbox: { filesystem: { allowWrite: ["/tmp/yami-*"] } } })).rejects.toThrow(`"/tmp/yami-*" in sandbox.filesystem.allowWrite of ${file} lets commands write /tmp,`);
       // A rule's path that starts with one slash is relative to the folder of its settings file, and a folder below /tmp holds no scratch folder.
