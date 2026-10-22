@@ -7,7 +7,7 @@ import { type Browser, chromium, type Page } from "playwright-core";
 
 const OBSIDIAN = process.env.OBSIDIAN_BINARY ?? "/Applications/Obsidian.app/Contents/MacOS/Obsidian";
 /** Obsidian's own data folder, where it keeps the app updates that it downloaded. */
-const OBSIDIAN_DATA = process.env.OBSIDIAN_DATA ?? path.join(homedir(), "Library/Application Support/obsidian");
+const OBSIDIAN_DATA = process.env.OBSIDIAN_DATA ?? path.join(homedir(), process.platform === "darwin" ? "Library/Application Support/obsidian" : ".config/obsidian");
 const PLUGIN_ID = "yami";
 
 export interface ObsidianInstance {
