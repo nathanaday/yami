@@ -22,7 +22,7 @@ features:
       - suite: obsidian
         files: [test/obsidian/plugin.test.ts]
     gaps:
-      - Unit tests pass against yami 0.18.1. The Obsidian suite has not run on 0.18.1: it needs an Obsidian binary (OBSIDIAN_BINARY), a display, and logged-in Claude Code and Codex CLIs; none exist in the agent container.
+      - "Unit tests pass against yami 0.18.1. The Obsidian suite has not run on 0.18.1. It needs an Obsidian binary (OBSIDIAN_BINARY), a display, and logged-in Claude Code and Codex CLIs, and none exist in the agent container."
   panel:
     covers: Panel views, module icons, sessions, stop and resume, broken flows.
     tests:
