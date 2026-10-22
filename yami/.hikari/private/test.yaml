@@ -1,0 +1,45 @@
+version: 1
+suites:
+  unit:
+    command: npm test
+    description: Typecheck tests then vitest unit tests with fake harnesses. No network. Needs npm ci first.
+features:
+  module-sdk:
+    covers: Modules, runs, review, base skill, tools, vault modules and flows.
+    tests:
+      - {suite: unit, files: [test/unit/module.test.ts, test/unit/base-skill.test.ts, test/unit/run.test.ts, test/unit/review.test.ts, test/unit/runtime.test.ts, test/unit/vault-modules.test.ts, test/unit/vault-flows.test.ts, test/unit/reads.test.ts, test/unit/agents.test.ts]}
+    gaps: ["Live harness tests are not run."]
+  agents:
+    covers: Claude and Codex adapters against fake harnesses, sessions, diff, rpc.
+    tests:
+      - {suite: unit, files: [test/unit/claude.test.ts, test/unit/codex.test.ts, test/unit/session.test.ts, test/unit/support.test.ts]}
+    gaps: ["No real harness."]
+  documents:
+    covers: Document reads/writes and text operations.
+    tests:
+      - {suite: unit, files: [test/unit/document.test.ts, test/unit/text-ops.test.ts]}
+  wiki:
+    covers: Index, search, lint, versions.
+    tests:
+      - {suite: unit, files: [test/unit/wiki.test.ts]}
+  wiki-changes-ingest:
+    covers: Checkout, office-file capture.
+    tests:
+      - {suite: unit, files: [test/unit/checkout.test.ts, test/unit/office.test.ts]}
+  threads:
+    covers: Threads module and phase readers.
+    tests:
+      - {suite: unit, files: [test/unit/threads.test.ts]}
+  conversation:
+    covers: Conversation note format and transcript.
+    tests:
+      - {suite: unit, files: [test/unit/conversation.test.ts]}
+  obsidian-layer:
+    covers: createYami, commands, composer, manager, discovery, prompts, colors against a fake Obsidian.
+    tests:
+      - {suite: unit, files: [test/unit/obsidian/commands.test.ts, test/unit/obsidian/composer.test.ts, test/unit/obsidian/discovery.test.ts, test/unit/obsidian/manager.test.ts, test/unit/obsidian/note-sessions.test.ts, test/unit/obsidian/prompts.test.ts, test/unit/obsidian/yami.test.ts, test/unit/colors.test.ts]}
+    gaps: ["Not tested in real Obsidian."]
+  collab:
+    covers: Shared notes, hub, presence, agent peer.
+    tests:
+      - {suite: unit, files: [test/unit/obsidian/collab.test.ts, test/unit/obsidian/presence.test.ts]}
