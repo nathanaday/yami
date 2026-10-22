@@ -17,6 +17,6 @@
     "vitest": "^5.0.4"
   },
   "dependencies": {
-    "yami": "file:../yami"
+    "yami": "file:vendor/yami-0.18.1.tgz"
   }
 }
