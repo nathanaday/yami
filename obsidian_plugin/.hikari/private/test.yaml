@@ -1,0 +1,45 @@
+version: 1
+suites:
+  unit:
+    command: npm test
+    description: Vitest unit tests; need the yami release installed.
+  obsidian:
+    command: npm run test:obsidian
+    description: End-to-end in a real Obsidian (OBSIDIAN_BINARY) and real agents; slow.
+features:
+  diff-view:
+    covers: Insertions, deletions, folding, create/remove, missing final newline, equal texts.
+    tests:
+      - suite: unit
+        files: [test/unit/diff.test.ts]
+        command: npx vitest run test/unit/diff.test.ts
+  vault-modules:
+    covers: The Hello vault module runs through the library's test harness.
+    tests:
+      - suite: unit
+        files: [test/unit/hello.test.ts]
+        command: npx vitest run test/unit/hello.test.ts
+      - suite: obsidian
+        files: [test/obsidian/plugin.test.ts]
+    gaps:
+      - Not run yet; no yami release is published, so dependencies cannot be installed.
+  panel:
+    covers: Panel views, module icons, sessions, stop and resume, broken flows.
+    tests:
+      - suite: obsidian
+        files: [test/obsidian/plugin.test.ts]
+  wiki-proposals:
+    covers: Approve, reject, refuse stale proposals in the panel.
+    tests:
+      - suite: obsidian
+        files: [test/obsidian/plugin.test.ts]
+  wiki-navigator:
+    covers: Walks by tags and follows the open note.
+    tests:
+      - suite: obsidian
+        files: [test/obsidian/plugin.test.ts]
+  conversations:
+    covers: Notes, approvals, questions, modes, Codex, tools, end.
+    tests:
+      - suite: obsidian
+        files: [test/obsidian/plugin.test.ts]

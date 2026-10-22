@@ -1,0 +1,30 @@
+version: 1
+parts:
+  - path: src/
+    description: Plugin source - entry, shared ui helpers, panel and navigator views.
+  - path: test/unit/
+    description: Fast unit tests against the yami library's testing helper.
+  - path: test/obsidian/
+    description: End-to-end tests driving a real Obsidian through playwright.
+  - path: test/fixtures/
+    description: Sample vault and the Hello vault module.
+features:
+  plugin-setup:
+    code: [src/main.ts, manifest.json, esbuild.config.mjs]
+    notes: onload() calls createYami and registers both views.
+  panel:
+    code: [src/panel/view.ts, src/panel/panel.css, src/ui.ts]
+    notes: YamiPanel in view.ts, 654 lines.
+  wiki-proposals:
+    code: [src/panel/view.ts]
+  diff-view:
+    code: [src/panel/diff.ts]
+    notes: diffLines().
+  wiki-navigator:
+    code: [src/navigator/view.ts, src/navigator/navigator.css]
+  vault-modules:
+    code: [test/fixtures/vault-modules/hello]
+    notes: Behavior lives in the library; the plugin only shows it.
+  conversations:
+    code: [src/main.ts]
+    notes: Behavior lives in the library.
