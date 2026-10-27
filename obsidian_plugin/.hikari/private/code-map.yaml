@@ -1,30 +1,30 @@
 version: 1
 parts:
-  - path: src/
+  - path: obsidian_plugin/src/
     description: Plugin source - entry, shared ui helpers, panel and navigator views.
-  - path: test/unit/
+  - path: obsidian_plugin/test/unit/
     description: Fast unit tests against the yami library's testing helper.
-  - path: test/obsidian/
+  - path: obsidian_plugin/test/obsidian/
     description: End-to-end tests driving a real Obsidian through playwright.
-  - path: test/fixtures/
+  - path: obsidian_plugin/test/fixtures/
     description: Sample vault and the Hello vault module.
 features:
   plugin-setup:
-    code: [src/main.ts, manifest.json, esbuild.config.mjs]
+    code: [obsidian_plugin/src/main.ts, obsidian_plugin/manifest.json, obsidian_plugin/esbuild.config.mjs]
     notes: onload() calls createYami and registers both views.
   panel:
-    code: [src/panel/view.ts, src/panel/panel.css, src/ui.ts]
+    code: [obsidian_plugin/src/panel/view.ts, obsidian_plugin/src/panel/panel.css, obsidian_plugin/src/ui.ts]
     notes: YamiPanel in view.ts, 654 lines.
   wiki-proposals:
-    code: [src/panel/view.ts]
+    code: [obsidian_plugin/src/panel/view.ts]
   diff-view:
-    code: [src/panel/diff.ts]
+    code: [obsidian_plugin/src/panel/diff.ts]
     notes: diffLines().
   wiki-navigator:
-    code: [src/navigator/view.ts, src/navigator/navigator.css]
+    code: [obsidian_plugin/src/navigator/view.ts, obsidian_plugin/src/navigator/navigator.css]
   vault-modules:
-    code: [test/fixtures/vault-modules/hello]
+    code: [obsidian_plugin/test/fixtures/vault-modules/hello]
     notes: Behavior lives in the library; the plugin only shows it.
   conversations:
-    code: [src/main.ts]
+    code: [obsidian_plugin/src/main.ts]
     notes: Behavior lives in the library.

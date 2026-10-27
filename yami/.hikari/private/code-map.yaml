@@ -1,0 +1,36 @@
+version: 1
+parts:
+  - {path: yami/src/, description: "Library source; one folder per package export."}
+  - {path: yami/src/module/, description: "SDK: modules, runs, review, tools, threads and wiki built-in modules."}
+  - {path: yami/src/agent/, description: "Claude and Codex harness adapters."}
+  - {path: yami/src/document/, description: "Vault documents and text ops, no Obsidian."}
+  - {path: yami/src/wiki/, description: "Wiki index, algorithms, lint, changes, versions."}
+  - {path: yami/src/obsidian/, description: "The only code using Obsidian, CodeMirror and DOM."}
+  - {path: yami/src/testing/, description: "Node test helpers."}
+  - {path: yami/test/unit/, description: "Unit tests (vitest) with fake harnesses in test/fixtures."}
+  - {path: yami/test/live/, description: "Live tests against real harnesses; not run."}
+  - {path: yami/bench/, description: "Wiki search benchmark."}
+features:
+  module-sdk:
+    code: [yami/src/index.ts, yami/src/module]
+    notes: "YamiModule in module.ts, runs in run.ts/agent-run.ts/fresh-run.ts, review.ts."
+  agents:
+    code: [yami/src/agent]
+  documents:
+    code: [yami/src/document]
+  wiki:
+    code: [yami/src/wiki]
+  wiki-changes-ingest:
+    code: [yami/src/wiki/change.ts, yami/src/wiki/source.ts, yami/src/module/wiki]
+  threads:
+    code: [yami/src/threads, yami/src/module/threads]
+  conversation:
+    code: [yami/src/conversation]
+  obsidian-layer:
+    code: [yami/src/obsidian]
+  collab:
+    code: [yami/src/obsidian/collab]
+  testing:
+    code: [yami/src/testing]
+  build:
+    code: [yami/src/build]

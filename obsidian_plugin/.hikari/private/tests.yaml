@@ -1,15 +1,15 @@
 version: 1
 suites:
   unit:
-    command: npm run build && npx vitest run test/unit --reporter=default --reporter=junit --outputFile=/hikari/private/reports/unit.xml
+    command: cd obsidian_plugin && npm run build && npx vitest run test/unit --reporter=default --reporter=junit --outputFile=/hikari/private/reports/unit.xml
     description: Fast unit tests against the testing helper of yami 0.18.1 (yami-library release). Runs the build first.
   obsidian:
-    command: npx vitest run test/obsidian --reporter=default --reporter=junit --outputFile=/hikari/private/reports/obsidian.xml
+    command: cd obsidian_plugin && npx vitest run test/obsidian --reporter=default --reporter=junit --outputFile=/hikari/private/reports/obsidian.xml
     description: End-to-end tests driving a real Obsidian through playwright, with yami 0.18.1 (yami-library release). Needs Obsidian and live agents.
 tests:
-  test/unit/diff.test.ts: ["[[diff-view]]"]
-  test/unit/hello.test.ts: ["[[vault-modules]]"]
-  test/obsidian/plugin.test.ts: ["[[plugin-setup]]", "[[panel]]"]
+  obsidian_plugin/test/unit/diff.test.ts: ["[[diff-view]]"]
+  obsidian_plugin/test/unit/hello.test.ts: ["[[vault-modules]]"]
+  obsidian_plugin/test/obsidian/plugin.test.ts: ["[[plugin-setup]]", "[[panel]]"]
   "test/obsidian/plugin.test.ts > Yami in Obsidian > lists the wiki's proposals in the panel, approves one, rejects one with a reason, refuses one that no longer fits, and runs the commands": ["[[wiki-proposals]]", "[[diff-view]]", "[[panel]]"]
   "test/obsidian/plugin.test.ts > Yami in Obsidian > walks the wiki by its tags in the navigator, and follows the open note": ["[[wiki-navigator]]", "[[plugin-setup]]"]
   "test/obsidian/plugin.test.ts > Yami in Obsidian > writes the exchange into the note and names the note": ["[[conversations]]"]
