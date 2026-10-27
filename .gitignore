@@ -1,0 +1,5 @@
+# The library loop: its sessions, skill, and agents
+.library-loop/
+.claude/skills/library-loop/
+.claude/agents/library-consumer.md
+.claude/agents/library-creator.md
