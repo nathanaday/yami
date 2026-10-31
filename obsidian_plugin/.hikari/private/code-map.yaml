@@ -1,30 +1,33 @@
 version: 1
 parts:
-  - path: obsidian_plugin/src/
-    description: Plugin source - entry, shared ui helpers, panel and navigator views.
-  - path: obsidian_plugin/test/unit/
+  - path: yami/obsidian_plugin/src/ui.ts
+    description: Shared row and section helpers of the views.
+  - path: yami/obsidian_plugin/test/unit/
     description: Fast unit tests against the yami library's testing helper.
-  - path: obsidian_plugin/test/obsidian/
+  - path: yami/obsidian_plugin/test/obsidian/
     description: End-to-end tests driving a real Obsidian through playwright.
-  - path: obsidian_plugin/test/fixtures/
+  - path: yami/obsidian_plugin/test/fixtures/
     description: Sample vault and the Hello vault module.
+  - path: yami/obsidian_plugin/esbuild.config.mjs
+    description: Build.
 features:
   plugin-setup:
-    code: [obsidian_plugin/src/main.ts, obsidian_plugin/manifest.json, obsidian_plugin/esbuild.config.mjs]
+    code: [yami/obsidian_plugin/src/main.ts, yami/obsidian_plugin/manifest.json]
     notes: onload() calls createYami and registers both views.
+  conversations:
+    code: [yami/obsidian_plugin/src/main.ts]
+    notes: Behavior lives in the library; the plugin gives it the agents.
   panel:
-    code: [obsidian_plugin/src/panel/view.ts, obsidian_plugin/src/panel/panel.css, obsidian_plugin/src/ui.ts]
-    notes: YamiPanel in view.ts, 654 lines.
+    code: [yami/obsidian_plugin/src/panel/view.ts, yami/obsidian_plugin/src/panel/panel.css, yami/obsidian_plugin/src/ui.ts]
+    notes: YamiPanel in view.ts.
   wiki-proposals:
-    code: [obsidian_plugin/src/panel/view.ts]
+    code: [yami/obsidian_plugin/src/panel/view.ts]
+    notes: waiting(), drawChange(), writeRow(), act().
   diff-view:
-    code: [obsidian_plugin/src/panel/diff.ts]
+    code: [yami/obsidian_plugin/src/panel/diff.ts]
     notes: diffLines().
   wiki-navigator:
-    code: [obsidian_plugin/src/navigator/view.ts, obsidian_plugin/src/navigator/navigator.css]
+    code: [yami/obsidian_plugin/src/navigator/view.ts, yami/obsidian_plugin/src/navigator/navigator.css]
   vault-modules:
-    code: [obsidian_plugin/test/fixtures/vault-modules/hello]
+    code: [yami/obsidian_plugin/test/fixtures/vault-modules/hello]
     notes: Behavior lives in the library; the plugin only shows it.
-  conversations:
-    code: [obsidian_plugin/src/main.ts]
-    notes: Behavior lives in the library.
