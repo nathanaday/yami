@@ -1,36 +1,50 @@
 version: 1
 parts:
-  - {path: yami/src/, description: "Library source; one folder per package export."}
-  - {path: yami/src/module/, description: "SDK: modules, runs, review, tools, threads and wiki built-in modules."}
-  - {path: yami/src/agent/, description: "Claude and Codex harness adapters."}
-  - {path: yami/src/document/, description: "Vault documents and text ops, no Obsidian."}
-  - {path: yami/src/wiki/, description: "Wiki index, algorithms, lint, changes, versions."}
-  - {path: yami/src/obsidian/, description: "The only code using Obsidian, CodeMirror and DOM."}
-  - {path: yami/src/testing/, description: "Node test helpers."}
-  - {path: yami/test/unit/, description: "Unit tests (vitest) with fake harnesses in test/fixtures."}
-  - {path: yami/test/live/, description: "Live tests against real harnesses; not run."}
-  - {path: yami/bench/, description: "Wiki search benchmark."}
+  - {path: yami/yami/src/, description: "Library source; one folder per package export."}
+  - {path: yami/yami/src/module/, description: "SDK: modules, runs, review, tools; built-in wiki and threads modules."}
+  - {path: yami/yami/src/agent/, description: "Claude and Codex harness adapters."}
+  - {path: yami/yami/test/unit/, description: "Unit tests (vitest) with fake harnesses in test/fixtures."}
+  - {path: yami/yami/test/fixtures/, description: "Fake claude and codex executables, office fixtures."}
+  - {path: yami/yami/test/live/, description: "Live tests against real harnesses; not run."}
+  - {path: yami/yami/bench/, description: "Wiki search benchmark; needs a vault and a Voyage key; not run."}
 features:
-  module-sdk:
-    code: [yami/src/index.ts, yami/src/module]
-    notes: "YamiModule in module.ts, runs in run.ts/agent-run.ts/fresh-run.ts, review.ts."
-  agents:
-    code: [yami/src/agent]
-  documents:
-    code: [yami/src/document]
-  wiki:
-    code: [yami/src/wiki]
-  wiki-changes-ingest:
-    code: [yami/src/wiki/change.ts, yami/src/wiki/source.ts, yami/src/module/wiki]
-  threads:
-    code: [yami/src/threads, yami/src/module/threads]
-  conversation:
-    code: [yami/src/conversation]
-  obsidian-layer:
-    code: [yami/src/obsidian]
-  collab:
-    code: [yami/src/obsidian/collab]
-  testing:
-    code: [yami/src/testing]
-  build:
-    code: [yami/src/build]
+  define-modules:
+    code: [yami/yami/src/index.ts, yami/yami/src/version.ts, yami/yami/src/module/module.ts, yami/yami/src/module/yami.ts, yami/yami/src/module/starter.ts, yami/yami/src/module/tools.ts, yami/yami/src/module/yami-tools.ts, yami/yami/src/module/links.ts, yami/yami/src/module/base-skill.ts]
+  run-sessions:
+    code: [yami/yami/src/module/run.ts, yami/yami/src/module/agent-run.ts, yami/yami/src/module/fresh-run.ts, yami/yami/src/module/session.ts, yami/yami/src/module/progress.ts, yami/yami/src/module/checks.ts, yami/yami/src/module/colors.ts]
+  review-promises:
+    code: [yami/yami/src/module/review.ts]
+  markdown-modules:
+    code: [yami/yami/src/module/vault-module.ts]
+  vault-documents:
+    code: [yami/yami/src/document/document.ts, yami/yami/src/document/schema.ts, yami/yami/src/document/bases.ts, yami/yami/src/document/vault.ts, yami/yami/src/document/index.ts]
+  text-operations:
+    code: [yami/yami/src/document/text-ops.ts]
+  conversation-notes:
+    code: [yami/yami/src/conversation]
+  agent-harnesses:
+    code: [yami/yami/src/agent]
+  approve-agent-actions:
+    code: [yami/yami/src/agent/approval.ts]
+  wiki-search:
+    code: [yami/yami/src/wiki/wiki.ts, yami/yami/src/wiki/algorithms, yami/yami/src/wiki/bm25.ts, yami/yami/src/wiki/chunks.ts, yami/yami/src/wiki/embed.ts, yami/yami/src/wiki/folders.ts, yami/yami/src/wiki/index.ts, yami/yami/src/wiki/lint.ts, yami/yami/src/wiki/match.ts, yami/yami/src/wiki/tags.ts, yami/yami/src/wiki/tokens.ts]
+  wiki-changes:
+    code: [yami/yami/src/wiki/change.ts, yami/yami/src/wiki/versions.ts]
+  wiki-ingest:
+    code: [yami/yami/src/module/wiki, yami/yami/src/wiki/source.ts, yami/yami/src/wiki/office.ts]
+  threads-module:
+    code: [yami/yami/src/threads, yami/yami/src/module/threads]
+  create-yami:
+    code: [yami/yami/src/obsidian/yami.ts, yami/yami/src/obsidian/index.ts, yami/yami/src/obsidian/vault.ts, yami/yami/src/obsidian/agents.ts, yami/yami/src/obsidian/commands.ts, yami/yami/src/obsidian/discovery.ts, yami/yami/src/obsidian/change-feed.ts, yami/yami/src/obsidian/note-sessions.ts, yami/yami/src/obsidian/colors.ts, yami/yami/src/obsidian/icons.ts, yami/yami/src/obsidian/styles.css]
+  conversation-in-obsidian:
+    code: [yami/yami/src/obsidian/conversation]
+  agent-prompts:
+    code: [yami/yami/src/obsidian/prompts]
+  shared-documents:
+    code: [yami/yami/src/obsidian/collab]
+  wiki-in-obsidian:
+    code: [yami/yami/src/obsidian/wiki]
+  test-modules-in-node:
+    code: [yami/yami/src/testing]
+  plugin-build:
+    code: [yami/yami/src/build]
