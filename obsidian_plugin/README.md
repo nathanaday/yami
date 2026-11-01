@@ -4,13 +4,13 @@ The Yami showcase plugin, and the test bed of the `yami` library. It runs conver
 
 ## Develop
 
-1. Install the dependencies. This step also builds `../yami` and links it into `node_modules`:
+1. Install the dependencies. This installs the release of `yami` that `package.json` names:
 
    ```sh
    npm install
    ```
 
-   When you change `yami`, rebuild it with `npm run build` in that folder, or run `npm run dev` there to rebuild on each change.
+   To take a new version of `yami`, change its URL in `package.json` and run `npm install`.
 
 2. Link this repository into the plugins folder of a test vault:
 
