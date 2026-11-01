@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.0 · peer dependencies
+
+The package declares what a host must provide.
+
+### Changed
+- `obsidian`, `@codemirror/state`, `@codemirror/view`, and `esbuild` are `peerDependencies`, at the ranges the library builds with; they stay dev dependencies for its own build and tests.
+- `CHANGELOG.md` ships in the package.
+- `npm run build` removes `dist/` first, so the output of a removed module cannot ship.
+
 ## 0.18.1 · the fix of a flat form
 
 A problem of a form in a file of its own, where a folder belongs, gives a fix that does not duplicate a form.

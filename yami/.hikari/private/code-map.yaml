@@ -7,6 +7,10 @@ parts:
   - {path: yami/yami/test/fixtures/, description: "Fake claude and codex executables, office fixtures."}
   - {path: yami/yami/test/live/, description: "Live tests against real harnesses; not run."}
   - {path: yami/yami/bench/, description: "Wiki search benchmark; needs a vault and a Voyage key; not run."}
+  - {path: yami/yami/package.json, description: "Package manifest: entries, peerDependencies, files, build script."}
+  - {path: yami/yami/CHANGELOG.md, description: "Changelog; ships in the package."}
+  - {path: yami/yami/package-lock.json, description: "Lockfile of the library build."}
+  - {path: yami/yami/.gitignore, description: "Ignores node_modules, dist, test output, and packed tarballs."}
 features:
   define-modules:
     code: [yami/yami/src/index.ts, yami/yami/src/version.ts, yami/yami/src/module/module.ts, yami/yami/src/module/yami.ts, yami/yami/src/module/starter.ts, yami/yami/src/module/tools.ts, yami/yami/src/module/yami-tools.ts, yami/yami/src/module/links.ts, yami/yami/src/module/base-skill.ts]
