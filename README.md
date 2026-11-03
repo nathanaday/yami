@@ -4,7 +4,7 @@ Yami is a TypeScript library for building AI agents into Obsidian plugins. It ke
 
 ![A conversation with Claude in a note, beside the Yami panel and its modules](docs/conversation.png)
 
-Yami replaces [Almagest](https://github.com/nathanaday/almagest). Almagest shipped finished features, such as a librarian and journals. Yami ships the parts to build features like those yourself: a library to build on, and modules you write in markdown. Two modules come built in, the wiki and threads, and each has a plugin of its own: [Yami Wiki](plugins/yami-wiki/) and [Yami Threads](plugins/yami-threads/). [Duet](https://github.com/nathanaday/obsidian-duet) is the conversation plugin.
+Yami replaces [Almagest](https://github.com/nathanaday/almagest). Almagest shipped finished features, such as a librarian and journals. Yami ships the parts to build features like those yourself: a library to build on, and modules you write in markdown. Two modules come built in, the wiki and threads, and each has a plugin of its own: [Yami Wiki](https://github.com/nathanaday/yami-wiki) and [Yami Threads](https://github.com/nathanaday/yami-threads). [Duet](https://github.com/nathanaday/obsidian-duet) is the conversation plugin.
 
 ## How It Works
 
@@ -119,17 +119,16 @@ Each plugin does one thing, and the three can share a vault:
 | Plugin | What it does | Where to get it |
 | --- | --- | --- |
 | [Duet](https://github.com/nathanaday/obsidian-duet) | Conversations with Claude Code or Codex in your notes: mentions, conversation notes, live edits | The community directory |
-| [Yami Wiki](plugins/yami-wiki/) | The wiki: ingest, approval, checkouts, search, the navigator | The community directory (submission pending); until then, a [release](https://github.com/nathanaday/yami/releases) |
-| [Yami Threads](plugins/yami-threads/) | Threads: validated work on repositories, and your own flows | A [release](https://github.com/nathanaday/yami/releases), or a build |
+| [Yami Wiki](https://github.com/nathanaday/yami-wiki) | The wiki: ingest, approval, checkouts, search, the navigator | The community directory (submission pending); until then, a [release](https://github.com/nathanaday/yami-wiki/releases) |
+| [Yami Threads](https://github.com/nathanaday/yami-threads) | Threads: validated work on repositories, and your own flows | A [release](https://github.com/nathanaday/yami-threads/releases), or a build |
 
 ## Getting Started
 
 You need Obsidian on the desktop, and Claude Code or Codex installed and signed in. Install a plugin from the table above; each README says how. To run one from a checkout:
 
 ```sh
-git clone https://github.com/nathanaday/yami.git
-cd yami/yami && npm install && npm run build       # the library
-cd ../plugins/yami-wiki && npm install
+git clone https://github.com/nathanaday/yami-wiki.git
+cd yami-wiki && npm install                        # takes the library from its release
 npm run install:vault -- /path/to/vault            # builds, and copies the plugin into the vault
 ```
 
@@ -140,7 +139,7 @@ In Obsidian, turn on **Yami Wiki** under **Settings → Community plugins**, the
 | Folder | What it holds |
 | --- | --- |
 | [`yami/`](yami/) | The library |
-| [`plugins/yami-wiki/`](plugins/yami-wiki/) | The wiki plugin |
-| [`plugins/yami-threads/`](plugins/yami-threads/) | The threads plugin |
 | [`design.md`](design.md) | The design rules that the code keeps |
 | [`docs/releasing.md`](docs/releasing.md) | How each repository is checked and released, and how a plugin gets into a vault |
+
+The plugins have repositories of their own: [yami-wiki](https://github.com/nathanaday/yami-wiki), [yami-threads](https://github.com/nathanaday/yami-threads), and [obsidian-duet](https://github.com/nathanaday/obsidian-duet).

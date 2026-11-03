@@ -1,5 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "types": ["node", "yami/markdown"], "allowImportingTsExtensions": true },
-  "include": ["test"]
-}
