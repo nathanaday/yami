@@ -20,6 +20,10 @@ describe("conversation notes", () => {
     expect(note).toBe("---\ntype: conversation\nagent: claude\nmodel: opus\nstatus: active\ncreated: 2026-10-05 14:02\ncssclasses:\n  - yami-conversation\n---\n");
   });
 
+  it("records the plugin whose Yami runs the conversation, after the agent", () => {
+    expect(newConversation({ agent: "claude", plugin: "duet", status: "active", created: "now" })).toContain("\nagent: claude\nplugin: duet\n");
+  });
+
   it("links the module session that the conversation runs", () => {
     expect(newConversation({ agent: "claude", status: "active", created: "now", module: "[[hello/cheerful|cheerful]]" })).toContain('\nmodule: "[[hello/cheerful|cheerful]]"\n');
   });

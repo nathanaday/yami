@@ -37,6 +37,7 @@ vi.mock("obsidian", () => {
   }
   return {
     Modal: Base,
+    ItemView: Base,
     SuggestModal: Base,
     FuzzySuggestModal: Base,
     Scope: Base,
@@ -187,6 +188,16 @@ describe("createYami", () => {
     const without = await build({ threads: false });
     expect(without.modules.map((m) => m.id)).toEqual(["wiki"]);
     expect([...fake!.commands.keys()].filter((id) => id.startsWith("yami-threads-"))).toEqual([]);
+  });
+
+  it("holds the wiki module and its commands, unless the plugin leaves it out", async () => {
+    const yami = await build();
+    expect([...fake!.commands.keys()]).toContain("yami-wiki-search");
+    await fake!.unload();
+    const without = await build({ wikiModule: false });
+    expect(without.modules.map((m) => m.id)).toEqual(["threads"]);
+    expect([...fake!.commands.keys()].filter((id) => id.startsWith("yami-wiki-"))).toEqual([]);
+    expect(without.wiki).toBeDefined();
   });
 
   it("builds with no agents, and the ribbon says so", async () => {

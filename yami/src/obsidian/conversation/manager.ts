@@ -18,6 +18,19 @@ export interface ConversationOptions {
   onActivity: () => void;
   /** What a conversation note says when no agent is left. Default: `Yami has no agents. Add one in its settings.` */
   noAgents?: string;
+  /**
+   * The id of the plugin, which the notes it creates record as `plugin`, so that two Yami plugins in one
+   * vault each keep their own conversations. Without it, the manager takes every conversation note.
+   */
+  plugin?: string;
+}
+
+/** The ids of the plugins whose managers are installed in this window, in the order they came. */
+const HOSTS_KEY = "__yamiConversationHosts";
+
+function hosts(): string[] {
+  const shared = globalThis as unknown as Record<string, string[] | undefined>;
+  return (shared[HOSTS_KEY] ??= []);
 }
 
 export interface CreateOptions {
@@ -55,6 +68,14 @@ export class ConversationManager {
   ) {}
 
   install(plugin: Plugin): void {
+    if (this.options.plugin) {
+      hosts().push(this.options.plugin);
+      plugin.register(() => {
+        const list = hosts();
+        const at = list.indexOf(this.options.plugin!);
+        if (at !== -1) list.splice(at, 1);
+      });
+    }
     const sync = () => this.sync();
     plugin.registerEvent(this.app.workspace.on("layout-change", sync));
     plugin.registerEvent(this.app.workspace.on("file-open", sync));
@@ -64,8 +85,20 @@ export class ConversationManager {
     this.app.workspace.onLayoutReady(sync);
   }
 
+  /**
+   * Whether a note is a conversation of this manager: a conversation note whose `plugin` names this
+   * plugin, or one with no `plugin` while this plugin's manager was the first installed in the window. So
+   * two Yami plugins in one vault each give a message box to their own notes, and a note from before the
+   * property goes to the first plugin, as it did when it was the only one. A manager with no plugin id
+   * takes every conversation note.
+   */
   isConversation(file: TFile | null | undefined): file is TFile {
-    return Boolean(file && this.app.metadataCache.getFileCache(file)?.frontmatter?.type === "conversation");
+    const properties = file && this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (properties?.type !== "conversation") return false;
+    const mine = this.options.plugin;
+    if (!mine) return true;
+    const owner = properties.plugin;
+    return owner === undefined || owner === null ? hosts()[0] === mine : owner === mine;
   }
 
   /** The controllers of conversations that are working now. */
@@ -94,6 +127,7 @@ export class ConversationManager {
         path,
         newConversation({
           agent: agent.name,
+          plugin: this.options.plugin,
           model: agent.agent.preferences.model || undefined,
           effort: agent.agent.preferences.effort || undefined,
           status: "active",

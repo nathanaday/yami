@@ -6,6 +6,7 @@ import { CONVERSATION_FOLDER, FileConversations, type Conversation, type Convers
 import { basename, checkSection, link, readDocument, writeDocument, type Document } from "../document/document.js";
 import { SESSION, timestamp, validate, withDefaults, type FormKind } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
+import { WIKI } from "../wiki/folders.js";
 import { captureSource, captureSources, isAbsolute, readSources, type OutsideFile } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
 import { installBaseSkill, YAMI_ID, YAMI_SKILLS } from "./base-skill.js";
@@ -26,6 +27,12 @@ export interface YamiOptions {
   agents?: Agent[];
   /** The plugin's modules. The built-in modules come first: the wiki, then threads. The vault modules come after these. */
   modules?: YamiModule[];
+  /**
+   * Whether the Yami holds the built-in wiki module: ingest and checkout sessions, change plans, the wiki
+   * tools, and the files under `internal/wiki/`. Default true. With false, the vault still has its wiki
+   * index, `yami.wiki`, which the checks and the links use, and a module of the host can take the id `wiki`.
+   */
+  wikiModule?: boolean;
   /** Whether the Yami holds the built-in threads module. Default true. With false, a module of the host can take the id `threads`. */
   threads?: boolean;
   /** Options of the vault's wiki. The conversation folder always stays out of its index. */
@@ -54,6 +61,11 @@ async function filesOutside(folder: string): Promise<string[]> {
 /** The id of the built-in threads module. */
 const THREADS = "threads";
 
+/** What a host reads when it leaves a built-in module out and then asks for it. */
+function builtInLeftOut(id: string, option: string): Error {
+  return new Error(`The id ${id} is the built-in ${id} module's. Give the module another id, or leave the built-in module out with the option ${option}: false.`);
+}
+
 export type SessionListener = (session: Session, status: SessionStatus) => void;
 
 export interface IngestOptions {
@@ -80,7 +92,8 @@ export class Yami {
   readonly #retired = new Set<Agent>();
   readonly #conversationFolder: string | (() => string);
   readonly #conversations: Conversations;
-  readonly #wikiModule = new WikiModule();
+  /** The built-in wiki module, unless the host left it out. */
+  readonly #wikiModule: WikiModule | undefined;
   readonly #code: YamiModule[];
   #vault: VaultModule[] = [];
   #problems: ModuleProblem[] = [];
@@ -99,10 +112,13 @@ export class Yami {
     this.#conversationFolder = options.conversationFolder ?? CONVERSATION_FOLDER;
     const exclude = options.wiki?.exclude;
     this.wiki = new Wiki(this.vault, { ...options.wiki, exclude: () => [this.conversationFolder, ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] });
+    const wikiModule = options.wikiModule ?? true;
     const threads = options.threads ?? true;
     const own = options.modules ?? [];
-    if (threads && own.some((module) => module.id === THREADS)) throw new Error(`The id ${THREADS} is the built-in threads module's. Give the module another id, or leave the built-in module out with the option threads: false.`);
-    this.#code = [this.#wikiModule, ...(threads ? [new ThreadsModule()] : []), ...own];
+    if (wikiModule && own.some((module) => module.id === WIKI)) throw builtInLeftOut(WIKI, "wikiModule");
+    if (threads && own.some((module) => module.id === THREADS)) throw builtInLeftOut(THREADS, "threads");
+    this.#wikiModule = wikiModule ? new WikiModule() : undefined;
+    this.#code = [...(this.#wikiModule ? [this.#wikiModule] : []), ...(threads ? [new ThreadsModule()] : []), ...own];
     const ids = new Set<string>();
     for (const module of this.#code) {
       if (module.id === YAMI_ID) throw new Error(`The id ${YAMI_ID} is Yami's own: give the module another id.`);
@@ -486,9 +502,12 @@ export class Yami {
    * Captures files as sources of the wiki, and creates an ingest session that links them, for an agent to
    * absorb them into topics. A file is named by its vault path, or by its absolute path: one inside the
    * vault counts as its vault path, and one outside is read from the disk. A file whose latest source holds
-   * its content keeps that source. It throws, and creates no session, for a file that is not there.
+   * its content keeps that source. It throws, and creates no session, for a file that is not there, and in
+   * a Yami with no wiki module.
    */
   async ingest(options: IngestOptions): Promise<Session> {
+    const wikiModule = this.#wikiModule;
+    if (!wikiModule) throw new Error("This Yami has no wiki module, so nothing can ingest: the host left it out with the option wikiModule: false.");
     let sources: string[];
     let what: string;
     const folder = options.folder === undefined ? undefined : this.#vaultPath(options.folder);
@@ -507,7 +526,7 @@ export class Yami {
       const first = basename(sources[0]!).replace(/ \(source( \d+)?\)$/, "");
       what = options.folder ? `${basename(options.folder.replace(/[\\/]$/, ""))} (${sources.length} files)` : files.length === 1 ? first : `${first} and ${files.length - 1} more`;
     }
-    return this.#wikiModule.ingest.create({
+    return wikiModule.ingest.create({
       name: options.name ?? `Ingest ${what} ${timestamp().slice(0, 10)}`,
       fields: { sources: sources.map(link) },
       add: options.policies,

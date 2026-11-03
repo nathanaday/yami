@@ -148,6 +148,7 @@ function fakeApp() {
   });
   const app = {
     vault: {
+      on: () => ({}),
       getAbstractFileByPath: (path: string) => files.get(path) ?? (folders.has(path) ? {} : null),
       getFileByPath: (path: string) => files.get(path) ?? null,
       getFolderByPath: (path: string) => (folders.has(path) ? { path } : null),
@@ -194,6 +195,8 @@ function fakeApp() {
     workspace: {
       getLeaf,
       iterateAllLeaves: (visit: (leaf: { view: MarkdownView }) => void) => leaves.forEach(visit),
+      on: () => ({}),
+      onLayoutReady: () => undefined,
     },
   };
   return { app, text, folders, onDisk, getLeaf };
@@ -248,6 +251,62 @@ describe("ConversationManager", () => {
     await flush();
     return { file, text: () => fake.text.get(file)! };
   };
+
+  describe("two Yami plugins in one vault", () => {
+    const hosts = () => (globalThis as unknown as Record<string, string[]>).__yamiConversationHosts;
+    const plugin = () => {
+      const stops: (() => void)[] = [];
+      return { registerEvent: () => undefined, register: (stop: () => void) => stops.push(stop), unload: () => stops.splice(0).forEach((stop) => stop()) };
+    };
+    const owned = (plugin: string) =>
+      new ConversationManager(fake.app as never, fakeHub(fake.text) as never, {} as never, {
+        agents: () => agents,
+        folder: () => "conversations",
+        animate: () => false,
+        idleMinutes: () => 15,
+        onActivity: () => undefined,
+        plugin,
+      });
+
+    afterEach(() => {
+      hosts()?.splice(0);
+    });
+
+    it("records its plugin in each note it creates, and takes the notes of its plugin only", async () => {
+      const duet = owned("duet");
+      const wiki = owned("yami-wiki");
+      const [first, second] = [plugin(), plugin()];
+      duet.install(first as never);
+      wiki.install(second as never);
+      expect(hosts()).toEqual(["duet", "yami-wiki"]);
+      const file = await wiki.start({ message: "Hi" });
+      expect(fake.text.get(file)).toContain("\nagent: claude\nplugin: yami-wiki\n");
+      expect(wiki.isConversation(file)).toBe(true);
+      expect(duet.isConversation(file)).toBe(false);
+      expect(duet.status(file.path)).toBe("none");
+      await wiki.destroy();
+      await duet.destroy();
+    });
+
+    it("gives a note with no plugin, from before the property, to the first plugin that was installed", async () => {
+      const duet = owned("duet");
+      const wiki = owned("yami-wiki");
+      const [first, second] = [plugin(), plugin()];
+      duet.install(first as never);
+      wiki.install(second as never);
+      const file = await manager.start({ message: "Hi" });
+      expect(fake.text.get(file)).not.toContain("plugin:");
+      expect(manager.isConversation(file)).toBe(true);
+      expect(duet.isConversation(file)).toBe(true);
+      expect(wiki.isConversation(file)).toBe(false);
+      // When the first plugin unloads, the next one takes those notes.
+      first.unload();
+      expect(hosts()).toEqual(["yami-wiki"]);
+      expect(wiki.isConversation(file)).toBe(true);
+      await wiki.destroy();
+      await duet.destroy();
+    });
+  });
 
   it("creates the note in the conversation folder, named after the message, and sends the message", async () => {
     const { file, text } = await start({ message: "Summarize [[Ideas]] please", open: false });

@@ -4,7 +4,7 @@ Yami is a TypeScript library for building AI agents into Obsidian plugins. It ke
 
 ![A conversation with Claude in a note, beside the Yami panel and its modules](docs/conversation.png)
 
-Yami replaces [Almagest](https://github.com/nathanaday/almagest). Almagest shipped finished features, such as a librarian and journals. Yami ships the parts to build features like those yourself: a library to build on, and modules you write in markdown. Two modules come built in: a wiki, and threads for work on your repositories.
+Yami replaces [Almagest](https://github.com/nathanaday/almagest). Almagest shipped finished features, such as a librarian and journals. Yami ships the parts to build features like those yourself: a library to build on, and modules you write in markdown. Two modules come built in, the wiki and threads, and each has a plugin of its own: [Yami Wiki](plugins/yami-wiki/) and [Yami Threads](plugins/yami-threads/). [Duet](https://github.com/nathanaday/obsidian-duet) is the conversation plugin.
 
 ## How It Works
 
@@ -112,24 +112,35 @@ Nothing in the wiki changes until you approve the plan. The Yami panel shows wha
 
 A conversation with Claude Code or Codex is a note with a message box. The agent edits the notes you have open with its own cursor beside yours and leaves a record of each reply and tool call. If you want, it asks before it changes a file or runs a command. Your own Claude Code and Codex setup applies: your instructions, skills, plugins, MCP servers, and permission rules.
 
+## The Plugins
+
+Each plugin does one thing, and the three can share a vault:
+
+| Plugin | What it does | Where to get it |
+| --- | --- | --- |
+| [Duet](https://github.com/nathanaday/obsidian-duet) | Conversations with Claude Code or Codex in your notes: mentions, conversation notes, live edits | The community directory |
+| [Yami Wiki](plugins/yami-wiki/) | The wiki: ingest, approval, checkouts, search, the navigator | The community directory (submission pending); until then, a [release](https://github.com/nathanaday/yami/releases) |
+| [Yami Threads](plugins/yami-threads/) | Threads: validated work on repositories, and your own flows | A [release](https://github.com/nathanaday/yami/releases), or a build |
+
 ## Getting Started
 
-You need Obsidian on the desktop, and Claude Code or Codex installed and signed in.
+You need Obsidian on the desktop, and Claude Code or Codex installed and signed in. Install a plugin from the table above; each README says how. To run one from a checkout:
 
 ```sh
 git clone https://github.com/nathanaday/yami.git
-cd yami/obsidian_plugin
-npm install
-npm run build
-ln -s "$PWD" /path/to/vault/.obsidian/plugins/yami
+cd yami/yami && npm install && npm run build       # the library
+cd ../plugins/yami-wiki && npm install
+npm run install:vault -- /path/to/vault            # builds, and copies the plugin into the vault
 ```
 
-In Obsidian, turn on **Yami** under **Settings → Community plugins**, then run **Open the Yami panel** from the command palette. To build your own plugin on Yami, start from the [library README](yami/README.md).
+In Obsidian, turn on **Yami Wiki** under **Settings → Community plugins**, then run **Open the wiki panel** from the command palette. To build your own plugin on Yami, start from the [library README](yami/README.md).
 
 ## The Repository
 
 | Folder | What it holds |
 | --- | --- |
 | [`yami/`](yami/) | The library |
-| [`obsidian_plugin/`](obsidian_plugin/) | The showcase plugin, which puts each part of the library to work |
+| [`plugins/yami-wiki/`](plugins/yami-wiki/) | The wiki plugin |
+| [`plugins/yami-threads/`](plugins/yami-threads/) | The threads plugin |
 | [`design.md`](design.md) | The design rules that the code keeps |
+| [`docs/releasing.md`](docs/releasing.md) | How each repository is checked and released, and how a plugin gets into a vault |

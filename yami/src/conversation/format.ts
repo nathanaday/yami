@@ -12,6 +12,8 @@ const OUTPUT_LINES = 24;
 export interface ConversationProperties {
   /** The name of the agent, as the host registered it. */
   agent: string;
+  /** The id of the plugin whose Yami runs the conversation, when two Yami plugins share a vault. */
+  plugin?: string;
   model?: string;
   effort?: string;
   session?: string;
@@ -28,6 +30,7 @@ export function newConversation(properties: ConversationProperties): string {
     "---",
     "type: conversation",
     `agent: ${properties.agent}`,
+    ...(properties.plugin ? [`plugin: ${properties.plugin}`] : []),
     ...(properties.model ? [`model: ${properties.model}`] : []),
     ...(properties.effort ? [`effort: ${properties.effort}`] : []),
     ...(properties.approval ? [`approval: ${properties.approval}`] : []),

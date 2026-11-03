@@ -187,7 +187,7 @@ describe("a module's files", () => {
             })(),
           ],
         }),
-    ).toThrow("Two modules have the id wiki.");
+    ).toThrow("The id wiki is the built-in wiki module's. Give the module another id, or leave the built-in module out with the option wikiModule: false.");
   });
 
   it("knows the vault only once a Yami has it, and belongs to one Yami", () => {

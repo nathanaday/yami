@@ -121,6 +121,8 @@ export const CONVERSATION: Schema = {
   type: typed("conversation"),
   /** The name of the agent, as the host registered it. */
   agent: { type: "text", required: true },
+  /** The id of the plugin whose Yami runs the conversation. A note with none belongs to the first Yami plugin of the window. */
+  plugin: { type: "text" },
   model: { type: "text" },
   effort: { type: "text" },
   approval: { type: "text", values: ["ask", "accept-edits", "plan", "auto", "sandbox"] },

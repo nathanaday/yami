@@ -1,0 +1,55 @@
+# The checks of every change: the library's build and unit tests, then each plugin's type check,
+# lint, unit tests, and build against the library at this commit. Runs on each push to main and on
+# each pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  library:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: yami
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: yami/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: [yami-wiki, yami-threads]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            yami/package-lock.json
+            plugins/${{ matrix.plugin }}/package-lock.json
+      # The plugin takes yami from ../../yami, so the library is built first.
+      - run: npm ci && npm run build
+        working-directory: yami
+      - run: npm ci
+        working-directory: plugins/${{ matrix.plugin }}
+      - run: npm run typecheck
+        working-directory: plugins/${{ matrix.plugin }}
+      - run: npm run lint
+        working-directory: plugins/${{ matrix.plugin }}
+      - run: npm test
+        working-directory: plugins/${{ matrix.plugin }}
+      - run: npm run build
+        working-directory: plugins/${{ matrix.plugin }}

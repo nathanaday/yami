@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.20.0 · one plugin, one thing
+
+The library holds the parts that the plugins share, and a plugin takes only the built-in module it is for. Two Yami plugins can share a vault: each keeps its own conversation notes.
+
+### Breaking
+- **The showcase plugin is gone.** Its two views are the library's: `YamiPanel` (`PANEL_VIEW`) and `WikiNavigator` (`NAVIGATOR_VIEW`) in `yami/obsidian`, with `revealView(app, type)`, the row helpers `row`, `section`, `icon`, and `activates`, and `diffLines` of the change page. Their stylesheet is in the library's `styles.css`, which `copyStyles` ships. The plugins `yami-wiki` and `yami-threads` register them; see the repository README.
+- **A conversation note records its plugin.** `newConversation` takes `plugin`, the id of the plugin whose Yami runs the conversation, and writes it after `agent`; `CONVERSATION` has the field. `createYami` gives the manager the plugin's id, so a Yami plugin takes only the conversation notes whose `plugin` names it, and a note with none goes to the plugin whose manager was installed first in the window. Before, every Yami plugin gave every conversation note a message box. A `ConversationManager` built with no `plugin` option still takes every conversation note. `ConversationOptions.plugin` is the option. Migrate: nothing, for a vault with one Yami plugin; with two, add `plugin: <id>` to a note that the wrong plugin took.
+- **A module of a host cannot take the id `wiki`** while the built-in wiki module is in: it throws `The id wiki is the built-in wiki module's. Give the module another id, or leave the built-in module out with the option wikiModule: false.`, as a module named `threads` does.
+
+### Added
+- `wikiModule: false` on `Yami`, `createYami`, and `testYami` leaves the built-in wiki module out: no wiki sessions, tools, skills, files, ledger, color, or commands, while `yami.wiki`, the index, stays for the checks, the links, and a host's own use. `yami.ingest` then throws `This Yami has no wiki module, so nothing can ingest: …`. A plugin that does something other than the wiki leaves it to the plugin that does.
+- The wiki commands follow the wiki module: `commands: { wiki: true }` adds none without it.
+- `YamiPanel` takes `{ name, icon }`, so a plugin names the view after itself. Without the wiki module the panel shows no Waiting for approval section.
+
 ## 0.19.0 · peer dependencies
 
 The package declares what a host must provide.

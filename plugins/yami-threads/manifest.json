@@ -1,0 +1,10 @@
+{
+  "id": "yami-threads",
+  "name": "Yami Threads",
+  "version": "0.1.0",
+  "minAppVersion": "1.13.0",
+  "description": "Validated work on your repositories from Obsidian: a thread is one note that carries an idea to a spec, a plan, the work, and a validation by a fresh agent.",
+  "author": "nathanaday",
+  "authorUrl": "https://github.com/nathanaday",
+  "isDesktopOnly": true
+}

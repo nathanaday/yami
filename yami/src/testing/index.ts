@@ -28,6 +28,8 @@ export interface TestYamiOptions {
   /** The agent's first turns. `agent.queue` adds more. */
   turns?: Turn[];
   wiki?: WikiOptions;
+  /** Whether the Yami holds the built-in wiki module, as the option of `Yami`. Default true. */
+  wikiModule?: boolean;
   /** Whether the Yami holds the built-in threads module, as the option of `Yami`. Default true. */
   threads?: boolean;
   /**
@@ -58,7 +60,7 @@ export async function testYami(options: TestYamiOptions = {}): Promise<TestYami>
   }
   const vault = new FsVault(root);
   const agent = new ScriptedAgent(options.turns);
-  const yami = new Yami({ vault, agents: [agent], modules: options.modules, wiki: options.wiki, threads: options.threads });
+  const yami = new Yami({ vault, agents: [agent], modules: options.modules, wiki: options.wiki, wikiModule: options.wikiModule, threads: options.threads });
   await yami.enable();
   return {
     yami,

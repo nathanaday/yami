@@ -1,0 +1,24 @@
+# This workflow runs once this folder is a repository of its own (see docs/releasing.md in the yami
+# repository). Inside the yami repository, GitHub ignores it, and the root workflows check the plugin.
+# The checks of every change: on each push to main and on each pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
