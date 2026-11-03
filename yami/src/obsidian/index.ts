@@ -24,3 +24,7 @@ export { WikiCompareModal } from "./wiki/compare-modal.js";
 export { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";
 export { type AskOptions, ignoredPaths, modeOf, type OpenMode, openNote, pickOne, watchWiki } from "./wiki/open.js";
 export { WikiSearchModal, type WikiSearchOptions } from "./wiki/search-modal.js";
+export { diffLines, CONTEXT as DIFF_CONTEXT, type DiffLine, type Part as DiffPart } from "./views/diff.js";
+export { NAVIGATOR_VIEW, WikiNavigator } from "./views/navigator.js";
+export { PANEL_VIEW, revealView, YamiPanel, type PanelOptions } from "./views/panel.js";
+export { activates, icon, row, section } from "./views/ui.js";

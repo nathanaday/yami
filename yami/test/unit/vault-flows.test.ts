@@ -237,6 +237,22 @@ describe("the built-in threads module", () => {
     expect(without.tools().tools.map((tool) => tool.name)).not.toContain("threads_stub");
   });
 
+  it("leaves the wiki module out with one option, and the vault keeps its wiki index", async () => {
+    const vault = new FsVault("/tmp/yami-none");
+    class Own extends Hello {
+      readonly id = "wiki";
+    }
+    expect(() => new Yami({ vault, modules: [new Own()] })).toThrow("The id wiki is the built-in wiki module's. Give the module another id, or leave the built-in module out with the option wikiModule: false.");
+    const own = new Own();
+    const without = new Yami({ vault, modules: [own], wikiModule: false, threads: false });
+    expect(without.modules.map((m) => m.id)).toEqual(["wiki"]);
+    expect(without.module("wiki")).toBe(own);
+    expect(without.tools().tools.map((tool) => tool.name)).not.toContain("wiki_search");
+    expect(without.wiki).toBeDefined();
+    await expect(new Yami({ vault, wikiModule: false }).ingest({ files: ["a.md"] })).rejects.toThrow("This Yami has no wiki module, so nothing can ingest: the host left it out with the option wikiModule: false.");
+    expect(new Yami({ vault, wikiModule: false }).modules.map((m) => m.id)).toEqual(["threads"]);
+  });
+
   it("keeps the person's own flow sessions in threads/ off the board, and they are no threads", async () => {
     t = await testYami();
     const threads = t.yami.module("threads") as ThreadsModule;

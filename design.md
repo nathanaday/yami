@@ -8,14 +8,14 @@ Yami is a Typescript library designed to enable agents in Obsidian plugins. Yami
 
 An agent reads the session document to know what to do, how, and how its work is checked. Everything else can be customized around it in the plugin: by importing and using the Yami library, you can create your own module that carries it's own set of MCP tools, skills, and front end UI surfaces. Yami exposes an API that makes it easy to work with these session entities, manage session state, and manage the agents as they run. Yami also has a built in set of wiki tools to enable an obsidian-based LLM wiki directly in the vault, so all custom modules and agent flows and use the vault as a knowledge source. Yami has two built-in modules: the wiki, and threads, which holds validated work on repositories and the person's own flows.
 
-This repository holds the library, `yami/`, and a showcase plugin, `obsidian_plugin/`. The showcase shows what a plugin built on Yami can do. The library is the product; the showcase is an example of its use.
+This repository holds the library, `yami/`, and two plugins built on it, `plugins/yami-wiki/` and `plugins/yami-threads/`. Each plugin does one thing: the wiki plugin holds the wiki, the threads plugin holds threads. The library is the product; a plugin is its choices and its tests. A third plugin, Duet (`obsidian-duet`, its own repository), holds the conversations and no module.
 
 ## Terms
 
 | Term | Meaning |
 | --- | --- |
 | Vault | The Obsidian vault. The highest context, and the working directory of every agent. |
-| Plugin | An Obsidian plugin built on Yami. It chooses the agents and the modules. `obsidian_plugin` is the showcase. |
+| Plugin | An Obsidian plugin built on Yami. It chooses the agents and the modules, and does one thing: `yami-wiki` the wiki, `yami-threads` threads, Duet the conversations. |
 | Host | The program that builds a Yami and runs its sessions: a plugin, or a test. |
 | Yami | The runtime of one vault: its modules, its wiki, its agents, and the handles of its sessions. A plugin builds one with `createYami`. |
 | Module | One agent workflow in the vault, as a subclass of `YamiModule`: its documents, flows, tools, checks, and actions. |
@@ -44,17 +44,18 @@ This repository holds the library, `yami/`, and a showcase plugin, `obsidian_plu
 | Snapshot | One version of the knowledge base: a document the ledger lists, and a compressed archive of every note beside it. |
 | Thread | One piece of validated work on repositories: the threads module's session. |
 | Checkout | A reading list with copies of wiki documents: a session of the wiki's `checkout` flow. |
-| Built-in module | A module that `yami` holds and every Yami has: the wiki, and threads, which a host can leave out. |
+| Built-in module | A module that `yami` holds: the wiki, and threads. A host leaves out the one it is not for. |
 
 ## The library and the plugin
 
 1. **The library holds every feature.** The session runtime, the loop, the checks, the wiki, the built-in modules (the wiki and threads), the conversation notes, the shared documents, the commands for sessions, conversations, and the wiki, the folder colors, the build options, and the test kit are in `yami`. A plugin gets them from `createYami`.
-2. **A plugin holds its choices, and may hold its own views.** It chooses its agents and its modules, and gives them to `createYami`. A module is a workflow: its documents, flows, tools, checks, and actions. A view, such as the showcase's panel, holds layout and look only: what it shows and what it does come from the public API, such as `yami.summaries`, `session.details`, `session.acts`, `module.acts`, `wiki.neighbors`, `wiki.tag`, the change API (the proposals, their details, approve, and reject), `onSessionsChange`, `onWikiChange`, `yami.setAgents`, `yami.addWork`, `yami.noteSessions`, and `hub.observe`. A plugin writes no other code for Yami.
+2. **A plugin holds its choices, and does one thing.** It chooses its agents and its modules, and gives them to `createYami`, with the built-in module it is not for left out (`wikiModule: false`, `threads: false`) and the command groups another plugin provides turned off. A module is a workflow: its documents, flows, tools, checks, and actions. A view holds layout and look only: what it shows and what it does come from the public API, such as `yami.summaries`, `session.details`, `session.acts`, `module.acts`, `wiki.neighbors`, `wiki.tag`, the change API (the proposals, their details, approve, and reject), `onSessionsChange`, `onWikiChange`, `yami.setAgents`, `yami.addWork`, `yami.noteSessions`, and `hub.observe`. The views that two plugins need, the panel and the navigator, are the library's (`yami/obsidian/views/`). A plugin writes no other code for Yami.
 3. **A gap in a plugin is a gap in the library.** When a plugin needs setup, a helper, a command, or a constant that a second plugin would need too, the library gets it, with a test, and the plugin uses it. The plugin does not keep its own copy until later.
 4. **A plugin uses the public API only.** It imports the package entries (`yami`, `yami/obsidian`, `yami/wiki`, `yami/threads`, `yami/document`, `yami/agent`, `yami/testing`, `yami/esbuild`), never a file of `yami/src`. The `yami` README documents each entry.
-5. **The showcase shows each part of the API.** A new part of the API gets a use in the showcase, through the built-in modules or the views, so the Obsidian tests run it in the real app. The showcase has no code module of its own.
+5. **The plugins show each part of the API.** A new part of the API gets a use in `yami-wiki` or `yami-threads`, through the built-in modules or the views, so the Obsidian tests run it in the real app. Neither plugin has a code module of its own: each is `createYami` with its agents and its options, the views it registers, a README, and its tests.
+6. **Two Yami plugins can share a vault.** Each builds its own Yami. They share the window's one hub, and keep their conversation notes apart by the note's `plugin` property. What else they would duplicate (the vault modules' commands, the status bar) is a known cost, listed in the README, until the runtime is one for the window.
 
-The showcase also has two views. The wiki navigator, `obsidian_plugin/src/navigator/`, walks the wiki by its tags with `wiki.neighbors` and `wiki.tag`, and follows the open note. The panel, `obsidian_plugin/src/panel/`, shows the modules, the sessions of a module, and one session with its documents, its conversation, its progress, and its acts as buttons. Each view's needs became library features: the panel found the summaries, the details, the acts of a session and of a module, the change feed, the flow's label, and the plugin stylesheet of `copyStyles`; the navigator found each note's own tags, the tag hierarchy, the wiki's change feed, and the rule of which notes the index holds.
+The two views are in the library. The wiki navigator, `yami/obsidian/views/navigator.ts`, walks the wiki by its tags with `wiki.neighbors` and `wiki.tag`, and follows the open note. The panel, `yami/obsidian/views/panel.ts`, shows the modules, the sessions of a module, one session with its documents, its conversation, its progress, and its acts as buttons, and the wiki's change plans. Each view's needs became library features: the panel found the summaries, the details, the acts of a session and of a module, the change feed, the flow's label, and the plugin stylesheet of `copyStyles`; the navigator found each note's own tags, the tag hierarchy, the wiki's change feed, and the rule of which notes the index holds.
 
 ## Entities
 
@@ -110,11 +111,11 @@ internal/wiki/              the wiki module's own: its sessions and ledger, the 
 ## Layers
 
 ```
-obsidian_plugin       the showcase plugin: createYami with its agents, and its views
-  test/fixtures/vault-modules/  hello, the showcase's vault module
-  src/panel/          the showcase panel: a view over the read API and the acts
-  src/navigator/      the wiki navigator: a view over the tag hierarchy
+plugins/yami-wiki     the wiki plugin: createYami with its agents, threads left out, the panel and the navigator
+  test/fixtures/vault-modules/  hello, the vault module of the tests
+plugins/yami-threads  the threads plugin: createYami with its agents, the wiki module left out, the panel
 yami/obsidian         the Obsidian layer: createYami, the Vault adapter, shared documents, conversation notes, prompts, commands
+  views/              the panel: a view over the read API and the acts; the wiki navigator: a view over the tag hierarchy
 yami/testing          a file system Vault, a scripted agent, and testYami, for tests without Obsidian
 yami                  the SDK: YamiModule, flows, actions, Yami, Session, the loop, the checks, the built-in modules: wiki and threads
 yami/threads          the threads module's public names: ThreadsModule, the thread's phase and next step
@@ -196,7 +197,7 @@ The wiki is the knowledge base, and the reason the modules belong together. `Wik
 
 ## The built-in modules
 
-The wiki and threads are in `yami`, and every Yami has them: the wiki always, threads unless the host leaves it out. They are built on the same API as any plugin's modules, and they keep the rules of this document. The rules below came from porting Almagest and obsidian-threads. Each one answers a failure of the original or a cut that review found.
+The wiki and threads are in `yami`, and a Yami has them unless the host leaves one out: `wikiModule: false`, `threads: false`. The index of the wiki stays in every Yami. They are built on the same API as any plugin's modules, and they keep the rules of this document. The rules below came from porting Almagest and obsidian-threads. Each one answers a failure of the original or a cut that review found.
 
 ### Threads
 
@@ -266,15 +267,15 @@ These facts cost days to learn. Keep them true, and read the `yami/agent` README
 
 A change is done when these pass, and the report says which ran:
 
-1. **Unit tests** (`npm test` in `yami/` and in `obsidian_plugin/`): the session queue, each adapter against a scripted harness (`test/fixtures/fake-codex.mjs`), the loop, the session handle, and the document logic with `yami/testing`, and the wiki with a fixture vault and a fake embedder: each algorithm, match, lint, and the checks. A library feature has its tests in `yami/`; the plugin's tests cover its modules the same way. No harness, no API key, deterministic. Every state of the loop has a case.
+1. **Unit tests** (`npm test` in `yami/`, and in each plugin for its own files): the session queue, each adapter against a scripted harness (`test/fixtures/fake-codex.mjs`), the loop, the session handle, and the document logic with `yami/testing`, and the wiki with a fixture vault and a fake embedder: each algorithm, match, lint, and the checks. A library feature has its tests in `yami/`; the plugin's tests cover its modules the same way. No harness, no API key, deterministic. Every state of the loop has a case.
    **Benchmark** (`npm run bench` in `yami/`): every algorithm against a real vault and a gold file of questions, reporting recall, mean reciprocal rank, and time. It decides which algorithm is the default; opinions do not.
 2. **Live tests** (`npm run test:live` in `yami/`): the same scenarios against the real CLIs, for both harnesses. Connect, a turn with a tool, approvals, interrupt, a command stopped on interrupt, queued messages, resume, and no process left behind. `YAMI_LIVE_THREAD=1 npm run test:live` in `yami/` takes one thread from stub to closed with a real Claude Code.
-3. **Obsidian layer and plugin changes:** `npm run test:obsidian` in `obsidian_plugin/` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents through its debugging port. The tests are in the plugin because they need a built plugin, but most of what they test is the library's Obsidian layer: `createYami`, the commands, the conversation notes, the shared documents, and the runs. Plain Node cannot catch renderer bugs, and three of them have happened. `npm test` in `yami/` also covers the shared documents and the conversation manager over a fake Obsidian app.
+3. **Obsidian layer and plugin changes:** `npm run test:obsidian` in `plugins/yami-wiki/` and in `plugins/yami-threads/` starts a separate Obsidian with a temporary vault, installs the built plugin, and drives it with real agents through its debugging port. The tests are in the plugins because they need a built plugin, but most of what they test is the library's Obsidian layer: `createYami`, the commands, the conversation notes, the shared documents, and the runs. Plain Node cannot catch renderer bugs, and three of them have happened. `npm test` in `yami/` also covers the shared documents and the conversation manager over a fake Obsidian app.
 4. A guard in the build fails when a dependency changes shape, instead of a silent no-op.
 
 ## Documentation
 
-1. This document holds the policy. The `yami` README holds the APIs and the harness facts. The plugin README holds how to run the showcase, and what its modules do.
+1. This document holds the policy. The `yami` README holds the APIs and the harness facts. Each plugin's README holds how to install and run it, and what it adds to a vault. `docs/releasing.md` holds how each repository is checked and released.
 2. A class, an attribute, or a text that the README names for a host is public API. This includes the names that a host's tests need to drive a view, such as the form of the agent's questions. A change to one is a break, and the CHANGELOG lists it.
 3. Code comments say what a reader cannot see in the code: a constraint, a harness quirk, a reason that is not obvious. They do not repeat the code.
 4. Prose follows ASD-STE100: short sentences, one term for one thing, active verbs.

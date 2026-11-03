@@ -86,7 +86,8 @@ The plugin's build needs `pluginBuild` from `yami/esbuild`, which loads `.md` fi
 
 - **Commands** for each agent (New conversation with claude, Run this session with Claude), for the session open in the editor (Resume this session, Stop this session, Kill this session's agent), for each flow (Notes: new weekly review), for each action (Notes: publish this summary), for the wiki (search, lint, versions, ingest), and New module. Each id starts with `yami-`, so it never collides with an id of the plugin's own. See [Turning a part off, and extending it](#turning-a-part-off-and-extending-it).
 - **Every agent** works in the vault, with Yami's self-check tool (`yami_check`), the agent tool (`yami_agent`), the tools of every module (`notes_find_sources`, `wiki_search`, …), the base skill (`/yami:run`), and the skills of every module (`/notes:summarize`). A reviewer gets only the tools that change nothing, and `yami_review`.
-- **Two built-in modules**: the wiki, with ingest and checkout sessions (see [The wiki module](#the-wiki-module)), and threads, validated work on repositories (see [The threads module](#the-threads-module)). A plugin leaves threads out with `threads: false`.
+- **Two built-in modules**: the wiki, with ingest and checkout sessions (see [The wiki module](#the-wiki-module)), and threads, validated work on repositories (see [The threads module](#the-threads-module)). A plugin leaves the wiki module out with `wikiModule: false` and threads with `threads: false`, so that each plugin does one thing: `yami-wiki` holds the wiki, `yami-threads` holds threads, and Duet holds neither.
+- **Two views**, which a plugin registers when it wants them: the panel (`YamiPanel`), the modules, their sessions, and the wiki's change plans, and the wiki navigator (`WikiNavigator`). See [The views](#the-views-obsidianviews).
 - **Every module** installs its documents into the vault when the workspace is ready. A person's edits stay; a document that holds the text Yami wrote last follows the code. See [The layout](#the-layout).
 - **Vault modules**: a person can define a module in the vault with markdown only. Yami finds it at start and as it changes, and the plugin gets its commands. See [Vault modules](#vault-modules).
 
@@ -223,7 +224,7 @@ expect(applyOps("The quick fox", diffOps("The quick fox", "The slow fox"))).toBe
 
 ## `yami/conversation`
 
-A conversation note has `type: conversation`, the `agent`, the `model`, `effort`, and `approval` in use, the harness `session` for resuming, a `status` of `active` or `ended`, and `module`, a link to the module session that the conversation runs, when it runs one. The body is Markdown:
+A conversation note has `type: conversation`, the `agent`, the `plugin` whose Yami runs it (see [Two Yami plugins in one vault](#two-yami-plugins-in-one-vault)), the `model`, `effort`, and `approval` in use, the harness `session` for resuming, a `status` of `active` or `ended`, and `module`, a link to the module session that the conversation runs, when it runs one. The body is Markdown:
 
 - A user message is a `> [!user]` callout.
 - The agent's thinking and tool calls between pieces of text go into one collapsed `> [!activity]-` callout, with a summary as its title, for example "Thought for 6s · Read 2 files".
@@ -494,9 +495,10 @@ The session ends `done` when every check is met and the review finds every polic
 
 ### The Yami
 
-`new Yami({ vault, agents, modules, threads, wiki, conversations, conversationFolder })` is the runtime of one vault. In Obsidian, `createYami` builds it. `conversationFolder` is a folder, or a function that Yami reads at each use; `yami.conversationFolder` gives the folder now. The built-in modules come first in `yami.modules`: the wiki, then threads; then the plugin's modules, then the vault modules.
+`new Yami({ vault, agents, modules, wikiModule, threads, wiki, conversations, conversationFolder })` is the runtime of one vault. In Obsidian, `createYami` builds it. `conversationFolder` is a folder, or a function that Yami reads at each use; `yami.conversationFolder` gives the folder now. The built-in modules come first in `yami.modules`: the wiki, then threads; then the plugin's modules, then the vault modules.
 
 - `threads: false` leaves the built-in threads module out: the Yami has no threads module, and so no threads tools, skills, commands, files, ledger, or color, and a module of the host can take the id `threads`. With the default, `true`, a module of the host with the id `threads` throws `The id threads is the built-in threads module's. Give the module another id, or leave the built-in module out with the option threads: false.`
+- `wikiModule: false` leaves the built-in wiki module out the same way: no ingest or checkout sessions, no wiki tools or skills, no files under `internal/wiki/`, no ledger, no color, and in Obsidian no wiki commands. `yami.wiki`, the index over the vault, stays: the checks, the links, and a host's own search use it. `yami.ingest` throws `This Yami has no wiki module, so nothing can ingest: the host left it out with the option wikiModule: false.` A module of the host with the id `wiki` throws the same way as one named `threads`, with `wikiModule` in the message.
 
 - `yami.agents` lists the agents, the first being the default, and `yami.setAgents(agents)` replaces them while Yami runs. A live run keeps the agent it started with until it ends, also an agent that is gone, and the next run takes one from the new list; the sessions' acts follow at once. In Obsidian, `ObsidianYami.setAgents` takes names and colors too.
 - It sets each agent's working directory to the vault, at the start and for each agent that `setAgents` adds, and gives it `yami.tools({ agent })`, one tool set named `yami` with Yami's own tools and the tools of every module, and `yami.skills()`, Yami's skill set `internal/yami` with the base skill, and each module's internal folder that holds skills.
@@ -932,13 +934,14 @@ The Obsidian layer. It holds what needs the Obsidian API: `createYami`, the vaul
 | Option | Default | What it sets |
 | --- | --- | --- |
 | `agents` | | The plugin's agents, the first being the default. An entry `{ agent, name, color }` names an agent in the vault; the name defaults to the harness, and the color to `HARNESS_COLORS`. Each name must be its own. An empty list is allowed: the plugin then has no agent commands, and the ribbon icon says `<plugin name> has no agents. Add one in its settings.`, with the name of the plugin's manifest. `yami.setAgents` changes the agents later. |
-| `modules` | none | The plugin's modules. The wiki and threads modules are built in. |
+| `modules` | none | The plugin's modules. The wiki and threads modules are built in, unless the two options below leave them out. |
+| `wikiModule` | `true` | `false` leaves the built-in wiki module out, as the option of `Yami`: no wiki sessions, tools, files, or commands, while `yami.wiki`, the index, stays. A plugin that is not the wiki plugin sets it. |
 | `threads` | `true` | `false` leaves the built-in threads module out, as the option of `Yami`. |
 | `wiki` | | Options of the wiki, such as an `embedder` or the `defaultAlgorithm`. The conversation folder and Obsidian's Excluded files always stay out of its index. |
 | `conversationFolder` | `conversations` | The folder of conversation notes. A value, or a function that Yami reads at each use. |
 | `idleMinutes` | 15 | Minutes after which an agent process with no open message box and no turn closes. A value, or a function that Yami reads at each use. |
 | `animate` | `true` | Whether an agent's edits play as typing in a note that the person sees. A value, or a function that Yami reads at each edit. While the system asks for reduced motion (`prefers-reduced-motion: reduce`), edits never play as typing. `yami.animate()` gives the result of this rule now. |
-| `commands` | every group | `{ conversations, sessions, wiki, modules }`: the groups of commands to add. `modules` is the New module command. The commands of the modules' flows and actions are always added. |
+| `commands` | every group | `{ conversations, sessions, wiki, modules }`: the groups of commands to add. `modules` is the New module command. The wiki commands come only with the wiki module. The commands of the modules' flows and actions are always added. |
 | `statusBar` | `true` | A status bar item that says which agents work. |
 | `folderColors` | `true` | Each module's folder in the module's color in the file explorer, its internal folder muted, and `internal/` gray (`INTERNAL_COLOR`). `folderColorRules(yami)` gives the CSS. |
 
@@ -974,7 +977,7 @@ The other options are fixed at `createYami`, because they choose the parts of th
 
 ### What `createYami` adds to a vault and to its agents
 
-A plugin author tells users what appears in their vault. With no modules of the plugin's own, `enable` writes these files when they are missing. It replaces a form that holds the text it wrote last, and keeps one that a person edited (see [The layout](#the-layout)); the base skill has its own rule (see [The Yami](#the-yami)):
+A plugin author tells users what appears in their vault. With no modules of the plugin's own, and both built-in modules in, `enable` writes these files when they are missing. It replaces a form that holds the text it wrote last, and keeps one that a person edited (see [The layout](#the-layout)); the base skill has its own rule (see [The Yami](#the-yami)):
 
 | File | What it is |
 | --- | --- |
@@ -1013,7 +1016,7 @@ A plugin can turn off each part that it replaces with its own, and extend a part
 | The status bar item | `statusBar: false` | `yami.addWork(work)` shows a host's own agent work in it. |
 | `yami-stop` | With the conversation commands. | `yami.addWork({ name, path, stop })`: the command calls `stop` in that note. |
 | The folder colors | `folderColors: false` | `folderColorRules(yami)` gives the CSS; a host adds rules of its own to its stylesheet. |
-| The wiki module: its files, its tools, and its skill sets | No: the wiki is built in, one for the vault, and every module uses it. | A session's own `tools` and `skills` leave them out of that session. |
+| The wiki module: its files, tools, skills, commands, ledger, and color | `wikiModule: false`. The index, `yami.wiki`, stays. | A session's own `tools` and `skills` leave them out of that session. |
 | The threads module: its files, tools, skills, commands, ledger, and color | `threads: false` | A person's own flows under `internal/threads/`; see [Vault flows in a code module](#vault-flows-in-a-code-module). |
 
 **Command ids.** Every command id of the library starts with `yami-`, `COMMAND_PREFIX`, so a host's own command never has the id of one of the library's: a host gives its own commands ids that do not start with `yami-`. Obsidian adds the plugin's id before each, as `<plugin id>:yami-new-module`, so a test runs one with `app.commands.executeCommandById`. Each command of the library:
@@ -1260,6 +1263,34 @@ await page.fill(`${question} input.yami-question-other`, "Plum");
 await page.click('.workspace-leaf.mod-active .yami-questions button[type="submit"]');
 ```
 
+### Two Yami plugins in one vault
+
+Each Yami plugin builds its own Yami. Two in one vault, such as Duet and `yami-wiki`, share the window's one shared-document hub (`installCollab`: the first plugin makes it, the next finds it) and keep the rest apart:
+
+- **Conversation notes.** A note records the `plugin` whose Yami runs it, and a plugin's conversation manager gives a message box to its own notes only. A note with no `plugin`, from before 0.20, goes to the plugin whose manager was installed first in the window, which is the order Obsidian loads them in; add `plugin: <id>` to a note to pin it.
+- **Files.** Each plugin installs the documents of its own modules. Both write `Yami.base` and the base skill, which are the same text at the same version of the library; keep the plugins on one version of `yami`, or the older one reports the newer base skill as a person's edit.
+- **Agents.** Each plugin runs its own agents, with its own settings. A tool of one plugin's module is not in the sessions of another plugin.
+- **Commands and status bar.** Each plugin adds its own. Turn off a group that another plugin provides with `commands`, as Duet turns off the session and wiki commands.
+- **Vault modules.** Every Yami discovers them, so each plugin lists them and adds their commands. A vault module runs the same in either.
+- **The hub.** The plugin that made the hub owns its editor extension and its patches. When that plugin unloads, the hub is gone for the others until they reload. A later version will hand it over.
+
+### The views (`obsidian/views/`)
+
+Two sidebar views over the read API, which a plugin registers when it wants them. Each holds layout and look only: what it shows and what it does come from `yami.summaries`, `session.details`, `session.acts`, `module.acts`, `wiki.changes`, `wiki.changeDetails`, `wiki.changeActs`, `wiki.neighbors`, `wiki.tag`, `onSessionsChange`, and `onWikiChange`.
+
+```ts
+this.registerView(PANEL_VIEW, (leaf) => new YamiPanel(leaf, this.yami, { name: "Wiki", icon: "book-open" }));
+this.addRibbonIcon("book-open", "Open the wiki panel", () => void revealView(this.app, PANEL_VIEW));
+this.registerView(NAVIGATOR_VIEW, (leaf) => new WikiNavigator(leaf, this.yami));
+```
+
+- **`YamiPanel`** (`PANEL_VIEW`, `yami-panel`): the modules, each with its icon, its color, a line that counts its sessions by status, and a badge for what waits for the person; the sessions that work now; the problems of the vault modules and the base skill; one module with its flows and actions as buttons and its sessions; one session with its status, its acts, its promises, policies, skills, agents, and articles with the verdicts, its conversations, and its progress; and with the wiki module, the change plans that wait for approval, and one change with each write as a diff and Approve and Reject. `{ name, icon }` name the view; the defaults are `Yami` and `blocks`. Backspace goes up a level; Tab reaches each row and button. The class names of its elements, `yami-panel`, `yami-row`, `yami-section`, `yami-module-row`, `yami-session-row`, `yami-change-row`, `yami-action`, `yami-mark`, `yami-diff`, and the `data-key` of each row and button, are public, so a plugin's test can drive it.
+- **`WikiNavigator`** (`NAVIGATOR_VIEW`, `yami-wiki-navigator`): walks the wiki by its tags, where `ml/vision` is below `ml`, and follows the note open in the editor. On a note: the tags above its own, its own, and the tags one level below. On a tag: the tags around it and the notes that hold it. Back, or Backspace, returns to the place before.
+- **`revealView(app, type)`** shows a view in the right sidebar, where it is, or in a new tab of the sidebar.
+- **`row`, `section`, `icon`, `activates`**: the rows and sections of the views, which a plugin's own view can use so it looks the same. **`diffLines(before, after, context?)`** gives the lines of the change page's diff, with the changed pieces of a line marked and runs of unchanged lines folded; it needs no Obsidian.
+
+The stylesheet of the views is in the library's `styles.css`, which `copyStyles` puts first in a plugin's.
+
 ### The wiki in Obsidian (`obsidian/wiki/`)
 
 The views that let a person use the vault's `Wiki` directly. They call the wiki's own methods and hold no ranking of their own. `createYami` adds a command for each; a host that builds its own `Wiki` uses them directly:
@@ -1294,7 +1325,7 @@ expect(await session.start()).toMatchObject({ state: "done" });
 await t.dispose();                                          // stops every run and removes the vault
 ```
 
-- `testYami({ modules, turns, wiki, threads, files })`: `threads: false` leaves the built-in threads module out, as the option of `Yami`. `files` maps a vault path to a file or a folder on disk, which `testYami` copies into the vault before it enables the modules. A relative disk path starts at the working directory of the test run. A file it cannot copy throws, with the path.
+- `testYami({ modules, turns, wiki, wikiModule, threads, files })`: `wikiModule: false` and `threads: false` leave a built-in module out, as the options of `Yami`. `files` maps a vault path to a file or a folder on disk, which `testYami` copies into the vault before it enables the modules. A relative disk path starts at the working directory of the test run. A file it cannot copy throws, with the path.
 - `FsVault` is a `Vault` over a folder of the file system.
 - `ScriptedAgent` runs the next function of its script for each turn of each of its sessions, and completes a turn with no function left. The script is shared by the agent's sessions, so a review takes the turn after the worker's. A turn gets the message and the `ScriptedSession`, whose `tool(name, input)` calls a tool as the harness would: the tool's signal aborts when the turn is interrupted or the session closes. A turn that never resolves runs until `stop` or `kill`, as a harness's does. An agent that `yami_agent` runs is a new session of the same agent, so it takes the next turn of the script. `agent.started` holds every session in order; `agent.last.prompts` holds the messages of its last session, and `agent.last.options` the tools, skills, and access it got.
 - `review(verdicts?)` is a turn that plays the reviewer: it records a verdict with `yami_review` for each item of the review, the one that `verdicts` names (by the item's name or path, as a verdict or `[verdict, reason]`), and otherwise `followed` or `met`. A reviewer that gives no verdict is a turn that does nothing. It throws in a session that is no review's.
@@ -1329,8 +1360,8 @@ await copyStyles(["styles.css", `${testVault}/.obsidian/plugins/my-plugin/styles
 
 - `VERSION` in `yami` is the version of the library a host has, as its `package.json` says it, and a test holds the two equal. A host checks it when its build and the CHANGELOG seem to disagree: `import { VERSION } from "yami"`.
 - `npm run build` first type-checks every module except `yami/obsidian` with `tsconfig.core.json`. That check has no DOM types, and it maps `obsidian` and `@codemirror/*` to an empty module, so a core file that uses them, or imports a file of `yami/obsidian`, fails the build. Then `tsc` builds the whole library.
-- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules and their forms, the vault modules and their problems, the vault flows of a code module and the starter forms, the threads module and the checkout, the loop, the review, the agent tool, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, the agents and options that change while Yami runs, the text operations with no Obsidian, and in `test/unit/obsidian/` the shared documents and their change feed, the conversation manager with agents that change while a conversation runs, the sessions of a note, `createYami` with its commands, status bar, and agent work, the modules' commands, and the discovery trigger over a fake Obsidian app. The tests of the message box, the question form, and the agent's presence in an editor run over happy-dom (`test/unit/obsidian/dom.ts` adds the DOM helpers of Obsidian), and each name of the README tables has a test.
+- `npm test` runs the unit tests: the session queue, the Codex adapter against a scripted `app-server` (`test/fixtures/fake-codex.mjs`), the RPC connection, the diff, the modules and their forms, the vault modules and their problems, the vault flows of a code module and the starter forms, the threads module and the checkout, the loop, the review, the agent tool, and the session handle with `yami/testing`, the wiki (each algorithm, match, lint, the checks, and the module's tools) over a fixture vault with a fake embedder, the agents and options that change while Yami runs, the text operations with no Obsidian, and in `test/unit/obsidian/` the shared documents and their change feed, the conversation manager with agents that change while a conversation runs, the sessions of a note, `createYami` with its commands, status bar, and agent work, the modules' commands, the discovery trigger, and the diff of the panel's change page over a fake Obsidian app. The tests of the message box, the question form, and the agent's presence in an editor run over happy-dom (`test/unit/obsidian/dom.ts` adds the DOM helpers of Obsidian), and each name of the README tables has a test.
 - `npm run bench` runs the retrieval benchmark against the vault in `YAMI_BENCH_VAULT`; see [The benchmark](#the-benchmark).
 - `YAMI_LIVE_THREAD=1 npm run test:live` also takes one thread from stub to closed with a real Claude Code, on a scratch repository outside the vault (`test/live/thread.test.ts`); without the variable it skips. `npm test` never runs it.
 - `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, skills, the agent tool in a session, a read-only session's commands (tests in a repository outside the vault, writes that fail, and no network), and resume; for Claude Code also that a skill set's `agents/` gives no subagent.
-- The plugin's `npm run test:obsidian` drives the real Obsidian app with `yami/obsidian`.
+- `npm run test:obsidian` in `plugins/yami-wiki/` and `plugins/yami-threads/` drives the real Obsidian app with `yami/obsidian` and the views.

@@ -1,0 +1,31 @@
+{
+  "name": "yami-threads",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Validated work on your repositories from Obsidian: a thread is one note that carries an idea to a spec, a plan, the work, and a validation by a fresh agent.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "npm run typecheck && node esbuild.config.mjs",
+    "dev": "node esbuild.config.mjs --watch",
+    "install:vault": "node esbuild.config.mjs --vault",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "lint": "npm install --prefix scripts/lint --no-audit --no-fund --silent && npm run --prefix scripts/lint lint",
+    "test": "vitest run test/unit",
+    "test:obsidian": "vitest run test/obsidian",
+    "set-version": "node scripts/set-version.mjs"
+  },
+  "dependencies": {
+    "yami": "file:../../yami"
+  },
+  "devDependencies": {
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "obsidian": "^1.14.4",
+    "playwright-core": "^1.63.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  }
+}

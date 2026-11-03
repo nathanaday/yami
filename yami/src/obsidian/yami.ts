@@ -6,6 +6,7 @@ import { Flow, type ActionResult, type ModuleAct, type ModuleAction, type YamiMo
 import type { Session } from "../module/session.js";
 import { Yami } from "../module/yami.js";
 import type { ChangeAct } from "../wiki/change.js";
+import { WIKI } from "../wiki/folders.js";
 import type { WikiOptions } from "../wiki/wiki.js";
 import { noAgentsMessage, vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
@@ -44,8 +45,15 @@ export interface YamiPluginOptions {
    * Each needs a name of its own. `yami.setAgents` changes them while the plugin runs. None is allowed.
    */
   agents: (Agent | AgentEntry)[];
-  /** The plugin's modules. The wiki and threads modules are built in. */
+  /** The plugin's modules. The wiki and threads modules are built in, unless `wikiModule` or `threads` leaves one out. */
   modules?: YamiModule[];
+  /**
+   * Whether the Yami holds the built-in wiki module: its sessions, its change plans, its tools, its files
+   * under `internal/wiki/`, and the wiki commands. Default true. With false, the vault keeps its wiki index,
+   * `yami.wiki`, and a module of the plugin can take the id `wiki`. A plugin that does something other than
+   * the wiki leaves it to the plugin that does.
+   */
+  wikiModule?: boolean;
   /** Whether the Yami holds the built-in threads module. Default true. With false, a module of the plugin can take the id `threads`. */
   threads?: boolean;
   /** Options of the wiki. The conversation folder and Obsidian's Excluded files always stay out of its index. */
@@ -60,8 +68,8 @@ export interface YamiPluginOptions {
    */
   animate?: boolean | (() => boolean);
   /**
-   * The groups of commands to add. Default: every group. `modules` is the New module command. The commands
-   * of the modules' flows and actions are always added.
+   * The groups of commands to add. Default: every group. `modules` is the New module command. The wiki
+   * commands come only with the wiki module. The commands of the modules' flows and actions are always added.
    */
   commands?: Partial<Record<CommandGroup, boolean>>;
   /** A status bar item that says which agents work. Default true. */
@@ -126,6 +134,7 @@ export class ObsidianYami extends Yami {
       vault: new ObsidianVault(app, vaultRoot(app)),
       agents: registered.map((r) => r.agent),
       modules: options.modules,
+      wikiModule: options.wikiModule,
       threads: options.threads,
       wiki: { ...options.wiki, exclude: () => [...ignoredPaths(app), ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] },
       conversations: { open: (open) => runs!.open(open) },
@@ -142,6 +151,7 @@ export class ObsidianYami extends Yami {
       idleMinutes: () => read(this.#idleMinutes),
       onActivity: () => this.updateStatus(),
       noAgents: noAgentsMessage(plugin.manifest.name),
+      plugin: plugin.manifest.id,
     });
     runs = new ObsidianConversations(app, conversations, () => [...this.#registered, ...this.#retired]);
     this.app = app;
@@ -187,7 +197,8 @@ export class ObsidianYami extends Yami {
     const groups = { conversations: true, sessions: true, wiki: true, modules: true, ...options.commands };
     if (groups.conversations) this.#agentCommands.push(addConversationCommands(this));
     if (groups.sessions) this.#agentCommands.push(addSessionCommands(this));
-    if (groups.wiki) addWikiCommands(this);
+    // The wiki commands are the wiki module's: a Yami without the module has nothing for them to act on.
+    if (groups.wiki && this.module(WIKI)) addWikiCommands(this);
     if (groups.modules) addNewModuleCommand(this);
     checkModuleIcons(this.modules);
     const syncCommands = addModuleCommands(this);

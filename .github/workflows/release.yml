@@ -1,0 +1,129 @@
+# Releases what main holds and no release has yet. A push to main (a merge, or a direct push) runs
+# three jobs, one for the library and one for each plugin. Each reads its version, and stops when a
+# release with that tag exists, so a change that bumps no version publishes nothing.
+#
+#   yami-X.Y.Z          the library: yami-X.Y.Z.tgz, which a plugin's package.json names
+#   yami-wiki-X.Y.Z     the wiki plugin: main.js, manifest.json, styles.css
+#   yami-threads-X.Y.Z  the threads plugin: main.js, manifest.json, styles.css
+#
+# To release: set the version (npm version X.Y.Z --no-git-tag-version in yami/, or npm run
+# set-version X.Y.Z in a plugin), commit, push to main. See docs/releasing.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  library:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: yami
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read the version, and whether it is released
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "yami-$version" >/dev/null 2>&1; then
+            echo "yami $version is released already; nothing to publish."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.new == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: yami/package-lock.json
+      - if: steps.version.outputs.new == 'true'
+        run: npm ci
+      - if: steps.version.outputs.new == 'true'
+        run: npm run build
+      - if: steps.version.outputs.new == 'true'
+        run: npm test
+      - if: steps.version.outputs.new == 'true'
+        run: npm pack
+      - name: Tag the commit and publish the release
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "yami-$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "yami $VERSION" \
+            --notes "The yami library $VERSION. A plugin takes it as a dependency by this file's URL. The changes are in yami/CHANGELOG.md." \
+            "yami-$VERSION.tgz"
+
+  plugin:
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin: [yami-wiki, yami-threads]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read the version, and whether it is released
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLUGIN: ${{ matrix.plugin }}
+        run: |
+          version=$(node -p "require('./plugins/$PLUGIN/manifest.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "$PLUGIN-$version" >/dev/null 2>&1; then
+            echo "$PLUGIN $version is released already; nothing to publish."
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.version.outputs.new == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            yami/package-lock.json
+            plugins/${{ matrix.plugin }}/package-lock.json
+      - if: steps.version.outputs.new == 'true'
+        run: npm ci && npm run build
+        working-directory: yami
+      - if: steps.version.outputs.new == 'true'
+        run: npm ci
+        working-directory: plugins/${{ matrix.plugin }}
+      - if: steps.version.outputs.new == 'true'
+        run: npm run lint
+        working-directory: plugins/${{ matrix.plugin }}
+      - if: steps.version.outputs.new == 'true'
+        run: npm test
+        working-directory: plugins/${{ matrix.plugin }}
+      - if: steps.version.outputs.new == 'true'
+        run: npm run build
+        working-directory: plugins/${{ matrix.plugin }}
+      - name: Tag the commit and publish the release
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PLUGIN: ${{ matrix.plugin }}
+        working-directory: plugins/${{ matrix.plugin }}
+        run: |
+          gh release create "$PLUGIN-$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "$PLUGIN $VERSION" \
+            --notes "$PLUGIN $VERSION. Put main.js, manifest.json, and styles.css in <vault>/.obsidian/plugins/$PLUGIN/." \
+            main.js manifest.json styles.css
