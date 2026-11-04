@@ -1,3 +1,4 @@
+import { figureMarkers } from "./figures.js";
 import { normalizeName } from "./tokens.js";
 import type { Note, Wiki } from "./wiki.js";
 
@@ -64,7 +65,7 @@ export function metaVoice(body: string): string[] {
   return found;
 }
 
-/** The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions, uncited sources, orphans, and topics in the voice of a report on their source. */
+/** The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions, uncited sources, orphans, topics with figures still to make, and topics in the voice of a report on their source. */
 export function lint(wiki: Wiki, options: LintOptions = {}): Finding[] {
   const findings: Finding[] = [];
   const add = (note: Note, check: string, severity: Finding["severity"], message: string, fix: string) =>
@@ -96,6 +97,10 @@ export function lint(wiki: Wiki, options: LintOptions = {}): Finding[] {
     if (note.type === "topic") {
       if (!note.links.some((path) => wiki.note(path)?.type === "source")) add(note, "no-sources", "warning", "cites no source", "link the sources of its claims in the sources property");
       if (!note.backlinks.length) add(note, "orphan", "warning", "no note links to it", "link it from a related topic");
+      const figures = figureMarkers(note.body);
+      if (figures.length) {
+        add(note, "figure-missing", "warning", `has ${figures.length} figure${figures.length === 1 ? "" : "s"} to make: ${figures.map((f) => `"${f.shows}"`).join(", ")}`, "run a figures session on it (Wiki: new figures), which draws each figure and replaces the marker with its embed");
+      }
       const phrases = metaVoice(note.body);
       if (phrases.length) {
         add(note, "meta-voice", "warning", `speaks of its source or its reader instead of its subject: ${phrases.map((p) => `"${p}"`).join(", ")}`, "state the claim, and put the citation in parentheses after it; the source note's Summary is the place to describe the source");

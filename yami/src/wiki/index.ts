@@ -45,6 +45,7 @@ export {
 export { chunk, MAX_CHUNK, type Chunk } from "./chunks.js";
 export { cosine, EmbeddingCache, VoyageEmbedder, type Embedder, type VoyageOptions } from "./embed.js";
 export { CACHE_PATH, CHANGES, inKnowledge, KNOWLEDGE, ORIGINALS, SNAPSHOTS, SOURCES, TOPICS, WIKI, WIKI_INTERNAL } from "./folders.js";
+export { FIGURE_MARKER, FIGURES, figureMarker, figureMarkers, fromBase64, MAX_PNG_BYTES, MAX_SVG_BYTES, pngProblem, svgProblem, type FigureMarker } from "./figures.js";
 export { lint, metaVoice, type Finding, type LintOptions } from "./lint.js";
 export type { Neighbors, TagCount, TagView } from "./tags.js";
 export { match, THRESHOLD, type Match, type MatchOptions, type Neighbor } from "./match.js";

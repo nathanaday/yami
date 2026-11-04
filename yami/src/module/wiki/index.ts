@@ -13,6 +13,7 @@ import { WIKI_COLOR } from "../colors.js";
 import { YamiModule } from "../module.js";
 import { checkedOut, checkoutSkill, COPY, MAX_DOCUMENTS, orderShape, readingListMade, type Checkout, type CheckoutOrder, type ReturnedCheckout } from "./checkout.js";
 import { absorbed, drafterAgent, extractorAgent, INGEST, pageForms, proposed } from "./ingest.js";
+import { figures, figuresMade, figuresSkill, illustratorAgent, saveFigure } from "./figures.js";
 import { bundleImported, imported, importSkill, stagingFolder, type ImportedBundle, type StagedNote } from "./import.js";
 
 /** The vault folder where a bundle goes when the export names none: `exports/<name>/`. */
@@ -82,7 +83,7 @@ export class WikiModule extends YamiModule {
       sort: [{ property: "created", direction: "DESC" }],
     },
   ];
-  readonly checks = { "checked-out": checkedOut, proposed, absorbed, imported };
+  readonly checks = { "checked-out": checkedOut, proposed, absorbed, imported, figures };
   readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, which proposes a change document in ${CHANGES}/ that a person approves in Obsidian, with a version in ${SNAPSHOTS}/ for each applied change. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
 
   readonly cite = this.policy({
@@ -141,7 +142,7 @@ Two agents of the session do the reading and the drafting, each in a fresh conte
 3. **Match.** Call \`wiki_match\` with every subject's name at once, aliases included, so a subject named in three chunks is one subject.
 4. **Slice.** Put every subject that hits or nears one topic into the same slice, so two drafters never write one topic. At most eight subjects per slice.
 5. **Draft.** For each slice, call \`yami_agent\` with the agent \`drafter\`. The task gives the slice (each subject with its items and its match), the source notes, their tags, and the tag list. Each returns writes. With one or two slices, draft them yourself from the drafter's brief, \`${this.layout.folders.agents}/drafter/AGENT.md\`.
-6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
+6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason, and the figure markers the drafters left, which a figures session makes later), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
 7. **Propose.** Call \`wiki_change\`. It validates the plan, writes it as a change document that waits for a person's approval, and links the change from this session. Nothing in the wiki changes until a person approves it in Obsidian. When the tool refuses, fix the writes it names and call it again. When it returns warnings, links to no note, fix those writes and propose the plan again; the person approves the last proposal and rejects the rest.
 8. **End.** Your work ends when the plan is proposed and covers every source. Do not wait for the approval, and do not lint the wiki for the plan's effect: the wiki holds it only after the approval. When a change of this session was rejected, the session's feedback holds the reason: read it, and propose a new plan that answers it.
 
@@ -207,6 +208,30 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     agents: [this.drafter],
     policies: [this.cite, this.onePlan, this.oneTopic, this.voice],
     promises: [this.changeApplied, this.bundleImported, this.clean],
+  });
+
+  readonly illustrator = this.agent(illustratorAgent);
+  readonly figuresSkill = this.skill(figuresSkill);
+  readonly figuresMade = this.promise(figuresMade);
+
+  /**
+   * A figures session: makes the figures that the topics of its `topics` field mark as missing, or of every
+   * topic with a marker when the field is empty, and proposes one change that puts them in place. Read-only:
+   * a figure is saved through `wiki_figure`, and a topic changes only through `wiki_change`.
+   */
+  readonly figures = this.flow({
+    name: "figures",
+    description: "Draw the figures that topics mark as missing, save them under internal/wiki/figures/, and propose one change plan that puts each in its marker's place.",
+    access: "read-only",
+    schema: {
+      /** The topics to make figures for. Empty: every topic with a figure marker. */
+      topics: { type: "links", default: [] },
+    },
+    skills: [this.figuresSkill],
+    agents: [this.illustrator],
+    policies: [this.cite, this.onePlan, this.voice],
+    promises: [this.changeApplied, this.figuresMade],
+    instructions: "With no topics in the Request section or the topics field, make the figures of every topic that has a marker.",
   });
 
   readonly exportSkill = this.skill({
@@ -629,6 +654,24 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
           const sources = (await session.read()).properties.sources;
           void session.start().catch((error: unknown) => console.error(`yami: the run of ${session.path} failed`, error));
           return JSON.stringify({ session: session.path, sources, run: "started" });
+        },
+      }),
+      defineTool({
+        name: "figure",
+        description: `Saves a figure for a topic under internal/wiki/figures/<topic>/<name>.svg or .png, and returns its path and the line that embeds it. Give the figure as svg text (one <svg> with a viewBox, no script, no event handler, no reference outside itself) or as png bytes in base64. Refuses a topic that is not one, a bad SVG or PNG, a file over 1 MB (SVG) or 4 MB (PNG), and a name in use unless replace is set. The topic embeds the figure through wiki_change, as any write.`,
+        input: {
+          topic: z.string().describe("The topic the figure is for, as a path or a [[link]] name."),
+          name: z.string().describe("The file name without its extension, such as encoder-decoder."),
+          svg: z.string().optional().describe("The figure as SVG text."),
+          png: z.string().optional().describe("The figure as PNG bytes in base64, when it was rendered or cropped with a tool."),
+          replace: z.boolean().optional().describe("Replace a figure of that name. Default false."),
+        },
+        title: ({ topic, name }) => `Save the figure ${name.slice(0, 40)} for ${topic.slice(0, 40)}`,
+        run: async (figure) => {
+          await wiki.refresh();
+          const path = wiki.resolve(figure.topic);
+          const topic = path && wiki.note(path)?.type === "topic" ? path : undefined;
+          return JSON.stringify(await saveFigure(wiki.vault, topic, figure));
         },
       }),
       defineTool({

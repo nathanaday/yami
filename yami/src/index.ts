@@ -54,5 +54,6 @@ export { moduleTools, TOOL_SET } from "./module/tools.js";
 export type { Checkout, CheckoutOrder, ReturnedCheckout } from "./module/wiki/checkout.js";
 export { EXPORTS, WikiModule, type ExportOptions, type ImportOptions } from "./module/wiki/index.js";
 export type { ImportedBundle, StagedNote, StagedStatus } from "./module/wiki/import.js";
+export { saveFigure, type FigureFile, type SavedFigure } from "./module/wiki/figures.js";
 export { defineTool, z, type AgentTool, type ToolOutput } from "./agent/index.js";
 export type { Field, FieldType, FormKind, LedgerView, Properties, Schema, SessionState, Vault } from "./document/index.js";

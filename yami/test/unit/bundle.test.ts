@@ -313,7 +313,7 @@ describe("importBundle", () => {
     expect(await vault.exists("internal/wiki/promises/bundle-imported/PROMISE.md")).toBe(true);
     expect(module.import.command).toBe(false);
     expect(module.import.access).toBe("read-only");
-    expect(module.acts().map((a) => a.label)).toEqual(["New checkout"]);
+    expect(module.acts().map((a) => a.label)).toEqual(["New checkout", "New figures"]);
     expect(t.yami.problems).toEqual([]);
   });
 });

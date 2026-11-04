@@ -6,7 +6,7 @@ What the wiki plugin still needs, in the order they were raised, and what each b
 | --- | --- | --- |
 | I1. Articles in an encyclopedic voice | done | the policy `encyclopedic-voice`, the drafter's brief, `page-forms.md`, the lint warning `meta-voice` |
 | PF1. Export and import | done | `yami/wiki` `bundle.ts`, `WikiModule.exportBundle` and `importBundle`, the `import` flow and skill, the tools `wiki_export` and `wiki_import`, the commands Wiki: export a topic and Wiki: import a bundle |
-| PF2. Images in articles | planned | figures in the extractor's Item Map, the drafter's figure rules, the lint warning `figure-missing`, the `figures` flow with the agent `illustrator` and the tool `wiki_figure` |
+| PF2. Images in articles | done | figures in the extractor's Item Map, the drafter's figure rules, the lint warning `figure-missing`, the `figures` flow with the agent `illustrator` and the tool `wiki_figure` |
 | PF3. Protected writing | planned | `yami/document` `protected.ts`, the refusal in `validatePlan`, the tool `yami_protected`, the check `protected`, the lint warning `protected-lost`, the editor extension and the commands in `yami/obsidian` |
 
 ## I1. Articles in an encyclopedic voice
@@ -44,6 +44,8 @@ What the wiki plugin still needs, in the order they were raised, and what each b
 - **The ingest notes figures and goes on with the text.** The extractor's Item Map gets `figures`: for each figure in its chunk, the locator, what it shows, what a reader must take from it, the subjects it serves, and the path of the picture when the captured text links one (a `.pptx` or a `.docx` capture writes the pictures beside the text already). The drafter embeds a captured picture under the claim it supports, with a caption and the citation. For a figure with no picture (a PDF, a drawing the capture could not show, a figure that should be drawn), it writes a figure marker in the topic: `%% figure: <what it shows and conveys> · from: [[Source]] <locator> %%`. Obsidian hides the marker in reading view, so the topic reads clean, and the marker says where the figure goes.
 - **The markers are the to-do list.** Lint reports each as `figure-missing`, a warning with the marker's text. No list is stored.
 - **A `figures` session makes them.** Its skill works through the markers of the topics in its `topics` field (every topic with a marker when the field is empty), and for each one runs the read-only agent `illustrator` with the marker and the source's locator. The illustrator reads the source at the locator (a PDF page with Read, a captured text) and returns the figure as SVG: a redrawing of the source's figure, or a diagram from scratch. The lead saves it with `wiki_figure`, which writes `internal/wiki/figures/<topic>/<name>.svg` (or a PNG, when the illustrator could render and crop a page with a tool the machine has, such as `pdftoppm`) and refuses an SVG with a script or an outside reference. One change plan replaces each marker with the embed and its caption. The session is read-only; the one file it writes outside a plan is a figure, through the tool.
+**Not done.** No capture of pictures from a PDF in code: the illustrator reads the page and redraws, or renders it with a tool the machine has. A PDF renderer in the library would need a dependency the plugin review would read.
+
 - SVG instead of a screenshot of a web component: Obsidian renders SVG itself, so no browser is needed on the machine, and the SVG is the saved component.
 
 ## PF3. Protected writing

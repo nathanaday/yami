@@ -107,6 +107,7 @@ describe("the commands of the modules in Obsidian", () => {
     const names = () => [...commands.values()].map((c) => `${c.id} · ${c.name}`);
     expect(names()).toEqual([
       "yami-wiki-new-checkout · Wiki: new checkout",
+      "yami-wiki-new-figures · Wiki: new figures",
       "yami-wiki-return · Wiki: return this checkout",
       "yami-threads-create-agent · Threads: create agent",
       "yami-threads-create-flow · Threads: create flow",
