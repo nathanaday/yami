@@ -423,3 +423,22 @@ describe("a new vault module from the starter", () => {
     await expect(yami.createModule("Drafts")).rejects.toThrow("The folder internal/drafts/ exists.");
   });
 });
+
+describe("the host's skill sets", () => {
+  it("gives every agent the host's sets beside Yami's and the modules', and follows the option on refreshSkills", async () => {
+    let sets = ["/sets/one"];
+    const t = await testYami({ skills: () => sets });
+    try {
+      expect(t.yami.skills()).toContain("/sets/one");
+      expect(t.yami.skills()[0]).toBe(`${t.root}/internal/yami`);
+      expect(t.agent.preferences.skills).toContain("/sets/one");
+      sets = ["/sets/two"];
+      expect(t.agent.preferences.skills).not.toContain("/sets/two");
+      t.yami.refreshSkills();
+      expect(t.agent.preferences.skills).toContain("/sets/two");
+      expect(t.agent.preferences.skills).not.toContain("/sets/one");
+    } finally {
+      await t.dispose();
+    }
+  });
+});

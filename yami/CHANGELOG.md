@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `skills` on `Yami`, `createYami`, and `testYami`: skill-set folders of the host, as absolute paths or a function that gives them, which every agent gets beside Yami's and the modules'. `yami.refreshSkills()` applies a change of what the function gives, for sessions that start after it. A plugin that finds skills in the vault, as Duet does with `SKILL.md` folders, hands them to every conversation note this way, on both harnesses.
+
 ## 0.22.0 · citations you can follow, and sources that stay current
 
 Every citation of a topic can be followed, checked, and kept current: a hover shows the passage it leads to, a verify session reads each one against the source, a changed file is re-ingested as a delta that moves the citations, and semantic search runs on the person's own computer with Ollama.
