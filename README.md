@@ -141,5 +141,6 @@ In Obsidian, turn on **Yami Wiki** under **Settings → Community plugins**, the
 | [`yami/`](yami/) | The library |
 | [`design.md`](design.md) | The design rules that the code keeps |
 | [`docs/releasing.md`](docs/releasing.md) | How each repository is checked and released, and how a plugin gets into a vault |
+| [`docs/todo.md`](docs/todo.md) | The wiki's open items, and what each became |
 
 The plugins have repositories of their own: [yami-wiki](https://github.com/nathanaday/yami-wiki), [yami-threads](https://github.com/nathanaday/yami-threads), and [obsidian-duet](https://github.com/nathanaday/obsidian-duet).
