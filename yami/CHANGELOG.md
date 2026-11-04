@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `skills` on `Yami`, `createYami`, and `testYami`: skill-set folders of the host, as absolute paths or a function that gives them, which every agent gets beside Yami's and the modules'. `yami.refreshSkills()` applies a change of what the function gives, for sessions that start after it. A plugin that finds skills in the vault, as Duet does with `SKILL.md` folders, hands them to every conversation note this way, on both harnesses.
+
 ## 0.20.0 · one plugin, one thing
 
 The library holds the parts that the plugins share, and a plugin takes only the built-in module it is for. Two Yami plugins can share a vault: each keeps its own conversation notes.

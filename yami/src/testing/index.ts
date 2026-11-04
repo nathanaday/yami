@@ -32,6 +32,8 @@ export interface TestYamiOptions {
   wikiModule?: boolean;
   /** Whether the Yami holds the built-in threads module, as the option of `Yami`. Default true. */
   threads?: boolean;
+  /** Skill-set folders of the host, as the option of `Yami`. */
+  skills?: string[] | (() => string[]);
   /**
    * Files and folders to copy into the vault before the modules are enabled, so that `enable` finds them,
    * as a vault module: each vault path with the file or the folder on disk to copy there. A relative disk
@@ -60,7 +62,7 @@ export async function testYami(options: TestYamiOptions = {}): Promise<TestYami>
   }
   const vault = new FsVault(root);
   const agent = new ScriptedAgent(options.turns);
-  const yami = new Yami({ vault, agents: [agent], modules: options.modules, wiki: options.wiki, wikiModule: options.wikiModule, threads: options.threads });
+  const yami = new Yami({ vault, agents: [agent], modules: options.modules, wiki: options.wiki, wikiModule: options.wikiModule, threads: options.threads, skills: options.skills });
   await yami.enable();
   return {
     yami,

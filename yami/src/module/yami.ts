@@ -41,6 +41,12 @@ export interface YamiOptions {
   conversations?: Conversations;
   /** The folder of conversation notes. Default `conversations`. A function is read at each use, so the folder can follow a setting. */
   conversationFolder?: string | (() => string);
+  /**
+   * Skill-set folders of the host, as absolute paths, which every agent gets beside Yami's and the modules'.
+   * A skill set is a folder whose `skills/` holds one folder for each skill (see `SessionOptions.skills`).
+   * A function is read at each use; when what it gives changes, the host calls `refreshSkills`.
+   */
+  skills?: string[] | (() => string[]);
 }
 
 /** The files of a folder outside the vault and of its subfolders, as absolute paths, with no hidden file or folder. */
@@ -91,6 +97,7 @@ export class Yami {
   /** Agents that `setAgents` removed. A live run can still use one, and `close` closes it. */
   readonly #retired = new Set<Agent>();
   readonly #conversationFolder: string | (() => string);
+  readonly #hostSkills: string[] | (() => string[]);
   readonly #conversations: Conversations;
   /** The built-in wiki module, unless the host left it out. */
   readonly #wikiModule: WikiModule | undefined;
@@ -110,6 +117,7 @@ export class Yami {
   constructor(options: YamiOptions) {
     this.vault = options.vault;
     this.#conversationFolder = options.conversationFolder ?? CONVERSATION_FOLDER;
+    this.#hostSkills = options.skills ?? [];
     const exclude = options.wiki?.exclude;
     this.wiki = new Wiki(this.vault, { ...options.wiki, exclude: () => [this.conversationFolder, ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] });
     const wikiModule = options.wikiModule ?? true;
@@ -212,11 +220,18 @@ export class Yami {
   }
 
   /**
-   * The skill sets that Yami gives its agents: its own, with the base skill `/yami:run`, and each module's
-   * that has skills. A skill is invoked as `/<module id>:<skill>`.
+   * The skill sets that Yami gives its agents: its own, with the base skill `/yami:run`, each module's
+   * that has skills, and the host's (the `skills` option). A skill is invoked as `/<set>:<skill>`.
    */
   skills(): string[] {
-    return [`${this.vault.root.replace(/\/$/, "")}/${YAMI_SKILLS}`, ...moduleSkills(this.vault, this.modules)];
+    const host = typeof this.#hostSkills === "function" ? this.#hostSkills() : this.#hostSkills;
+    return [`${this.vault.root.replace(/\/$/, "")}/${YAMI_SKILLS}`, ...moduleSkills(this.vault, this.modules), ...host];
+  }
+
+  /** Gives every agent the skill sets as they are now. A host calls it when its `skills` option gives something new. Sessions that start after it have the new sets. */
+  refreshSkills(): void {
+    const skills = this.skills();
+    for (const agent of [...this.#agents, ...this.#retired]) agent.setPreferences({ skills });
   }
 
   /**
@@ -274,8 +289,7 @@ export class Yami {
     this.#vault = modules;
     const colors = assignColors(this.modules);
     for (const module of this.modules) module.attach(this, colors.get(module)!);
-    const skills = this.skills();
-    for (const agent of [...this.#agents, ...this.#retired]) agent.setPreferences({ skills });
+    this.refreshSkills();
     for (const module of added) {
       try {
         await module.install();

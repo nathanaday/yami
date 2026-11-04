@@ -60,6 +60,11 @@ export interface YamiPluginOptions {
   wiki?: WikiOptions;
   /** The folder of conversation notes. Default `conversations`. A function is read at each use. */
   conversationFolder?: string | (() => string);
+  /**
+   * Skill-set folders of the plugin, as absolute paths, which every agent gets beside Yami's and the modules'.
+   * A function is read at each use; when what it gives changes, the plugin calls `yami.refreshSkills()`.
+   */
+  skills?: string[] | (() => string[]);
   /** Minutes after which an agent process with no open message box and no turn closes. Default 15. A function is read at each use. */
   idleMinutes?: number | (() => number);
   /**
@@ -139,6 +144,7 @@ export class ObsidianYami extends Yami {
       wiki: { ...options.wiki, exclude: () => [...ignoredPaths(app), ...(typeof exclude === "function" ? exclude() : (exclude ?? []))] },
       conversations: { open: (open) => runs!.open(open) },
       conversationFolder: options.conversationFolder,
+      skills: options.skills,
     });
     this.#registered = registered;
     this.#idleMinutes = options.idleMinutes ?? IDLE_MINUTES;
