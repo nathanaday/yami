@@ -44,10 +44,12 @@ export {
   type WrittenBundle,
 } from "./bundle.js";
 export { chunk, MAX_CHUNK, type Chunk } from "./chunks.js";
-export { cosine, EmbeddingCache, VoyageEmbedder, type Embedder, type VoyageOptions } from "./embed.js";
+export { changedRuns, CONTEXT_LINES, deltaChunks, lineDelta, mapRange, movedCitations, type DeltaChunks, type LineDelta, type LineRange, type MovedCitation } from "./delta.js";
+export { CITATION, citations, claimBefore, lintCitations, parseLocator, passage, PASSAGE_LINES, passageText, resolveCitation, resolveCitations, sourceExtent, visibleRanges, type Citation, type CitationRef, type CitationTarget, type Extent, type Locator, type Passage, type ResolvedCitation, type SourceExtent } from "./citations.js";
+export { cosine, EmbeddingCache, OLLAMA_BATCH, OllamaEmbedder, VoyageEmbedder, type Embedder, type OllamaOptions, type VoyageOptions } from "./embed.js";
 export { CACHE_PATH, CHANGES, inKnowledge, KNOWLEDGE, ORIGINALS, SNAPSHOTS, SOURCES, TOPICS, WIKI, WIKI_INTERNAL } from "./folders.js";
 export { FIGURE_MARKER, FIGURES, figureMarker, figureMarkers, fromBase64, MAX_PNG_BYTES, MAX_SVG_BYTES, pngProblem, svgProblem, type FigureMarker } from "./figures.js";
-export { lint, metaVoice, type Finding, type LintOptions } from "./lint.js";
+export { lint, metaVoice, selectNotes, type Finding, type LintOptions } from "./lint.js";
 export type { Neighbors, TagCount, TagView } from "./tags.js";
 export { match, THRESHOLD, type Match, type MatchOptions, type Neighbor } from "./match.js";
 export {
@@ -63,7 +65,10 @@ export {
   LINES_PER_CHUNK,
   PAGES_PER_CHUNK,
   sourceChunks,
+  sourceFile,
+  TEXT_EXTENSIONS,
   type OutsideFile,
+  type SourceFile,
   type SourceChunk,
   type SourceChunks,
 } from "./source.js";

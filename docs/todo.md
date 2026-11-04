@@ -7,6 +7,11 @@ What the wiki plugin still needs, in the order they were raised, and what each b
 | I1. Articles in an encyclopedic voice | done | the policy `encyclopedic-voice`, the drafter's brief, `page-forms.md`, the lint warning `meta-voice` |
 | PF1. Export and import | done | `yami/wiki` `bundle.ts`, `WikiModule.exportBundle` and `importBundle`, the `import` flow and skill, the tools `wiki_export` and `wiki_import`, the commands Wiki: export a topic and Wiki: import a bundle |
 | PF2. Images in articles | done | figures in the extractor's Item Map, the drafter's figure rules, the lint warning `figure-missing`, the `figures` flow with the agent `illustrator` and the tool `wiki_figure` |
+| SF1. Claim verification | done | `citations.ts` in `yami/wiki`, the lint warning `bad-citation`, the tool `wiki_citations`, the `verify` flow with the agent `verifier`, the promise `claims-verified`, and the check `verified` |
+| SF2. Local embeddings | done | `OllamaEmbedder` and `wiki.setEmbedder` in `yami/wiki`, the `hybrid` fallback, and the Embeddings setting of the wiki plugin |
+| SF3. Source freshness | done | `supersedes` on a new capture, the lint warning `superseded-citation`, `delta.ts` in `yami/wiki`, `wiki_chunks` as `deltaChunks`, and the ingest skill's and the drafter's superseded-source text |
+| SF4. Overview topics from communities | dropped | the tag navigator already gives a walkable structure, and overviews rot as the graph moves |
+| SF5. Citation preview | done | `CitationPreview`, `citationExtension`, `citationPostProcessor`, and `wrapCitations` in `yami/obsidian`, added by `createYami` with the wiki module |
 | PF3. Protected writing | done | `yami/document` `protected.ts`, the refusal in `validatePlan`, the tool `yami_protected`, the check `protected`, the lint warning `protected-lost`, the editor extension and the commands in `yami/obsidian` |
 
 ## I1. Articles in an encyclopedic voice
@@ -60,3 +65,42 @@ What the wiki plugin still needs, in the order they were raised, and what each b
 - **In Obsidian**, the commands Protect the selection and Unprotect the selection, also in the editor's menu, and Toggle editing of protected text. An editor extension marks the protected ranges gray on a soft background. In `block` mode (the default) a transaction that changes a protected range is dropped; in `track` mode the edit goes through and the mark's text follows it, so the person edits their own protected text and the map stays right. `protectedEditing` on `createYami` sets the default; the command switches for the session. The hub's guard puts a protected mark back when an agent's live edit removes it, and says so in a notice.
 
 **Not done.** Duet's contribution ledger is not moved onto this map: its spans are positions through every edit, for authorship, and the protected map is content a person chose; the design says what each is for. A Reading view marks the block that holds protected text, not the text itself, since rendered text has no positions.
+
+## SF1. Claim verification
+
+**The problem.** The wiki promises a citation on every claim, and nothing enforces that the cited passage says what the claim says. A locator can be wrong, a claim can say more than its source, and a reader has no way to tell short of reading the source.
+
+**Design.**
+
+- **Code parses the citations.** `citations(body)` reads each citation of a topic: the target, the locator, and the claim (the sentence the citation ends). Everything else builds on it. `parseLocator` reads pages, slides, lines, sections, figures, and tables; `sourceExtent` reads how far a source's copy goes; `resolveCitation` says where a citation leads, or why it cannot.
+- **Lint checks what code can see.** `bad-citation`, a warning: a locator on a note that is not a source, or a page, slide, or line past the copy's end. A dead link stays `dead-link`.
+- **A verify session reads the rest.** The flow `verify` (read-only, with a command and the field `topics`) runs the agent `verifier` per topic, with the output of `wiki_citations`: each claim with its file and range. The verifier grades each claim by the passage alone (`supported`, `unsupported`, `contradicted`, `misplaced`, `unreadable`) and quotes the passage. The lead proposes one change with the fixes and `verified` on each topic; the check `verified` holds the session to a date at or after its creation, in the wiki or in a standing change.
+
+**Not done.** No rewrite of claims by code: the verifier is an LLM, so every fix is a proposal a person approves, and the code check stays a warning. No reading of a PDF's page in code: the verifier reads it with its Read tool.
+
+## SF2. Local embeddings
+
+**The problem.** The hybrid algorithm needs an embedder, and the only one took a Voyage key, so the plugin, which promises no key, searched by words alone.
+
+**Design.** `OllamaEmbedder` fills the `Embedder` contract with Ollama on the person's computer, over `fetch` to localhost: no key, no network beyond the machine. The plugin's settings offer Off, Ollama, or Voyage with a key; `wiki.setEmbedder` swaps the embedder while the wiki runs, and the default algorithm follows the setting (`hybrid` with an embedder). `hybrid` survives an embedder that fails: the lexical half alone, with the reason kept on the wiki for the settings tab to show.
+
+**Not done.** No embedding model inside the plugin: an ONNX runtime is a dependency the plugin review would read, and Ollama is the person's own installation, as Claude Code and Codex are.
+
+## SF3. Source freshness
+
+**The problem.** An edited file was captured as a new source, and the topics kept citing the old one. Nothing linked the two, and a re-ingest read the whole file again.
+
+**Design.**
+
+- **`supersedes` on the new source**, a link to the earlier capture of the same file. The earlier one stays: its copy is what the topics said. Lint warns `superseded-citation` on a topic that cites a superseded source, with the fix: run the new source's ingest.
+- **The ingest is a delta.** `wiki_chunks` on a superseding source, when both copies are texts, gives only the changed passages with their context, the removed runs of the old text, and each citation of the old source in the topics with where it stands against the new text: `kept` with its new locator (line ranges mapped through the line diff), `changed`, or `unknown` (a locator that is not a line range). The skill extracts only those chunks, and the drafter moves the kept citations and revisits the changed claims against the changed passages; the old source gets `status: superseded`. For copies that are not texts, such as two PDFs, the chunks are the whole file and every cited passage is unknown.
+
+**Not done.** No delta for PDFs: a page diff needs the text of the pages, which the library does not read. A re-exported PDF is ingested whole, as before.
+
+## SF5. Citation preview
+
+**The problem.** A citation named a place in a source, and a reader had to open the source and find the place by hand.
+
+**Design.** `CitationPreview` in `yami/obsidian` marks each citation of a source in the editor and in Reading view, and shows where it leads when the pointer rests on it: the passage of the copy at the locator (a text's lines, a slide, a section, a figure's line), or the page of a PDF, in a popover; a click on the title opens the file there. It uses the same parser and resolver as lint and the verifier, and holds no state. In Reading view the links are rendered, so the citation is read from the nodes: the links give their targets, the text between them the locators.
+
+**Not done.** No preview of a PDF's page as a picture: the popover names the page, and the click opens the PDF there.

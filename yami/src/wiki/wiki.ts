@@ -29,6 +29,7 @@ import {
   type ValidateOptions,
 } from "./change.js";
 import { chunk, type Chunk } from "./chunks.js";
+import { lintCitations } from "./citations.js";
 import { EmbeddingCache, type Embedder } from "./embed.js";
 import { BUNDLE_PROPERTY } from "./bundle.js";
 import { CACHE_PATH, ORIGINALS, WIKI_INTERNAL } from "./folders.js";
@@ -138,6 +139,18 @@ export class Wiki {
 
   get embedder(): Embedder | undefined {
     return this.options.embedder;
+  }
+
+  /** Why the embedder's last call failed, for a host to show; cleared by a call that works. */
+  embedderProblem: string | undefined;
+
+  /**
+   * Replaces the embedder, or removes it with nothing, for a host whose setting changed while the wiki runs.
+   * The cache follows: a new embedder reads the cache file again and keeps it only when the file names it.
+   */
+  setEmbedder(embedder: Embedder | undefined): void {
+    this.options.embedder = embedder;
+    this.cache = embedder ? new EmbeddingCache(this.vault, embedder, this.options.cachePath ?? CACHE_PATH) : undefined;
   }
 
   /** The algorithm of a query that names none, as the option gives it now. */
@@ -315,16 +328,20 @@ export class Wiki {
     return match(this, names, options);
   }
 
-  /** The health of the notes: each finding names its fix. A protected text map that does not parse is a finding on the map itself. */
+  /**
+   * The health of the notes: each finding names its fix. A protected text map that does not parse is a finding
+   * on the map itself. The citations of the topics are checked against the sources' files (`lintCitations`).
+   */
   async lint(options: LintOptions = {}): Promise<Finding[]> {
     await this.ensure();
     let guarded: ProtectedMap | undefined;
+    let broken: Finding[] = [];
     try {
       guarded = await readProtected(this.vault);
     } catch (error) {
-      return [{ path: PROTECTED_PATH, check: "bad-protected-map", severity: "error", message: error instanceof Error ? error.message : String(error), fix: "fix the JSON, or remove the file and protect the texts again" }, ...lint(this, options)];
+      broken = [{ path: PROTECTED_PATH, check: "bad-protected-map", severity: "error", message: error instanceof Error ? error.message : String(error), fix: "fix the JSON, or remove the file and protect the texts again" }];
     }
-    return lint(this, options, guarded);
+    return [...broken, ...lint(this, options, guarded), ...(await lintCitations(this, options))];
   }
 
   /** The notes that a query's `types`, `tags`, and `folder` keep. */

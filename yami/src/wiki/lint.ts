@@ -1,3 +1,4 @@
+import { basename, linkTarget } from "../document/document.js";
 import { excerpt, protectedLost, type ProtectedMap } from "../document/protected.js";
 import { figureMarkers } from "./figures.js";
 import { normalizeName } from "./tokens.js";
@@ -66,14 +67,27 @@ export function metaVoice(body: string): string[] {
   return found;
 }
 
+/** The notes that a lint's options keep: the paths named, the notes of the folder, or every note. */
+export function selectNotes(wiki: Wiki, options: LintOptions = {}): Note[] {
+  const wanted = new Set(options.paths?.map((path) => wiki.resolve(path) ?? path));
+  const folder = options.folder?.replace(/\/$/, "");
+  return wiki.notes.filter((note) => (!wanted.size || wanted.has(note.path)) && (!folder || note.path.startsWith(`${folder}/`)));
+}
+
 /** The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions, uncited sources, orphans, topics with figures still to make, topics in the voice of a report on their source, and notes that lost a text a person protected. */
 export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedMap): Finding[] {
   const findings: Finding[] = [];
   const add = (note: Note, check: string, severity: Finding["severity"], message: string, fix: string) =>
     findings.push({ path: note.path, check, severity, message, fix });
-  const wanted = new Set(options.paths?.map((path) => wiki.resolve(path) ?? path));
-  const folder = options.folder?.replace(/\/$/, "");
-  const selected = wiki.notes.filter((note) => (!wanted.size || wanted.has(note.path)) && (!folder || note.path.startsWith(`${folder}/`)));
+  const selected = selectNotes(wiki, options);
+
+  // A source that a later capture of its file supersedes, by the `supersedes` link of the later one.
+  const supersededBy = new Map<string, Note>();
+  for (const note of wiki.notes) {
+    if (note.type !== "source" || typeof note.properties.supersedes !== "string") continue;
+    const old = wiki.resolve(linkTarget(note.properties.supersedes));
+    if (old) supersededBy.set(old, note);
+  }
 
   const holders = new Map<string, Note[]>();
   for (const note of wiki.notes) {
@@ -105,6 +119,10 @@ export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedM
       const figures = figureMarkers(note.body);
       if (figures.length) {
         add(note, "figure-missing", "warning", `has ${figures.length} figure${figures.length === 1 ? "" : "s"} to make: ${figures.map((f) => `"${f.shows}"`).join(", ")}`, "run a figures session on it (Wiki: new figures), which draws each figure and replaces the marker with its embed");
+      }
+      const stale = [...new Set(note.links.map((path) => supersededBy.get(path)).filter((n): n is Note => n !== undefined))];
+      if (stale.length) {
+        add(note, "superseded-citation", "warning", `cites ${stale.map((n) => `[[${basename(linkTarget(n.properties.supersedes as string))}]], which [[${n.name}]] supersedes`).join("; ")}: the file changed since`, "run the ingest session of the new source (Wiki: ingest this file creates one), which moves the citations to it and revisits the claims the edit changed");
       }
       const phrases = metaVoice(note.body);
       if (phrases.length) {

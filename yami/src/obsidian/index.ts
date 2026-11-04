@@ -23,6 +23,7 @@ export { checkModuleIcons, moduleIcon } from "./icons.js";
 export { watchModules } from "./discovery.js";
 export { ObsidianVault } from "./vault.js";
 export { createYami, HARNESS_COLORS, IDLE_MINUTES, ObsidianYami, type AgentEntry, type CommandGroup, type YamiPluginOptions } from "./yami.js";
+export { CITATION_ATTRIBUTE, CITATION_CLASS, CITATION_POPOVER_CLASS, citationExtension, citationPostProcessor, CitationPreview, HOVER_DELAY, wrapCitations, type CitationView } from "./wiki/citations.js";
 export { WikiCompareModal } from "./wiki/compare-modal.js";
 export { WikiExportModal } from "./wiki/export-modal.js";
 export { findingRows, matchRows, NoteListModal, type NoteRow } from "./wiki/list-modal.js";

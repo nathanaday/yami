@@ -19,8 +19,19 @@ export const hybrid: Algorithm = async (wiki, query) => {
   const lexical = wiki.chunkLexical(text);
   const lexicalRank = rank([...lexical.keys()].filter((i) => lexical[i]! > 0), (i) => lexical[i]!);
   let semanticRank = new Map<number, number>();
-  const vectors = await wiki.vectors();
-  const queryVector = vectors ? await wiki.queryVector(text) : undefined;
+  let vectors: Map<string, Float32Array> | undefined;
+  let queryVector: Float32Array | undefined;
+  let problem: string | undefined;
+  // An embedder that fails, such as Ollama not running, leaves the lexical half, and the reason says so.
+  try {
+    vectors = await wiki.vectors();
+    queryVector = vectors ? await wiki.queryVector(text) : undefined;
+  } catch (error) {
+    vectors = undefined;
+    problem = error instanceof Error ? error.message : String(error);
+    wiki.embedderProblem = problem;
+  }
+  if (!problem) wiki.embedderProblem = undefined;
   if (vectors && queryVector) {
     const similarity = chunks.map(({ chunk }) => cosine(queryVector, vectors.get(chunk.hash)!));
     semanticRank = rank([...similarity.keys()].filter((i) => similarity[i]! > 0), (i) => similarity[i]!);
@@ -37,7 +48,7 @@ export const hybrid: Algorithm = async (wiki, query) => {
     byNote.set(note.path, {
       path: note.path,
       score,
-      why: `chunk "${chunk.heading}": ${kinds}${vectors ? "" : " (no embedder)"}`,
+      why: `chunk "${chunk.heading}": ${kinds}${vectors ? "" : problem ? " (embedder failed)" : " (no embedder)"}`,
       snippet: chunk.text.length > 200 ? `${chunk.text.slice(0, 197)}…` : chunk.text,
     });
   }

@@ -132,6 +132,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/agents/drafter/AGENT.md",
     "internal/wiki/agents/extractor/AGENT.md",
     "internal/wiki/agents/illustrator/AGENT.md",
+    "internal/wiki/agents/verifier/AGENT.md",
     "internal/wiki/installed.json",
     "internal/wiki/policies/cite-every-claim/POLICY.md",
     "internal/wiki/policies/encyclopedic-voice/POLICY.md",
@@ -140,6 +141,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/policies/protected-text/POLICY.md",
     "internal/wiki/promises/bundle-imported/PROMISE.md",
     "internal/wiki/promises/change-applied/PROMISE.md",
+    "internal/wiki/promises/claims-verified/PROMISE.md",
     "internal/wiki/promises/clean-topics/PROMISE.md",
     "internal/wiki/promises/figures-made/PROMISE.md",
     "internal/wiki/promises/reading-list-made/PROMISE.md",
@@ -151,9 +153,10 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/skills/import/SKILL.md",
     "internal/wiki/skills/ingest/SKILL.md",
     "internal/wiki/skills/ingest/page-forms.md",
+    "internal/wiki/skills/verify/SKILL.md",
     "internal/wiki/wiki.md",
   ];
-  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"];
+  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"];
 
   it("writes the vault ledger, the base skill, and the documents of the wiki and threads, and gives each agent its tools and three skill sets, as the README lists them", async () => {
     t = await testYami();

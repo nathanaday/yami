@@ -108,6 +108,7 @@ describe("the commands of the modules in Obsidian", () => {
     expect(names()).toEqual([
       "yami-wiki-new-checkout · Wiki: new checkout",
       "yami-wiki-new-figures · Wiki: new figures",
+      "yami-wiki-new-verify · Wiki: new verify",
       "yami-wiki-return · Wiki: return this checkout",
       "yami-threads-create-agent · Threads: create agent",
       "yami-threads-create-flow · Threads: create flow",

@@ -65,6 +65,7 @@ aliases: [SSL]
 sources: ["[[${SOURCES}/DINOv2|DINOv2]]"]
 status: draft          # draft | stable | contested | deprecated
 kind: concept          # concept (an idea) | entity (a named thing) | overview (the page of a tag)
+verified: 2026-11-04T10:00:00   # set by a verify session, which read each citation at its place; never by a drafter
 \`\`\`
 
 Sections, in order: \`## Definition\` or \`## What it is\` (two or three sentences), \`## Explanation\` or \`## Facts\`, \`## Related\` (links, each with a few words on how it relates), \`## Sources\` (each cited source, one line on what it gives), \`## Notes\` (the user's; never change it).
@@ -83,12 +84,14 @@ A source note stands for one captured original. Capture copies the file into \`i
 description: One sentence on what the original is.
 tags: [paper, vision]
 authority: secondary   # official | primary | secondary | community | synthetic | unknown
-status: absorbed       # when every claim worth keeping is in the topics
+status: absorbed       # when every claim worth keeping is in the topics; superseded when a later capture of the file replaced it
 \`\`\`
 
 Body: the embed of the copy or its text, then \`## Summary\` (what it says, a paragraph or two), \`## Structure\` (one line per part, linking the topics that grew from it), \`## Notes\` (the user's). Cite a source by its note, \`[[Dart Manipulation Tutorials (source)]]\`, never by the file it came from.
 
 The source note is the one page that describes the original as a thing: what it is, who made it and for whom, how it is organized, what it covers well and where it is thin or wrong. Write that here, in the Summary and the Structure, and keep it out of the topics.
+
+A later capture of a file that has a source is a new source note with \`supersedes\`, a link to the earlier one. Lint warns \`superseded-citation\` on a topic that still cites the earlier one; the ingest of the new source moves the citations, and the earlier source gets \`status: superseded\`.
 
 Never change the copy that a source embeds, or the file it came from.
 `;
@@ -187,6 +190,10 @@ You decide what the wiki does with each subject of your slice, and you draft the
 - **entity**: it has a name, and the document says something about it that someone would look up.
 - **concept**: the document explains it, or relies on it in a way a reader must understand.
 - A subject that fails both gates is skipped, with its reason.
+
+## A superseded source
+
+When the task says the source supersedes an earlier capture of the same file, the task also gives the citations of the old source in your topics, each with where it stands. In the modify of such a topic: a \`kept\` citation points at the new source note, with its \`moved\` locator when it has one, and the \`sources\` property names the new source in place of the old; a \`changed\` or \`unknown\` claim is read against the changed passages of the new text, in the items you were given, and kept with its new citation, corrected, or dropped when the new text no longer supports it, with the reason in your \`reason\`. No topic keeps a citation of the old source.
 
 ## Writing
 

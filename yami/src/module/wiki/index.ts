@@ -7,7 +7,9 @@ import { algorithms } from "../../wiki/algorithms/index.js";
 import { BUNDLE_SIZES, isRepository, readBundle, selectBundle, selectDocuments, writeBundle, type BundleSelection, type BundleSize, type WrittenBundle } from "../../wiki/bundle.js";
 import { bodyHash, InvalidPlan, validatePlan, type ChangePlan, type Write } from "../../wiki/change.js";
 import { CHANGES, inKnowledge, SNAPSHOTS, SOURCES, TOPICS, WIKI } from "../../wiki/folders.js";
-import { isAbsolute, sourceChunks } from "../../wiki/source.js";
+import { resolveCitations } from "../../wiki/citations.js";
+import { deltaChunks } from "../../wiki/delta.js";
+import { isAbsolute } from "../../wiki/source.js";
 import { normalizeTag } from "../../wiki/wiki.js";
 import { WIKI_COLOR } from "../colors.js";
 import { YamiModule } from "../module.js";
@@ -15,6 +17,7 @@ import { checkedOut, checkoutSkill, COPY, MAX_DOCUMENTS, orderShape, readingList
 import { absorbed, drafterAgent, extractorAgent, INGEST, pageForms, proposed } from "./ingest.js";
 import { figures, figuresMade, figuresSkill, illustratorAgent, saveFigure } from "./figures.js";
 import { bundleImported, imported, importSkill, stagingFolder, type ImportedBundle, type StagedNote } from "./import.js";
+import { claimsVerified, verified, verifierAgent, verifySkill } from "./verify.js";
 
 /** The vault folder where a bundle goes when the export names none: `exports/<name>/`. */
 export const EXPORTS = "exports";
@@ -83,7 +86,7 @@ export class WikiModule extends YamiModule {
       sort: [{ property: "created", direction: "DESC" }],
     },
   ];
-  readonly checks = { "checked-out": checkedOut, proposed, absorbed, imported, figures };
+  readonly checks = { "checked-out": checkedOut, proposed, absorbed, imported, figures, verified };
   readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, which proposes a change document in ${CHANGES}/ that a person approves in Obsidian, with a version in ${SNAPSHOTS}/ for each applied change. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
 
   readonly cite = this.policy({
@@ -142,12 +145,12 @@ export class WikiModule extends YamiModule {
 
 Two agents of the session do the reading and the drafting, each in a fresh context: \`extractor\` reads one chunk, and \`drafter\` drafts the writes of one slice. Run each with \`yami_agent\`; calls in one turn run at the same time. An agent knows only its brief and your task, so give it everything in the task. \`page-forms.md\`, in this skill's folder \`${INGEST}/\`, gives the properties and the sections of a topic and a source: read it before you assemble the plan.
 
-1. **Chunks.** Call \`wiki_chunks\` for each source. It names the file to read and its chunks: line ranges, page ranges, or the whole file. Call \`wiki_tags\` once for the tag list.
+1. **Chunks.** Call \`wiki_chunks\` for each source. It names the file to read and its chunks: line ranges, page ranges, or the whole file. Call \`wiki_tags\` once for the tag list. A source that **supersedes** an earlier capture of its file says so: with \`delta: true\` its chunks are the changed passages alone, with the lines around them, and \`citations\` lists each citation of the old source in the topics with where it stands (\`kept\` with its locator in the new text as \`moved\`, \`changed\`, or \`unknown\`); with \`delta: false\` (the copies are not texts) the chunks are the whole file and every cited passage is unknown. Extract the chunks it gives and no more; a source with no chunk changed in nothing but form, and its citations move.
 2. **Extract.** For each chunk, call \`yami_agent\` with the agent \`extractor\`, in waves of at most eight, also when you could read the chunk yourself: each worker reads with a fresh context, so the last chunk gets the care of the first. Only when the sources hold one chunk in all, extract it yourself from the extractor's brief, \`${this.layout.folders.agents}/extractor/AGENT.md\`. The task gives the source note's path, the file and the range from \`wiki_chunks\`, the source's tags, and the tag list. Each returns an Item Map. A \`partial\` chunk goes again, narrower.
 3. **Match.** Call \`wiki_match\` with every subject's name at once, aliases included, so a subject named in three chunks is one subject.
 4. **Slice.** Put every subject that hits or nears one topic into the same slice, so two drafters never write one topic. At most eight subjects per slice.
 5. **Draft.** For each slice, call \`yami_agent\` with the agent \`drafter\`. The task gives the slice (each subject with its items and its match), the source notes, their tags, and the tag list. Each returns writes. With one or two slices, draft them yourself from the drafter's brief, \`${this.layout.folders.agents}/drafter/AGENT.md\`.
-6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason, and the figure markers the drafters left, which a figures session makes later), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
+6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. For a source that supersedes another, also a modify of the old source with \`status: superseded\`, and the citations of the old source move: give each drafter the \`citations\` of its topics, so its modifies point every \`kept\` citation at the new source with its \`moved\` locator, and read each \`changed\` or \`unknown\` claim against the changed passages. A topic that cites the old source and gets no other write still gets a modify that moves its citations. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason, and the figure markers the drafters left, which a figures session makes later), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
 7. **Propose.** Call \`wiki_change\`. It validates the plan, writes it as a change document that waits for a person's approval, and links the change from this session. Nothing in the wiki changes until a person approves it in Obsidian. When the tool refuses, fix the writes it names and call it again. When it returns warnings, links to no note, fix those writes and propose the plan again; the person approves the last proposal and rejects the rest.
 8. **End.** Your work ends when the plan is proposed and covers every source. Do not wait for the approval, and do not lint the wiki for the plan's effect: the wiki holds it only after the approval. When a change of this session was rejected, the session's feedback holds the reason: read it, and propose a new plan that answers it.
 
@@ -237,6 +240,31 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     policies: [this.cite, this.onePlan, this.voice, this.protectedText],
     promises: [this.changeApplied, this.figuresMade],
     instructions: "With no topics in the Request section or the topics field, make the figures of every topic that has a marker.",
+  });
+
+  readonly verifier = this.agent(verifierAgent);
+  readonly verifySkill = this.skill(verifySkill);
+  readonly claimsVerified = this.promise(claimsVerified);
+
+  /**
+   * A verify session: reads each citation of the topics of its `topics` field, or of the topics most in need
+   * when the field is empty, at its locator in the source's copy, and proposes one change that fixes the claims
+   * the sources do not support and sets `verified` on each topic. Read-only: a topic changes only through
+   * `wiki_change`.
+   */
+  readonly verify = this.flow({
+    name: "verify",
+    description: "Read each citation of the topics at its place in the source, and propose one change plan that fixes the claims the sources do not support and stamps each topic verified.",
+    access: "read-only",
+    schema: {
+      /** The topics to verify. Empty: the topics with a bad citation, then the ones verified longest ago. */
+      topics: { type: "links", default: [] },
+    },
+    skills: [this.verifySkill],
+    agents: [this.verifier],
+    policies: [this.cite, this.onePlan, this.voice, this.protectedText],
+    promises: [this.changeApplied, this.claimsVerified],
+    instructions: "With no topics in the Request section or the topics field, verify the topics with a bad-citation finding first, then the ones with no verified date or the oldest one.",
   });
 
   readonly exportSkill = this.skill({
@@ -557,7 +585,7 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
       defineTool({
         name: "lint",
         readOnly: true,
-        description: "The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, and orphan topics. Each finding names its fix. Errors fail the clean-topics promise; warnings are worth a look. Reads only.",
+        description: "The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, orphan topics, figures still to make, topics in the voice of a report, citations that lead nowhere, and citations of a superseded source. Each finding names its fix. Errors fail the clean-topics promise; warnings are worth a look. Reads only.",
         input: {
           paths: z.array(z.string()).optional().describe("Check only these notes, as paths or [[link]] names."),
           folder: z.string().optional().describe(`Check only this folder, for example ${TOPICS}.`),
@@ -606,14 +634,31 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
       defineTool({
         name: "chunks",
         readOnly: true,
-        description: `Splits a source's original for the workers of an ingest: a text file into runs of at most 800 lines, a PDF into 20 pages at a time, any other file whole. A source with a text, such as the slides of a .pptx, is split as that text. Returns the file to read and each chunk's range and locator. Workers read a range with their Read tool.`,
+        description: `Splits a source's original for the workers of an ingest: a text file into runs of at most 800 lines, a PDF into 20 pages at a time, any other file whole. A source with a text, such as the slides of a .pptx, is split as that text. Returns the file to read and each chunk's range and locator. Workers read a range with their Read tool. For a source that supersedes an earlier capture of its file (both texts), the chunks are the changed passages alone, with delta true, the removed runs of the old text, and each citation of the old source in the topics with where it stands: kept with its new locator, changed, or unknown.`,
         input: {
           source: z.string().describe("The source note, as a path or a [[link]] name."),
         },
         title: ({ source }) => `Chunk ${source.slice(0, 60)}`,
         run: async ({ source }) => {
           await wiki.refresh();
-          return JSON.stringify(await sourceChunks(wiki.vault, wiki, source));
+          return JSON.stringify(await deltaChunks(wiki.vault, wiki, source));
+        },
+      }),
+      defineTool({
+        name: "citations",
+        readOnly: true,
+        description: `The citations of a topic, each with the claim it ends, the source note, the file to read (the frozen copy, or its text), and the lines or pages its locator names, so a verifier reads the source at that place. A citation that code can see leads nowhere, a locator past the file or a note that is not a source, says so in problem. A verify session calls it for each topic.`,
+        input: {
+          topic: z.string().describe("The topic, as a path or a [[link]] name."),
+        },
+        title: ({ topic }) => `Citations of ${topic.slice(0, 60)}`,
+        run: async ({ topic }) => {
+          await wiki.refresh();
+          const path = wiki.resolve(topic);
+          const note = path ? wiki.note(path) : undefined;
+          if (!note || note.type !== "topic") throw new Error(`${topic} is not a topic of the wiki.`);
+          const resolved = await resolveCitations(wiki.vault, wiki, note);
+          return JSON.stringify({ topic: note.path, verified: note.properties.verified ?? null, citations: resolved.map(({ from: _from, to: _to, ...rest }) => rest) });
         },
       }),
       defineTool({

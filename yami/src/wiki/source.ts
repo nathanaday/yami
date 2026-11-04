@@ -74,6 +74,8 @@ export async function captureSource(vault: Vault, file: string | OutsideFile, so
   const sha256 = await hashBytes(data);
   const existing = sourceOf(sources, path, sha256);
   if (existing) return existing;
+  // The file had a source before, with another content: the new source supersedes it, and lint says which topics still cite the old one.
+  const earlier = sources.latest.get(fromKey(path));
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
   const extension = dot > 0 ? name.slice(dot).toLowerCase() : "";
@@ -94,6 +96,7 @@ export async function captureSource(vault: Vault, file: string | OutsideFile, so
       ...(text && { text: `[[${text}]]` }),
       from: outside ? path : path.endsWith(".md") ? link(path) : `[[${path}]]`,
       sha256,
+      ...(earlier && { supersedes: link(earlier.path) }),
       status: "pending",
       created: timestamp(),
     },
@@ -182,13 +185,25 @@ export interface SourceChunks {
   chunks: SourceChunk[];
 }
 
+/** The file a source's workers read, and how it is read: by lines, by pages, or whole. */
+export interface SourceFile {
+  /** The source note. */
+  source: string;
+  /** The file the workers read, as a vault path: the frozen copy, or its text when the source has one. */
+  file: string;
+  kind: SourceChunk["kind"];
+}
+
+/** The extensions of the files that are read by lines. */
+export const TEXT_EXTENSIONS = ["md", "markdown", "txt", "text", "csv", "json", "yaml", "yml", "html", "xml", "tex", "rst", "org"];
+
 /**
- * Splits a source's original for the workers of an ingest: a text file into runs of at most
- * 800 lines, cut at a heading or a blank line; a PDF into 20 pages at a time; any other file
- * whole. A source with a `text`, such as the slides of a `.pptx`, is split as that text. The
- * workers read the ranges with their own Read tool.
+ * The file a source cites, named by the source note or by the file it was captured from, and how it is read:
+ * a text file by lines, a PDF by pages, any other file whole. A source with a `text`, such as the slides of a
+ * `.pptx`, is read as that text. It throws for a name that is neither a source nor a captured file, and a
+ * source whose file is not in the vault.
  */
-export async function sourceChunks(vault: Vault, wiki: Wiki, source: string): Promise<SourceChunks> {
+export async function sourceFile(vault: Vault, wiki: Wiki, source: string): Promise<SourceFile> {
   const named = wiki.resolve(source);
   const path = (named && wiki.note(named)?.type === "source" ? named : await sourceFrom(vault, source)) ?? named ?? source;
   if (!(await vault.exists(path))) throw new Error(`${source} is neither a source note nor a file that a source was captured from.`);
@@ -199,11 +214,22 @@ export async function sourceChunks(vault: Vault, wiki: Wiki, source: string): Pr
   const file = await resolveFile(vault, wiki, target);
   if (!file) throw new Error(`${path} links ${target}, which is not in the vault.`);
   const extension = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
-  if (["md", "markdown", "txt", "text", "csv", "json", "yaml", "yml", "html", "xml", "tex", "rst", "org"].includes(extension)) {
+  return { source: path, file, kind: TEXT_EXTENSIONS.includes(extension) ? "lines" : extension === "pdf" ? "pages" : "file" };
+}
+
+/**
+ * Splits a source's original for the workers of an ingest: a text file into runs of at most
+ * 800 lines, cut at a heading or a blank line; a PDF into 20 pages at a time; any other file
+ * whole. A source with a `text`, such as the slides of a `.pptx`, is split as that text. The
+ * workers read the ranges with their own Read tool.
+ */
+export async function sourceChunks(vault: Vault, wiki: Wiki, source: string): Promise<SourceChunks> {
+  const { source: path, file, kind } = await sourceFile(vault, wiki, source);
+  if (kind === "lines") {
     const lines = (await vault.read(file)).split("\n");
     return { source: path, file, kind: "lines", chunks: lineChunks(lines) };
   }
-  if (extension === "pdf") {
+  if (kind === "pages") {
     const pages = countPages(await vault.readBinary(file));
     if (pages === 0) return { source: path, file, kind: "pages", chunks: [{ index: 1, count: 1, kind: "pages", locator: "the pages, 20 at a time, until the end" }] };
     const count = Math.ceil(pages / PAGES_PER_CHUNK);

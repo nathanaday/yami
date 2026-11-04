@@ -64,7 +64,7 @@ describe("the agent tool", () => {
     expect(child!.options.approval).toBe("accept-edits");
     expect(child!.options.skills).toEqual(worker!.options.skills);
     expect(child!.options.cwd).toBe(t!.root);
-    expect(names(child!)).toEqual(["yami_check", "yami_protected", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks"]);
+    expect(names(child!)).toEqual(["yami_check", "yami_protected", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations"]);
     const [prompt] = child!.prompts;
     expect(prompt).toMatch(/^You are the agent "team:reader" of Yami: Reads the greeting and reports it\.\n\nA caller gave you the task below\. You work in a fresh context/);
     expect(prompt).toContain("You are read-only: change no file. You can run commands that only read or check, such as git log or the tests.");
@@ -228,7 +228,7 @@ describe("the agent tool", () => {
       await greet("unknown");
     });
     expect(await session.start()).toMatchObject({ state: "done" });
-    const list = "The agents: reader, writer, other:helper, wiki:drafter, wiki:extractor, wiki:illustrator.";
+    const list = "The agents: reader, writer, other:helper, wiki:drafter, wiki:extractor, wiki:illustrator, wiki:verifier.";
     expect(results).toEqual([
       { isError: true, text: `No agent is named "nobody". ${list}` },
       { isError: true, text: `No agent is named "missing:helper". ${list}` },
@@ -259,7 +259,7 @@ describe("the agent tool", () => {
       () => ({ text: "Read." }),
     );
     await conversation.send("Ask the reader.");
-    expect(results[1]).toEqual({ isError: true, text: 'No agent is named "helper". A conversation has no module, so name an agent as <module>:<name>. The agents: other:helper, team:reader, team:writer, wiki:drafter, wiki:extractor, wiki:illustrator.' });
+    expect(results[1]).toEqual({ isError: true, text: 'No agent is named "helper". A conversation has no module, so name an agent as <module>:<name>. The agents: other:helper, team:reader, team:writer, wiki:drafter, wiki:extractor, wiki:illustrator, wiki:verifier.' });
     expect(reply(results[2]!)).toMatchObject({ agent: "team:reader", conversation: "conversations/team reader.md", message: "Read." });
     const note = await readDocument(t!.vault, reply(results[2]!).conversation);
     expect(note.properties.module).toBeUndefined();

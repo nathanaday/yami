@@ -279,7 +279,7 @@ describe("the built-in threads module", () => {
 });
 
 describe("the wiki's flows", () => {
-  it("are ingest and import, read-only with their own promises, checkout, and figures, read-only with a command", async () => {
+  it("are ingest and import, read-only with their own promises, checkout, and figures and verify, read-only with a command", async () => {
     t = await testYami();
     const wiki = t.yami.module("wiki")!;
     expect(wiki.flows.map((f) => [f.name, f.command, f.access])).toEqual([
@@ -287,10 +287,12 @@ describe("the wiki's flows", () => {
       ["checkout", true, "edit"],
       ["import", false, "read-only"],
       ["figures", true, "read-only"],
+      ["verify", true, "read-only"],
     ]);
+    expect(wiki.flowOf("verify")!.promises.map((p) => p.name)).toEqual(["change-applied", "claims-verified"]);
     expect(wiki.flowOf("import")!.promises.map((p) => p.name)).toEqual(["change-applied", "bundle-imported", "clean-topics"]);
     expect(wiki.flowOf("ingest")!.promises.map((p) => p.name)).toEqual(["change-applied", "sources-absorbed", "clean-topics"]);
-    expect(wiki.acts().map((a) => a.label)).toEqual(["New checkout", "New figures"]);
+    expect(wiki.acts().map((a) => a.label)).toEqual(["New checkout", "New figures", "New verify"]);
     expect(await t.vault.read("internal/wiki/sessions.base")).toContain("name: Checkouts");
   });
 

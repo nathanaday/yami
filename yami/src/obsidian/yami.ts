@@ -16,6 +16,7 @@ import { watchModules } from "./discovery.js";
 import { checkModuleIcons } from "./icons.js";
 import { addConversationCommands, addModuleCommands, addNewModuleCommand, addProtectedCommands, addSessionCommands, addWikiCommands, PROTECTED_BLOCKED, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
 import { protectedExtension, protectedPostProcessor } from "./protected/editor.js";
+import { CitationPreview, citationExtension, citationPostProcessor } from "./wiki/citations.js";
 import { protectedGuard } from "./protected/guard.js";
 import { ProtectedStore, type ProtectedEditing } from "./protected/store.js";
 import { ConversationManager } from "./conversation/manager.js";
@@ -61,6 +62,8 @@ export interface YamiPluginOptions {
   threads?: boolean;
   /** Options of the wiki. The conversation folder and Obsidian's Excluded files always stay out of its index. */
   wiki?: WikiOptions;
+  /** Whether a citation of a source shows where it leads at a hover, in the editor and in Reading view. Default true, with the wiki module. */
+  citationPreview?: boolean;
   /** The folder of conversation notes. Default `conversations`. A function is read at each use. */
   conversationFolder?: string | (() => string);
   /** Minutes after which an agent process with no open message box and no turn closes. Default 15. A function is read at each use. */
@@ -120,6 +123,8 @@ export class ObsidianYami extends Yami {
   readonly conversations: ConversationManager;
   /** The text that a person protected against change by an agent, and how the editor treats it. */
   readonly protected: ProtectedStore;
+  /** Where a citation leads, at a hover in the editor and in Reading view. Absent without the wiki module, or when the host turned it off. */
+  readonly citations: CitationPreview | undefined;
   #registered: ConversationAgent[];
   /** The agents that `setAgents` removed, so that a run that is live keeps its agent's name and color. */
   #retired: ConversationAgent[] = [];
@@ -176,6 +181,13 @@ export class ObsidianYami extends Yami {
     plugin.registerMarkdownPostProcessor(protectedPostProcessor(this.protected));
     plugin.register(hub.observe(protectedGuard(this.protected, (message) => new Notice(message, 8_000))));
     plugin.register(this.protected.onBlocked(() => new Notice(PROTECTED_BLOCKED)));
+    // The citation preview is the wiki's: a Yami without the wiki module has no sources to lead to.
+    if (this.module(WIKI) && options.citationPreview !== false) {
+      this.citations = new CitationPreview(app, this.vault, this.wiki);
+      plugin.registerEditorExtension(citationExtension(this.citations) as never);
+      plugin.registerMarkdownPostProcessor(citationPostProcessor(this.citations));
+      plugin.register(() => this.citations?.hide());
+    }
     // The body's class tells the stylesheet the mode. A test without a DOM has no body.
     const body = () => (globalThis as { document?: { body?: HTMLElement } }).document?.body;
     plugin.register(this.protected.onChange(() => body()?.toggleClass("yami-protected-editing", this.protected.editing === "track")));
