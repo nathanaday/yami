@@ -4,14 +4,43 @@ import type { LedgerView } from "../../document/bases.js";
 import { basename, checkSection, link, LINK, linkTarget, readDocument, replaceSection, sectionText, updateDocument, writeDocument } from "../../document/document.js";
 import { timestamp, type Schema } from "../../document/schema.js";
 import { algorithms } from "../../wiki/algorithms/index.js";
+import { BUNDLE_SIZES, isRepository, readBundle, selectBundle, selectDocuments, writeBundle, type BundleSelection, type BundleSize, type WrittenBundle } from "../../wiki/bundle.js";
 import { bodyHash, InvalidPlan, validatePlan, type ChangePlan, type Write } from "../../wiki/change.js";
 import { CHANGES, inKnowledge, SNAPSHOTS, SOURCES, TOPICS, WIKI } from "../../wiki/folders.js";
-import { sourceChunks } from "../../wiki/source.js";
+import { isAbsolute, sourceChunks } from "../../wiki/source.js";
 import { normalizeTag } from "../../wiki/wiki.js";
 import { WIKI_COLOR } from "../colors.js";
 import { YamiModule } from "../module.js";
 import { checkedOut, checkoutSkill, COPY, MAX_DOCUMENTS, orderShape, readingListMade, type Checkout, type CheckoutOrder, type ReturnedCheckout } from "./checkout.js";
 import { absorbed, drafterAgent, extractorAgent, INGEST, pageForms, proposed } from "./ingest.js";
+import { bundleImported, imported, importSkill, stagingFolder, type ImportedBundle, type StagedNote } from "./import.js";
+
+/** The vault folder where a bundle goes when the export names none: `exports/<name>/`. */
+export const EXPORTS = "exports";
+
+/** What an export takes: a topic and a size, or the documents, and where to write. */
+export interface ExportOptions {
+  /** The topic to export around, as a path or a link name. */
+  topic?: string;
+  /** How far to reach from the topic. Default `medium`. */
+  size?: BundleSize;
+  /** Instead of a topic and a size: the topics and sources to export. The sources the topics cite come along. */
+  documents?: string[];
+  /** A vault path, or an absolute path outside the vault. Default `exports/<name>`. */
+  folder?: string;
+  /** The bundle's name. Default: the topic's, or `Bundle <date>`. */
+  name?: string;
+  /** Whether the originals come along. Default true. */
+  originals?: boolean;
+}
+
+/** What an import takes: where the bundle is, and the session's name. */
+export interface ImportOptions {
+  /** A folder of the vault, an absolute path, or a git repository URL. */
+  from: string;
+  /** The session's name. Default `Import <bundle> <date>`. */
+  name?: string;
+}
 
 /**
  * The wiki module, built into every Yami: ingest sessions that turn sources into cited topics through
@@ -53,7 +82,7 @@ export class WikiModule extends YamiModule {
       sort: [{ property: "created", direction: "DESC" }],
     },
   ];
-  readonly checks = { "checked-out": checkedOut, proposed, absorbed };
+  readonly checks = { "checked-out": checkedOut, proposed, absorbed, imported };
   readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, which proposes a change document in ${CHANGES}/ that a person approves in Obsidian, with a version in ${SNAPSHOTS}/ for each applied change. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
 
   readonly cite = this.policy({
@@ -153,6 +182,47 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     skills: [this.checkoutSkill],
     promises: [this.readingListMade],
     maxIterations: 2,
+  });
+
+  readonly importSkill = this.skill(importSkill);
+  readonly bundleImported = this.promise(bundleImported);
+
+  /**
+   * An import as a session: `importBundle` stages the bundle's notes in the folder of the session's name and
+   * writes the Import section, and a run merges them into the wiki through one change plan. Read-only, as an
+   * ingest. No command creates one empty: Wiki: import a bundle and `wiki_import` stage one.
+   */
+  readonly import = this.flow({
+    name: "import",
+    description: "Merge a bundle of topics and sources, staged in the session's folder, into the wiki through one change plan, which a person approves.",
+    access: "read-only",
+    command: false,
+    schema: {
+      /** Where the bundle came from: a folder, an absolute path, or a repository URL. */
+      from: { type: "text" },
+      /** The staged notes of the bundle, in the session's folder. */
+      staged: { type: "links", default: [] },
+    },
+    skills: [this.importSkill],
+    agents: [this.drafter],
+    policies: [this.cite, this.onePlan, this.oneTopic, this.voice],
+    promises: [this.changeApplied, this.bundleImported, this.clean],
+  });
+
+  readonly exportSkill = this.skill({
+    name: "export",
+    description: "Export a bundle of the wiki's notes around a subject, for another vault or another person: choose the topics that serve the request, and write them with their sources and originals as a folder that Wiki: import a bundle reads.",
+    body: `# Export
+
+A bundle is a folder of topics and sources in the wiki's own layout, with the originals the sources embed and a README that lists them. Another vault imports it with Wiki: import a bundle or \`wiki_import\`. Code writes the bundle; you choose what goes in.
+
+1. **The request.** Take it in the user's words: a subject, and how far around it to reach.
+2. **One topic, by size.** When the request is one subject, call \`wiki_export\` with \`topic\` and a \`size\`: \`minimal\` (the topic alone), \`small\` (up to 8 topics), \`medium\` (up to 25), or \`extensive\` (up to 80). Code walks the links from the topic and takes the best-connected neighbors first, and every source the topics cite comes along. Choose \`small\` for a hand-out, \`medium\` for a week's reading, \`extensive\` for a course.
+3. **A chosen set.** When the request names several subjects, or a selection code cannot make ("my midterm topics", "everything on vision but the datasets"), choose the documents as \`/wiki:checkout\` chooses a reading list: \`wiki_search\` for candidates, read the snippets, keep what serves, stop a branch where it stops serving. Then call \`wiki_export\` with \`documents\`: the paths, topics and sources. The sources the topics cite come along either way.
+4. **Where.** \`folder\` is a vault path (default \`exports/<name>\`) or an absolute path outside the vault, as the user names it. Give the bundle a \`name\` when the user does.
+
+End with one line: the folder, and the counts of topics and sources. A bundle inside the vault is not knowledge: the index skips its notes.
+`,
   });
 
   /** Returns the checkout open in the editor, the person's act. It applies while the checkout is out. */
@@ -284,6 +354,111 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       d.body = replaceSection(d.body, "Return", summary);
     });
     return { ...(change && { change }), returned: writes.map((write) => write.path), skipped, summary };
+  }
+
+  /**
+   * Writes a bundle of the wiki's notes: around a `topic` by `size` (`selectBundle`), or the `documents` given
+   * (`selectDocuments`), to `folder`, a vault path (default `exports/<name>`) or an absolute path outside the
+   * vault, with the sources the topics cite and the originals they embed. Each note gets the property `bundle`,
+   * so the index skips a bundle inside the vault. It throws, and writes nothing, for a topic that is not one,
+   * a document that is not knowledge, no topic and no documents, an unknown size, and a folder under `wiki/`.
+   * `wiki_export` calls it, and the command Wiki: export a topic.
+   * @example
+   * const { folder, topics } = await wiki.exportBundle({ topic: "Reinforcement learning", size: "small" });
+   */
+  async exportBundle(options: ExportOptions): Promise<WrittenBundle> {
+    const { wiki } = this;
+    await wiki.refresh();
+    let selection: BundleSelection;
+    if (options.documents?.length) {
+      selection = await selectDocuments(wiki, options.documents);
+      if (options.topic) selection.topic = wiki.resolve(options.topic) ?? selection.topic;
+    } else if (options.topic) {
+      selection = await selectBundle(wiki, options.topic, options.size ?? "medium");
+    } else throw new Error("Name a topic to export around, or the documents to export.");
+    const name = options.name?.trim() || (selection.topic ? basename(selection.topic) : `Bundle ${timestamp().slice(0, 10)}`);
+    const folder = options.folder?.trim() || `${EXPORTS}/${name.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim()}`;
+    return writeBundle(wiki, selection, folder, { name, originals: options.originals });
+  }
+
+  /**
+   * Imports a bundle: reads it from `from` (a folder of the vault, an absolute path, or a git repository URL,
+   * cloned with the person's own git), copies its originals into `internal/wiki/originals/`, creates an
+   * `import` session, and stages each note in the session's folder with a line in the session's Import
+   * section that says where it stands: `new`, `near` a topic, or in `conflict` with a note that holds its path
+   * or its name. A note the wiki holds already, as it is, is dropped. When every staged note is new and
+   * nothing is near one, it proposes the change itself, as creates, and the session is done: a person
+   * approves it. Otherwise a run of the session merges them. It throws, and creates nothing, for a bundle it
+   * cannot read or that holds no note. `wiki_import` calls it, and the command Wiki: import a bundle.
+   * @example
+   * const { session, staged, change } = await wiki.importBundle({ from: "exports/Reinforcement learning" });
+   */
+  async importBundle(options: ImportOptions): Promise<ImportedBundle> {
+    const { vault, wiki } = this;
+    const from = options.from.trim();
+    if (!from) throw new Error("Give the bundle to import: a folder, an absolute path, or a repository URL.");
+    const bundle = await readBundle(vault, from);
+    for (const { path, data } of bundle.originals) if (!(await vault.exists(path))) await vault.writeBinary(path, data);
+    await wiki.refresh();
+    const sourceName = (p: string) => p.replace(/\/+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? p;
+    // A bundle folder inside the vault is indexed as any folder is, so its own notes are no match for its notes.
+    const own = !isAbsolute(from) && !isRepository(from) ? `${from.replace(/\/+$/, "")}/` : undefined;
+    const outside = (path: string) => !own || !path.startsWith(own);
+    const name = bundle.name ?? sourceName(from.replace(/\.git$/, ""));
+    const staged: StagedNote[] = [];
+    const dropped: ImportedBundle["dropped"] = [];
+    const plan: { note: (typeof bundle.notes)[number]; status: StagedNote["status"]; with: string[]; reason: string }[] = [];
+    for (const note of bundle.notes) {
+      const existing = wiki.note(note.path);
+      if (existing) {
+        if ((await bodyHash(existing.body)) === (await bodyHash(note.body)) && existing.description === String(note.properties.description ?? "")) {
+          dropped.push({ target: note.path, reason: "the wiki holds it already, as it is" });
+          continue;
+        }
+        plan.push({ note, status: "conflict", with: [existing.path], reason: `a note holds this path with another text: merge into ${link(existing.path)}` });
+        continue;
+      }
+      const names = [basename(note.path), ...(Array.isArray(note.properties.aliases) ? note.properties.aliases.map(String) : [])];
+      const matches = await wiki.match(names, { types: [note.type] });
+      const hit = matches.find((m) => m.match === "hit" && m.path && m.path !== note.path && outside(m.path));
+      if (hit) {
+        plan.push({ note, status: "conflict", with: [hit.path!], reason: `${link(hit.path!)} holds the name "${hit.name}": the same subject, or another that needs a name of its own` });
+        continue;
+      }
+      const near = [...new Set(matches.flatMap((m) => (m.match === "near" ? m.neighbors.map((n) => n.path).filter(outside) : [])))];
+      if (near.length) {
+        plan.push({ note, status: "near", with: near, reason: `near ${near.map(link).join(", ")}: the same subject, or a neighbor to link` });
+        continue;
+      }
+      plan.push({ note, status: "new", with: [], reason: "new to this wiki" });
+    }
+    const session = (await this.import.create({ name: options.name ?? `Import ${name} ${timestamp().slice(0, 10)}`, request: `Merge the bundle ${from} into the wiki.`, fields: { from } })).path;
+    const folder = stagingFolder(session);
+    for (const entry of plan) {
+      const path = `${folder}/${basename(entry.note.path)}.md`;
+      await writeDocument(vault, { path, properties: entry.note.properties, body: entry.note.body });
+      staged.push({ staged: path, target: entry.note.path, type: entry.note.type, status: entry.status, with: entry.with, reason: entry.reason });
+    }
+    const lines = [
+      ...staged.map((s) => `- ${link(s.staged)} → \`${s.target}\` · **${s.status}** · ${s.reason}`),
+      ...dropped.map((d) => `- \`${d.target}\` · dropped · ${d.reason}`),
+      ...bundle.skipped.map((k) => `- \`${k.path}\` · skipped · ${k.reason}`),
+    ];
+    const direct = staged.length > 0 && staged.every((s) => s.status === "new");
+    await updateDocument(vault, session, (doc) => {
+      doc.properties.staged = staged.map((s) => link(s.staged));
+      doc.body = replaceSection(doc.body, "Import", lines.join("\n") || "The bundle brought nothing that the wiki lacks.");
+      if (!staged.length || direct) doc.properties.state = "done";
+    });
+    let change: string | undefined;
+    if (direct) {
+      const writes: Write[] = staged.map((s) => {
+        const { type: _type, ...properties } = plan.find((p) => p.note.path === s.target)!.note.properties;
+        return { op: "create", path: s.target, properties, body: plan.find((p) => p.note.path === s.target)!.note.body, why: `imported from ${name}` };
+      });
+      change = (await wiki.change({ title: `Import ${name}`, notes: `Every note of the bundle is new to this wiki, so code proposed the plan at once.${dropped.length ? ` Dropped, as the wiki holds them already: ${dropped.map((d) => basename(d.target)).join(", ")}.` : ""}`, session, writes })).path;
+    }
+    return { session, name, staged, dropped, skipped: bundle.skipped, ...(change && { change }) };
   }
 
   /** The path of a checkout session of this module, or an error that says what it is instead. */
@@ -454,6 +629,35 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
           const sources = (await session.read()).properties.sources;
           void session.start().catch((error: unknown) => console.error(`yami: the run of ${session.path} failed`, error));
           return JSON.stringify({ session: session.path, sources, run: "started" });
+        },
+      }),
+      defineTool({
+        name: "export",
+        description: `Writes a bundle of the wiki's notes for another vault or another person: a folder in the wiki's layout with the topics, the sources they cite, the originals the sources embed, and a README. Give a topic and a size (${BUNDLE_SIZES.join(", ")}: the topic alone, up to 8 topics, 25, or 80, the best-connected neighbors first), or the documents to export as paths. The folder is a vault path (default ${EXPORTS}/<name>) or an absolute path outside the vault. The skill /wiki:export says how to choose. Returns the folder and what it holds; refuses a topic that is not one, a document that is not knowledge, or a folder under ${WIKI}/.`,
+        input: {
+          topic: z.string().optional().describe("The topic to export around, as a path or a [[link]] name."),
+          size: z.enum(BUNDLE_SIZES).optional().describe("How far to reach from the topic. Default medium."),
+          documents: z.array(z.string()).optional().describe("Instead of a topic and a size: the topics and sources to export, as paths or [[link]] names."),
+          folder: z.string().optional().describe(`Where to write: a vault path, or an absolute path. Default ${EXPORTS}/<name>.`),
+          name: z.string().optional().describe("The bundle's name. Default: the topic's."),
+        },
+        title: ({ topic, documents, size }) => `Export ${topic ? `${topic.slice(0, 50)} (${size ?? "medium"})` : `${documents?.length ?? 0} documents`}`,
+        run: async (options) => JSON.stringify(await this.exportBundle(options)),
+      }),
+      defineTool({
+        name: "import",
+        description: `Imports a bundle of topics and sources into the wiki: reads it from a folder of the vault, an absolute path, or a git repository URL (cloned with the person's git), copies its originals, stages its notes in an import session, and says where each stands against the wiki. When every note is new and nothing is near one, it proposes the change at once; otherwise it starts the session's run, which merges them and proposes one plan. Nothing in the wiki changes until a person approves. Returns the session, the staged notes with their status, the notes dropped as already held, and the change when one was proposed; do not merge the notes yourself. Refuses a folder it cannot read or that holds no topic or source.`,
+        input: {
+          from: z.string().describe("The bundle: a vault folder, an absolute path, or a repository URL such as https://github.com/owner/repo or …/tree/<branch>/<folder>."),
+          name: z.string().optional().describe("The session's name. Default: Import <bundle> <date>."),
+        },
+        title: ({ from }) => `Import ${from.slice(from.lastIndexOf("/") + 1).slice(0, 60) || from.slice(0, 60)}`,
+        run: async (options) => {
+          const result = await this.importBundle(options);
+          const session = this.yami.session(result.session);
+          const run = result.change || !result.staged.length ? "not needed" : "started";
+          if (run === "started") void session.start().catch((error: unknown) => console.error(`yami: the run of ${session.path} failed`, error));
+          return JSON.stringify({ ...result, run });
         },
       }),
       defineTool({

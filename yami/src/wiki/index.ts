@@ -24,6 +24,24 @@ export {
   type Write,
   type WriteCounts,
 } from "./change.js";
+export {
+  BUNDLE_PROPERTY,
+  BUNDLE_README,
+  BUNDLE_SIZES,
+  isRepository,
+  readBundle,
+  repositoryParts,
+  selectBundle,
+  selectDocuments,
+  TOPIC_CAPS,
+  writeBundle,
+  type Bundle,
+  type BundleNote,
+  type BundleSelection,
+  type BundleSize,
+  type WriteBundleOptions,
+  type WrittenBundle,
+} from "./bundle.js";
 export { chunk, MAX_CHUNK, type Chunk } from "./chunks.js";
 export { cosine, EmbeddingCache, VoyageEmbedder, type Embedder, type VoyageOptions } from "./embed.js";
 export { CACHE_PATH, CHANGES, inKnowledge, KNOWLEDGE, ORIGINALS, SNAPSHOTS, SOURCES, TOPICS, WIKI, WIKI_INTERNAL } from "./folders.js";

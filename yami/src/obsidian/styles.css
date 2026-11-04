@@ -854,6 +854,31 @@ button.yami-send.is-stop svg {
   font-family: var(--font-monospace);
 }
 
+/* The export modal: a lead line, the settings, and a quiet error under the button. */
+
+.yami-export .yami-export-lead {
+  margin: 0 0 var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.yami-export .yami-export-folder input {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+
+.yami-export .yami-export-actions {
+  border-top: none;
+  justify-content: flex-end;
+}
+
+.yami-export .yami-export-error {
+  margin: 0;
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
+}
+
 .modal.yami-wiki-compare {
   width: min(1100px, 95vw);
 }

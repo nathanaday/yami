@@ -4,8 +4,8 @@ What the wiki plugin still needs, in the order they were raised, and what each b
 
 | Item | Status | Where it landed |
 | --- | --- | --- |
-| I1. Articles in an encyclopedic voice | in progress | the policy `encyclopedic-voice`, the drafter's brief, `page-forms.md`, the lint warning `meta-voice` |
-| PF1. Export and import | planned | `yami/wiki` `bundle.ts`, `WikiModule.exportBundle` and `importBundle`, the `import` flow and skill, the tools `wiki_export` and `wiki_import`, the commands Wiki: export a topic and Wiki: import a bundle |
+| I1. Articles in an encyclopedic voice | done | the policy `encyclopedic-voice`, the drafter's brief, `page-forms.md`, the lint warning `meta-voice` |
+| PF1. Export and import | done | `yami/wiki` `bundle.ts`, `WikiModule.exportBundle` and `importBundle`, the `import` flow and skill, the tools `wiki_export` and `wiki_import`, the commands Wiki: export a topic and Wiki: import a bundle |
 | PF2. Images in articles | planned | figures in the extractor's Item Map, the drafter's figure rules, the lint warning `figure-missing`, the `figures` flow with the agent `illustrator` and the tool `wiki_figure` |
 | PF3. Protected writing | planned | `yami/document` `protected.ts`, the refusal in `validatePlan`, the tool `yami_protected`, the check `protected`, the lint warning `protected-lost`, the editor extension and the commands in `yami/obsidian` |
 
@@ -32,6 +32,8 @@ What the wiki plugin still needs, in the order they were raised, and what each b
 - **Export is code.** `selectBundle(wiki, topic, size)` walks the link graph from the topic, over links and backlinks among knowledge notes, breadth first, and ranks each hop by how many of the notes already in the bundle it connects to. The size caps the topics: `minimal` is the topic alone, `small` up to 8, `medium` up to 25, `extensive` up to 80. Every source that an included topic cites comes along, with its originals, so the citations resolve in the bundle. `writeBundle` writes to a vault folder or to an absolute path outside the vault. The agent's part is choice: `/wiki:export` chooses the documents as `/wiki:checkout` does and calls `wiki_export` with them, for a request such as "the topics for my midterm". The command Wiki: export a topic asks for the topic, shows the count of each size, and takes the folder.
 - **Import is a session** of a new `import` flow, read-only, with the policies and promises of an ingest and its own skill. `importBundle({ from, name })` reads the bundle (a vault folder, an absolute path, or a GitHub repository URL, which `git clone --depth 1` fetches into a temporary folder with the person's own git), copies its originals into `internal/wiki/originals/` (hash-named, so a copy that exists is the same file), stages its notes in the session's folder, where the index does not read them, and writes an Import section in the session that says, for each note, whether it is new, the same as a note the wiki has (dropped), or a conflict (the path is taken, or a topic holds the name). When every note is new and nothing in the wiki is near one, code proposes the change at once and the session is done; a person approves it. Otherwise a run merges: the skill creates the new notes as written, merges each conflict with the `drafter`, links the imported topics from their neighbors, and proposes one plan. The check `imported` holds the run to every staged note.
 - The folder `internal/wiki/sessions/<session>/` is left out of the index as a whole: it holds copies and staged notes, never knowledge.
+
+**Not done.** The plugin README of yami-wiki (its own repository) lists the commands; it needs the two new rows when the plugin takes this library. The import of a repository runs the person's `git`; the plugin's privacy section should say so.
 
 ## PF2. Images in articles
 

@@ -28,7 +28,8 @@ import {
 } from "./change.js";
 import { chunk, type Chunk } from "./chunks.js";
 import { EmbeddingCache, type Embedder } from "./embed.js";
-import { CACHE_PATH, ORIGINALS } from "./folders.js";
+import { BUNDLE_PROPERTY } from "./bundle.js";
+import { CACHE_PATH, ORIGINALS, WIKI_INTERNAL } from "./folders.js";
 import { lint, type Finding, type LintOptions } from "./lint.js";
 import { match, type Match, type MatchOptions } from "./match.js";
 import { TagIndex, type Neighbors, type TagCount, type TagView } from "./tags.js";
@@ -81,8 +82,12 @@ export interface WikiOptions {
 
 export const FIELD_WEIGHTS = { title: 3, aliases: 3, tags: 2, description: 2, body: 1 };
 
-/** Files that are not knowledge: the forms of the modules (agents, flows, policies, promises, and skills), and the frozen copies that sources embed. */
-const UNINDEXED = [/^internal\/[^/]+\/(agents|flows|policies|promises|skills)\//, new RegExp(`^${ORIGINALS}/`)];
+/**
+ * Files that are not knowledge: the forms of the modules (agents, flows, policies, promises, and skills), the
+ * frozen copies that sources embed, also inside an exported bundle, and the folder of a wiki session, which holds the copies of a checkout or
+ * the staged notes of an import.
+ */
+const UNINDEXED = [/^internal\/[^/]+\/(agents|flows|policies|promises|skills)\//, new RegExp(`(^|/)${ORIGINALS}/`), new RegExp(`^${WIKI_INTERNAL}/sessions/[^/]+/`)];
 
 /** A seed of a graph query: a note and its weight. */
 export interface Seed {
@@ -417,10 +422,10 @@ export class Wiki {
     return !UNINDEXED.some((pattern) => pattern.test(path)) && !exclude.some((entry) => path === entry || path.startsWith(`${entry}/`));
   }
 
-  /** Whether the index keeps a note with these properties. A copy of another note, such as a checkout copy, is not knowledge of its own. */
+  /** Whether the index keeps a note with these properties. A copy of another note, such as a checkout copy, and a note of an exported bundle are not knowledge of their own. */
   private keeps(properties: Properties): boolean {
     const type = typeof properties.type === "string" ? properties.type : undefined;
-    return !(type && this.options.skipTypes.includes(type)) && properties.copy_of === undefined;
+    return !(type && this.options.skipTypes.includes(type)) && properties.copy_of === undefined && properties[BUNDLE_PROPERTY] === undefined;
   }
 
   /** Every version of the knowledge base, oldest first. */

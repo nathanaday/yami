@@ -4,7 +4,8 @@ vi.mock("obsidian", () => {
   class Base {}
   return {
     Notice: Base,
-    Modal: Base,
+    Modal: class { modalEl = { addClass() {} }; },
+    Setting: Base,
     SuggestModal: Base,
     FuzzySuggestModal: Base,
     MarkdownView: Base,
@@ -170,6 +171,47 @@ describe("the commands of the modules in Obsidian", () => {
     const host = { get modules() { return t!.yami.modules; }, plugin: { addCommand: (command: Command) => commands.set(command.id, command), removeCommand: () => true } } as unknown as ObsidianYami;
     addModuleCommands(host);
     expect([...commands.keys()].filter((id) => id.includes("-create-"))).toEqual([]);
+  });
+});
+
+describe("the export and import commands of the wiki", () => {
+  it("exports around a picked topic through the modal, and imports a bundle from the folder the person names into a session", async () => {
+    t = await testYami({ threads: false });
+    const { yami, vault } = t;
+    await write(`${TOPICS}/Levain.md`, { type: "topic", description: "A starter.", sources: [] }, "Levain is a starter. See [[Sourdough]].\n");
+    await write(`${TOPICS}/Sourdough.md`, { type: "topic", description: "Bread from a starter.", sources: [] }, "Bread.\n");
+    await write("drop/Baguette.md", { type: "topic", description: "A long loaf." }, "A baguette is long.\n");
+    const commands = new Map<string, Command>();
+    const shown: unknown[] = [];
+    const picked: string[][] = [];
+    const asked: string[][] = [];
+    let done: Promise<void> = Promise.resolve();
+    const host = {
+      app: {},
+      plugin: { addCommand: (command: Command) => commands.set(command.id, command) },
+      wiki: yami.wiki,
+      module: (id: string) => yami.module(id),
+      conversationFolder: "conversations",
+      pick: async <T,>(items: T[], label: (item: T) => string, placeholder: string) => (picked.push([placeholder, ...items.map(label)]), items[0]),
+      ask: async (placeholder: string, hint: string) => (asked.push([placeholder, hint]), "drop"),
+      notify: (work: Promise<unknown>) => (done = work.then((result) => void (result !== undefined && shown.push(result)), (error: Error) => void shown.push(`Yami: ${error.message}`))),
+    } as unknown as ObsidianYami;
+    addWikiCommands(host);
+    expect([...commands.values()].filter((c) => c.id.endsWith("port")).map((c) => `${c.id} · ${c.name}`)).toEqual(["yami-wiki-export · Wiki: export a topic", "yami-wiki-import · Wiki: import a bundle"]);
+    commands.get("yami-wiki-import")!.callback!();
+    await done;
+    expect(asked).toEqual([["A folder of the vault, an absolute path, or a GitHub repository URL", "Import the bundle"]]);
+    expect(shown).toEqual([{ message: "1 note(s) staged. Approve its change in the panel.", open: expect.stringMatching(/^internal\/wiki\/sessions\/Import drop /) }]);
+    expect((await readDocument(vault, (shown[0] as { open: string }).open)).properties).toMatchObject({ flow: "import", state: "done", from: "drop" });
+    // The export command picks the topic, then opens the modal (a Modal of Obsidian, which this test cannot open): the pick is what the test sees.
+    const opened: string[] = [];
+    (await import("../../../src/obsidian/wiki/export-modal.js")).WikiExportModal.prototype.open = function (this: { topic: string }) {
+      opened.push(this.topic);
+    };
+    commands.get("yami-wiki-export")!.callback!();
+    await done;
+    expect(picked).toEqual([["The topic to export around", "Baguette · A long loaf.", "Levain · A starter.", "Sourdough · Bread from a starter."]]);
+    expect(opened).toEqual([`drop/Baguette.md`]);
   });
 });
 

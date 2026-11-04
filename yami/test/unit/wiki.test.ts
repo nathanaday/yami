@@ -551,7 +551,7 @@ describe("the wiki module", () => {
     const { path } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`)] } });
     expect((await readDocument(vault, path)).properties.sources).toEqual([link(`${SOURCES}/codex-notes.md`)]);
     const set = { tools: yami.tools().tools.filter((t) => t.name.startsWith("wiki_")) };
-    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_checkout"]);
+    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_export", "wiki_import", "wiki_checkout"]);
     const signal = new AbortController().signal;
     const search = JSON.parse((await runTool(set.tools[0]!, { text: "codex harness", limit: 1 }, signal)).text);
     expect(search.hits[0].path).toBe(`${TOPICS}/Codex harness.md`);
