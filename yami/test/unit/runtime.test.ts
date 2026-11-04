@@ -133,6 +133,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/agents/extractor/AGENT.md",
     "internal/wiki/installed.json",
     "internal/wiki/policies/cite-every-claim/POLICY.md",
+    "internal/wiki/policies/encyclopedic-voice/POLICY.md",
     "internal/wiki/policies/one-plan/POLICY.md",
     "internal/wiki/policies/one-topic/POLICY.md",
     "internal/wiki/promises/change-applied/PROMISE.md",

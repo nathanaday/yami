@@ -71,6 +71,11 @@ export class WikiModule extends YamiModule {
     description: "One subject, one topic.",
     body: `Before a new topic, call \`wiki_match\` with the subject's names. A hit means extend that topic. A near match means read the neighbors before you decide. Only a new subject gets a new topic, and its title is the name the sources use.`,
   });
+  readonly voice = this.policy({
+    name: "encyclopedic-voice",
+    description: "A topic reads as an encyclopedia article: it states what is known, cites in parentheses, and never narrates its source.",
+    body: `A topic is an article on its subject that stands on its own, in the voice of an encyclopedia. State what is known, and put the citation in parentheses after the claim: "DINOv2 trains on 142M curated images ([[DINOv2]], p. 3)." Never make the source the subject of a sentence: not "the slides say", "the paper argues", "according to the lecture", "in this document", "the author notes". The source appears in the parentheses and in the Sources section, and nowhere else. Never recap the source in its own order, and never summarize it in a topic: the sections of a topic follow the subject, and the source note's Summary and Structure are the one place that describes the original, how it is organized, and where it is weak. No first person, no "you", no advice, no commentary of your own. Present tense for what is, past tense for what happened. Use the subject's own terms, and define each at its first use.`,
+  });
   readonly changeApplied = this.promise({
     name: "change-applied",
     description: "A change plan of the session is proposed, or applied.",
@@ -128,7 +133,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     },
     skills: [this.ingestSkill],
     agents: [this.extractor, this.drafter],
-    policies: [this.cite, this.onePlan, this.oneTopic],
+    policies: [this.cite, this.onePlan, this.oneTopic, this.voice],
     promises: [this.changeApplied, this.absorbed, this.clean],
   });
 

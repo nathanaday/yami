@@ -454,7 +454,7 @@ describe("the wiki, built in", () => {
     expect(result, doc).toMatchObject({ state: "done", iterations: 1 });
     // The two code checks judge the proposal; clean-topics has no check, so the review judges it.
     expect(doc).toContain("iteration 1: 2 met, 0 unmet");
-    expect(doc).toContain("iteration 1: review: 3 followed, 0 broken, 1 met, 0 unmet");
+    expect(doc).toContain("iteration 1: review: 4 followed, 0 broken, 1 met, 0 unmet");
     expect(doc).toContain("change-applied]] — 1 change(s) of the session stand: proposed");
     expect(agent.started[0]!.options.access).toBe("read-only");
 
@@ -487,7 +487,7 @@ describe("the wiki, built in", () => {
     const doc = await readDocument(vault, files.path);
     expect(doc.properties.sources).toEqual(["[[wiki/sources/a (source)|a (source)]]", "[[wiki/sources/b (source)|b (source)]]"]);
     expect(doc.properties.policies).toContain("[[internal/journal/policies/own-words/POLICY|own-words]]");
-    expect(doc.properties.policies).toHaveLength(4);
+    expect(doc.properties.policies).toHaveLength(5);
     const two = await yami.ingest({ files: ["papers/a.md", "papers/b.md"] });
     expect(two.path).toMatch(/Ingest a and 1 more /);
     await expect(yami.ingest({})).rejects.toThrow("Name a file or a folder to ingest.");

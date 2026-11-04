@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, PropertiesError, readDocument } from "../../src/document/index.js";
 import { runCheck, Yami, type WikiModule } from "../../src/index.js";
-import { algorithms, bodyHash, captureSource, captureSources, CHANGE_STATUS_LABELS, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, normalizeTag, readProposal, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
+import { algorithms, bodyHash, captureSource, captureSources, CHANGE_STATUS_LABELS, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, metaVoice, normalizeTag, readProposal, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
 import { statusText } from "../../src/wiki/change.js";
 import { CHANGE_STATUSES } from "../../src/document/index.js";
 import { FsVault, testYami } from "../../src/testing/index.js";
@@ -262,6 +262,40 @@ describe("lint", () => {
     expect(findings.find((f) => f.check === "dead-link")).toMatchObject({ severity: "error", message: "links [[Nowhere]], which is not a note" });
     expect(await wiki.lint({ paths: ["[[Broken]]"] })).toHaveLength(4);
     expect((await wiki.lint({ folder: SOURCES })).map((f) => f.path)).toEqual([`${SOURCES}/unread.md`]);
+  });
+
+  it("warns on a topic that speaks of its source or its reader, outside code and the Notes section, and not on a source", async () => {
+    const wiki = await fixture();
+    const body = [
+      "## Definition",
+      "",
+      "The slides say that gradient descent follows the negative gradient ([[codex-notes]]). According to the lecture, the step is small.",
+      "As mentioned above, we see that it converges. You should try it.",
+      "",
+      "```",
+      "the paper says nothing here: code",
+      "```",
+      "",
+      "## Notes",
+      "",
+      "The lecture covers this on day 3; the slides say more.",
+      "",
+    ].join("\n");
+    await note(`${TOPICS}/Gradient descent.md`, { type: "topic", description: "Following the gradient downhill.", sources: [link(`${SOURCES}/codex-notes.md`)] }, body);
+    await note(`${TOPICS}/Momentum.md`, { type: "topic", description: "A running average of gradients." }, "Momentum averages past gradients ([[codex-notes]]). See [[Gradient descent]].\n");
+    await note(`${SOURCES}/talk.md`, { type: "source", description: "A talk.", file: "[[x.pdf]]", status: "absorbed" }, "## Summary\n\nThe speaker says a lot; according to the slides, more. [[Gradient descent]] grew from it.\n");
+    await wiki.refresh();
+    const findings = await wiki.lint();
+    const meta = findings.filter((f) => f.check === "meta-voice");
+    expect(meta).toHaveLength(1);
+    expect(meta[0]).toMatchObject({
+      path: `${TOPICS}/Gradient descent.md`,
+      severity: "warning",
+      message: 'speaks of its source or its reader instead of its subject: "The slides say", "According to", "As mentioned above", "we see", "You should"',
+    });
+    expect(meta[0]!.fix).toContain("put the citation in parentheses after it");
+    expect(metaVoice("Gradient descent follows the negative gradient ([[codex-notes]], p. 3).")).toEqual([]);
+    expect(metaVoice("In this chapter, the author notes that x.")).toEqual(["the author notes", "In this chapter"]);
   });
 });
 

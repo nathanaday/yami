@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.21.0 · articles, bundles, figures, and protected text
+
+The wiki writes articles in an encyclopedic voice, exports and imports bundles of notes, makes the figures its topics lack, and keeps the text a person protected.
+
+### Added
+- The policy `encyclopedic-voice` of the wiki module, in the `ingest` flow: a topic is an article on its subject, with the citation in parentheses after the claim and never a sentence about the source or to the reader; the source note's Summary and Structure are the one place that describes the source. The drafter's brief has a Voice section with the rules, and `page-forms.md` says which page is about the source.
+- Lint warns `meta-voice` on a topic whose body speaks of its source or its reader ("the slides say", "according to", "as mentioned above", "we see", "you should"), outside code blocks and the Notes section, with each phrase in the message. `metaVoice(body)` in `yami/wiki` gives the phrases.
+
 ## 0.20.0 · one plugin, one thing
 
 The library holds the parts that the plugins share, and a plugin takes only the built-in module it is for. Two Yami plugins can share a vault: each keeps its own conversation notes.
