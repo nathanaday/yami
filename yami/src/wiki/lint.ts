@@ -1,3 +1,4 @@
+import { excerpt, protectedLost, type ProtectedMap } from "../document/protected.js";
 import { figureMarkers } from "./figures.js";
 import { normalizeName } from "./tokens.js";
 import type { Note, Wiki } from "./wiki.js";
@@ -65,8 +66,8 @@ export function metaVoice(body: string): string[] {
   return found;
 }
 
-/** The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions, uncited sources, orphans, topics with figures still to make, and topics in the voice of a report on their source. */
-export function lint(wiki: Wiki, options: LintOptions = {}): Finding[] {
+/** The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions, uncited sources, orphans, topics with figures still to make, topics in the voice of a report on their source, and notes that lost a text a person protected. */
+export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedMap): Finding[] {
   const findings: Finding[] = [];
   const add = (note: Note, check: string, severity: Finding["severity"], message: string, fix: string) =>
     findings.push({ path: note.path, check, severity, message, fix });
@@ -84,6 +85,10 @@ export function lint(wiki: Wiki, options: LintOptions = {}): Finding[] {
 
   for (const note of selected) {
     if (note.problem) add(note, "bad-properties", "error", `its properties do not parse: ${note.problem}`, "fix the properties between the --- lines; put quotes around a value that holds \": \"");
+    if (guarded) {
+      const lost = protectedLost(guarded, note.path, note.body);
+      if (lost.length) add(note, "protected-lost", "warning", `no longer holds the protected text ${lost.map((m) => `"${excerpt(m.text)}"`).join(", ")}`, "put the text back, protect the text that replaced it, or unprotect it");
+    }
     for (const target of note.unresolved) add(note, "dead-link", "error", `links [[${target}]], which is not a note`, "fix the link, or create the note");
     const others = new Set<string>();
     for (const name of [note.name, ...note.aliases]) {

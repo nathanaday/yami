@@ -1,6 +1,7 @@
 import { defineTool, z } from "../agent/index.js";
 import type { AgentTool, ToolSet } from "../agent/types.js";
-import { linkTarget } from "../document/document.js";
+import { basename, linkTarget } from "../document/document.js";
+import { marksOf, readProtected } from "../document/protected.js";
 import { AGENT_TOOL, AgentError, runAgent, type AgentCaller } from "./agent-run.js";
 import { YAMI_ID } from "./base-skill.js";
 import type { Review } from "./review.js";
@@ -27,6 +28,21 @@ export function yamiTools(yami: Yami, caller: AgentCaller, served: () => ToolSet
       readOnly: true,
       title: ({ session }) => `Check ${session.slice(0, 80)}`,
       run: async ({ session }) => JSON.stringify(await yami.session(sessionPath(session)).check()),
+    }),
+    defineTool({
+      name: `${YAMI_ID}_protected`,
+      description:
+        "The text that a person protected against change by an agent, in a note or in the whole vault: each mark's exact text, when it was protected, and the person's note. Keep every protected text as it is, letter for letter, in any write to its note; wiki_change refuses a write that drops one. Call it before you change a note.",
+      input: { note: z.string().optional().describe("The note, as a vault path or a [[link]] name. Leave it out for every note that has protected text.") },
+      readOnly: true,
+      title: ({ note }) => (note ? `Protected text in ${basename(note).slice(0, 60)}` : "Protected text in the vault"),
+      run: async ({ note }) => {
+        const map = await readProtected(yami.vault);
+        if (note === undefined) return JSON.stringify({ notes: Object.entries(map.notes).map(([path, marks]) => ({ path, marks })) });
+        const target = linkTarget(note);
+        const path = yami.wiki.locate(target) ?? (target.endsWith(".md") ? target : `${target}.md`);
+        return JSON.stringify({ path, marks: marksOf(map, path) });
+      },
     }),
     defineTool({
       name: AGENT_TOOL,

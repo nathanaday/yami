@@ -106,6 +106,11 @@ export class WikiModule extends YamiModule {
     description: "A topic reads as an encyclopedia article: it states what is known, cites in parentheses, and never narrates its source.",
     body: `A topic is an article on its subject that stands on its own, in the voice of an encyclopedia. State what is known, and put the citation in parentheses after the claim: "DINOv2 trains on 142M curated images ([[DINOv2]], p. 3)." Never make the source the subject of a sentence: not "the slides say", "the paper argues", "according to the lecture", "in this document", "the author notes". The source appears in the parentheses and in the Sources section, and nowhere else. Never recap the source in its own order, and never summarize it in a topic: the sections of a topic follow the subject, and the source note's Summary and Structure are the one place that describes the original, how it is organized, and where it is weak. No first person, no "you", no advice, no commentary of your own. Present tense for what is, past tense for what happened. Use the subject's own terms, and define each at its first use.`,
   });
+  readonly protectedText = this.policy({
+    name: "protected-text",
+    description: "Text that a person protected stays as it is.",
+    body: `A person can protect text in a note against change by an agent. Keep every protected text as it is, letter for letter, wherever it stands in the note: do not reword it, move it, cut it, or fold it into other text. Before a modify of a note, call \`yami_protected\` with the note, and keep each text it lists in the new body. \`wiki_change\` refuses a write that drops one, with the text; then put the text back and propose again. Write around protected text: a new claim goes beside it, not in its place.`,
+  });
   readonly changeApplied = this.promise({
     name: "change-applied",
     description: "A change plan of the session is proposed, or applied.",
@@ -163,7 +168,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     },
     skills: [this.ingestSkill],
     agents: [this.extractor, this.drafter],
-    policies: [this.cite, this.onePlan, this.oneTopic, this.voice],
+    policies: [this.cite, this.onePlan, this.oneTopic, this.voice, this.protectedText],
     promises: [this.changeApplied, this.absorbed, this.clean],
   });
 
@@ -206,7 +211,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     },
     skills: [this.importSkill],
     agents: [this.drafter],
-    policies: [this.cite, this.onePlan, this.oneTopic, this.voice],
+    policies: [this.cite, this.onePlan, this.oneTopic, this.voice, this.protectedText],
     promises: [this.changeApplied, this.bundleImported, this.clean],
   });
 
@@ -229,7 +234,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     },
     skills: [this.figuresSkill],
     agents: [this.illustrator],
-    policies: [this.cite, this.onePlan, this.voice],
+    policies: [this.cite, this.onePlan, this.voice, this.protectedText],
     promises: [this.changeApplied, this.figuresMade],
     instructions: "With no topics in the Request section or the topics field, make the figures of every topic that has a marker.",
   });
@@ -357,7 +362,7 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
         const write: Write = { op: "modify", path: original, body: await this.#towardOriginals(body), base: properties.sha256, why: "the user's edits of the checkout copy" };
         // One edit the wiki refuses must not hold back the others: it stays in its copy, with the reason.
         try {
-          await validatePlan(wiki, { title: "Return", writes: [write] });
+          await validatePlan(wiki, { title: "Return", writes: [write] }, { person: true });
           writes.push(write);
           done.push(copy);
         } catch (error) {
@@ -366,8 +371,9 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
         }
       }
     }
-    const change = writes.length ? (await wiki.change({ title: `Return ${basename(session)}`, session, writes })).path : undefined;
-    if (change) await wiki.approve(change);
+    // The edits are the person's own, so a protected text they changed in a copy changes in the wiki too.
+    const change = writes.length ? (await wiki.change({ title: `Return ${basename(session)}`, session, writes }, { person: true })).path : undefined;
+    if (change) await wiki.approve(change, { person: true });
     for (const copy of done) await vault.remove(copy);
     const summary = [
       change ? `- Returned the edits of ${writes.length} cop${writes.length === 1 ? "y" : "ies"} in ${link(change)}.` : "- No copy held an edit.",

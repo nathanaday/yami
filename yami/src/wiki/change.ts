@@ -1,5 +1,6 @@
 import { basename, link, LINK, linkTarget, parseDocument, PropertiesError, readDocument, sectionText, serializeDocument, updateDocument, writeDocument, type Document } from "../document/document.js";
 import { SOURCE, timestamp, TOPIC, validate, withDefaults, type ChangeStatus } from "../document/schema.js";
+import { excerpt, protectedLost, readProtected, type ProtectedMap } from "../document/protected.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { CHANGES, inKnowledge, SOURCES, TOPICS } from "./folders.js";
 import { hashBytes } from "./source.js";
@@ -147,10 +148,27 @@ export class InvalidPlan extends Error {
 const SCHEMA_OF = { topic: TOPIC, source: SOURCE } as const;
 const typeOf = (path: string) => (path.startsWith(`${TOPICS}/`) ? "topic" : "source");
 
-/** Checks the plan against the wiki as it is now. Returns the warnings, or throws `InvalidPlan`. */
-export async function validatePlan(wiki: Wiki, plan: ChangePlan): Promise<string[]> {
+/** How a plan is checked: `person` for a plan of the person's own edits, such as the return of a checkout, which may change the text they protected. */
+export interface ValidateOptions {
+  person?: boolean;
+}
+
+/**
+ * Checks the plan against the wiki as it is now. Returns the warnings, or throws `InvalidPlan`. A modify
+ * whose new body drops a text that a person protected, and a remove of a note with protected text, are
+ * refused unless the plan is the person's own (`person`).
+ */
+export async function validatePlan(wiki: Wiki, plan: ChangePlan, options: ValidateOptions = {}): Promise<string[]> {
   const problems: string[] = [];
   const warnings: string[] = [];
+  let guarded: ProtectedMap | undefined;
+  if (!options.person) {
+    try {
+      guarded = await readProtected(wiki.vault);
+    } catch (error) {
+      problems.push(error instanceof Error ? error.message : String(error));
+    }
+  }
   if (!plan.title?.trim()) problems.push("the plan needs a title");
   if (!plan.writes?.length) problems.push("the plan has no writes");
   if (plan.writes?.length > MAX_WRITES) problems.push(`the plan has ${plan.writes.length} writes; at most ${MAX_WRITES}, so split it`);
@@ -190,6 +208,11 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan): Promise<string
       for (const error of validate(merged, SCHEMA_OF[type])) problems.push(`${label}: ${error}`);
       if (!String(merged.description ?? "").trim()) problems.push(`${label}: description is empty`);
       if (write.properties === undefined && write.body === undefined) problems.push(`${label}: a modify changes properties or the body`);
+      if (guarded && typeof write.body === "string") {
+        for (const mark of protectedLost(guarded, write.path, write.body)) problems.push(`${label}: the new body drops the text "${excerpt(mark.text)}", which a person protected; keep it as it is`);
+      }
+    } else if (guarded && protectedLost(guarded, write.path, "").length) {
+      problems.push(`${label}: the note holds text that a person protected, so it cannot be removed`);
     }
   }
   for (const write of plan.writes ?? []) {

@@ -137,6 +137,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/policies/encyclopedic-voice/POLICY.md",
     "internal/wiki/policies/one-plan/POLICY.md",
     "internal/wiki/policies/one-topic/POLICY.md",
+    "internal/wiki/policies/protected-text/POLICY.md",
     "internal/wiki/promises/bundle-imported/PROMISE.md",
     "internal/wiki/promises/change-applied/PROMISE.md",
     "internal/wiki/promises/clean-topics/PROMISE.md",
@@ -174,6 +175,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
     ]);
     expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual([
       "yami_check",
+      "yami_protected",
       "yami_agent",
       ...WIKI_TOOLS,
       "threads_stub",
@@ -189,7 +191,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
   it("writes nothing of threads, and gives no tool, skill set, or color of it, when the host leaves it out", async () => {
     t = await testYami({ threads: false });
     expect(await listed(t.root)).toEqual(["Yami.base", ...WIKI_FILES, "internal/yami/skills/run/SKILL.md"]);
-    expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(["yami_check", "yami_agent", ...WIKI_TOOLS]);
+    expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(["yami_check", "yami_protected", "yami_agent", ...WIKI_TOOLS]);
     expect(t.agent.preferences.skills).toEqual([join(t.root, "internal/yami"), join(t.root, "internal/wiki")]);
     expect(t.yami.modules.map((module) => module.id)).toEqual(["wiki"]);
   });

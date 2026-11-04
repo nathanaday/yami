@@ -21,6 +21,7 @@ export {
   type Proposal,
   type ProposedChange,
   type ProposedWrite,
+  type ValidateOptions,
   type Write,
   type WriteCounts,
 } from "./change.js";

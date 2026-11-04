@@ -2,6 +2,7 @@ import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import { basename, link, LINK, linkTarget, parseDocument, PropertiesError, readDocument, writeDocument } from "../document/document.js";
 import { timestamp, type ChangeStatus } from "../document/schema.js";
+import { PROTECTED_PATH, readProtected, type ProtectedMap } from "../document/protected.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { algorithms, type Algorithm, type Hit, type Query, type Scored } from "./algorithms/index.js";
 import { Bm25, normalize, type Fields } from "./bm25.js";
@@ -25,6 +26,7 @@ import {
   type ChangePlan,
   type ChangeSummary,
   type ProposedChange,
+  type ValidateOptions,
 } from "./change.js";
 import { chunk, type Chunk } from "./chunks.js";
 import { EmbeddingCache, type Embedder } from "./embed.js";
@@ -313,10 +315,16 @@ export class Wiki {
     return match(this, names, options);
   }
 
-  /** The health of the notes: each finding names its fix. */
+  /** The health of the notes: each finding names its fix. A protected text map that does not parse is a finding on the map itself. */
   async lint(options: LintOptions = {}): Promise<Finding[]> {
     await this.ensure();
-    return lint(this, options);
+    let guarded: ProtectedMap | undefined;
+    try {
+      guarded = await readProtected(this.vault);
+    } catch (error) {
+      return [{ path: PROTECTED_PATH, check: "bad-protected-map", severity: "error", message: error instanceof Error ? error.message : String(error), fix: "fix the JSON, or remove the file and protect the texts again" }, ...lint(this, options)];
+    }
+    return lint(this, options, guarded);
   }
 
   /** The notes that a query's `types`, `tags`, and `folder` keep. */
@@ -466,10 +474,10 @@ export class Wiki {
    * @example
    * const { path, warnings } = await wiki.change({ title: "Ingest DINOv2", session, writes: [{ op: "create", path, properties, body, why }] });
    */
-  change(plan: ChangePlan): Promise<ProposedChange> {
+  change(plan: ChangePlan, options: ValidateOptions = {}): Promise<ProposedChange> {
     return this.queued(async () => {
       await this.refresh();
-      const warnings = await validatePlan(this, plan);
+      const warnings = await validatePlan(this, plan, options);
       const writes = await resolveWrites(this, plan);
       const now = timestamp();
       const path = await changePath(this.vault, plan.title, now);
@@ -489,16 +497,17 @@ export class Wiki {
    * one after another. It throws, and writes nothing, for a change that is not `proposed` (the message
    * names its status), for a document that no longer parses, and for a plan that no longer validates
    * (`InvalidPlan`, with the problems; the change stays proposed). A write that fails puts the knowledge
-   * base back at the version before, sets `failed` with the error, and throws.
+   * base back at the version before, sets `failed` with the error, and throws. A plan that drops text a
+   * person protected is refused, unless `person` says the plan is the person's own, as a checkout's return is.
    * @example
    * const { before, after, creates } = await wiki.approve("internal/wiki/changes/2026-10-15 1432 Ingest DINOv2.md");
    */
-  approve(path: string): Promise<AppliedChange> {
+  approve(path: string, options: ValidateOptions = {}): Promise<AppliedChange> {
     return this.queued(async () => {
       await this.refresh();
       const proposal = await readProposal(this.vault, path);
       if (proposal.properties.status !== "proposed") throw new Error(`${basename(path)} is ${String(proposal.properties.status)}, not proposed; only a proposed change can be approved.`);
-      const warnings = await validatePlan(this, { title: proposal.title, writes: proposal.writes });
+      const warnings = await validatePlan(this, { title: proposal.title, writes: proposal.writes }, options);
       const state = await captured(this.vault);
       const before = state.captured && state.latest ? state.latest : await snapshot(this.vault);
       const now = timestamp();
