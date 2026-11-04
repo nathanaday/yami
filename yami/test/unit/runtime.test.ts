@@ -131,21 +131,32 @@ describe("what a Yami adds to the vault and to its agents", () => {
   const WIKI_FILES = [
     "internal/wiki/agents/drafter/AGENT.md",
     "internal/wiki/agents/extractor/AGENT.md",
+    "internal/wiki/agents/illustrator/AGENT.md",
+    "internal/wiki/agents/verifier/AGENT.md",
     "internal/wiki/installed.json",
     "internal/wiki/policies/cite-every-claim/POLICY.md",
+    "internal/wiki/policies/encyclopedic-voice/POLICY.md",
     "internal/wiki/policies/one-plan/POLICY.md",
     "internal/wiki/policies/one-topic/POLICY.md",
+    "internal/wiki/policies/protected-text/POLICY.md",
+    "internal/wiki/promises/bundle-imported/PROMISE.md",
     "internal/wiki/promises/change-applied/PROMISE.md",
+    "internal/wiki/promises/claims-verified/PROMISE.md",
     "internal/wiki/promises/clean-topics/PROMISE.md",
+    "internal/wiki/promises/figures-made/PROMISE.md",
     "internal/wiki/promises/reading-list-made/PROMISE.md",
     "internal/wiki/promises/sources-absorbed/PROMISE.md",
     "internal/wiki/sessions.base",
     "internal/wiki/skills/checkout/SKILL.md",
+    "internal/wiki/skills/export/SKILL.md",
+    "internal/wiki/skills/figures/SKILL.md",
+    "internal/wiki/skills/import/SKILL.md",
     "internal/wiki/skills/ingest/SKILL.md",
     "internal/wiki/skills/ingest/page-forms.md",
+    "internal/wiki/skills/verify/SKILL.md",
     "internal/wiki/wiki.md",
   ];
-  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_checkout"];
+  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"];
 
   it("writes the vault ledger, the base skill, and the documents of the wiki and threads, and gives each agent its tools and three skill sets, as the README lists them", async () => {
     t = await testYami();
@@ -167,6 +178,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
     ]);
     expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual([
       "yami_check",
+      "yami_protected",
       "yami_agent",
       ...WIKI_TOOLS,
       "threads_stub",
@@ -182,7 +194,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
   it("writes nothing of threads, and gives no tool, skill set, or color of it, when the host leaves it out", async () => {
     t = await testYami({ threads: false });
     expect(await listed(t.root)).toEqual(["Yami.base", ...WIKI_FILES, "internal/yami/skills/run/SKILL.md"]);
-    expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(["yami_check", "yami_agent", ...WIKI_TOOLS]);
+    expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(["yami_check", "yami_protected", "yami_agent", ...WIKI_TOOLS]);
     expect(t.agent.preferences.skills).toEqual([join(t.root, "internal/yami"), join(t.root, "internal/wiki")]);
     expect(t.yami.modules.map((module) => module.id)).toEqual(["wiki"]);
   });

@@ -44,3 +44,23 @@ export {
 } from "./schema.js";
 export { moduleLedger, vaultLedger, type LedgerView } from "./bases.js";
 export { applyOps, deltaOps, diffOps, normalizeNewlines, shiftOps, type TextOp } from "./text-ops.js";
+export {
+  emptyProtected,
+  excerpt,
+  followEdit,
+  mapThrough,
+  marksOf,
+  protect,
+  PROTECTED_PATH,
+  PROTECTED_VERSION,
+  protectedLost,
+  protectedRanges,
+  readProtected,
+  renameProtected,
+  touches,
+  unprotect,
+  writeProtected,
+  type ProtectedMap,
+  type ProtectedMark,
+  type ProtectedRange,
+} from "./protected.js";

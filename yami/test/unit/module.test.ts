@@ -388,7 +388,7 @@ describe("the tools and skills of the modules", () => {
     const set = yami.tools();
     expect(set.name).toBe("yami");
     expect(set.description).toBe("Tools of Yami. Tools of the Yami modules in this vault: Wiki, Threads, Hello world, Two.");
-    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_agent", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_change", "wiki_ingest", "wiki_checkout", "threads_stub", "threads_spec", "threads_plan", "threads_round", "threads_close", "threads_status", "hello_greet_user", "hello_two_greet_user"]);
+    expect(set.tools.map((tool: AgentTool) => tool.name)).toEqual(["yami_check", "yami_protected", "yami_agent", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout", "threads_stub", "threads_spec", "threads_plan", "threads_round", "threads_close", "threads_status", "hello_greet_user", "hello_two_greet_user"]);
     expect(await runTool(set.tools.find((tool: AgentTool) => tool.name === "hello_greet_user")!, { name: "Ada" }, new AbortController().signal)).toEqual({ text: "Hello, Ada!", isError: false });
     expect(agent.preferences.cwd).toBe(root);
     expect(agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(set.tools.map((tool) => tool.name));

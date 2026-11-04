@@ -4,14 +4,47 @@ import type { LedgerView } from "../../document/bases.js";
 import { basename, checkSection, link, LINK, linkTarget, readDocument, replaceSection, sectionText, updateDocument, writeDocument } from "../../document/document.js";
 import { timestamp, type Schema } from "../../document/schema.js";
 import { algorithms } from "../../wiki/algorithms/index.js";
+import { BUNDLE_SIZES, isRepository, readBundle, selectBundle, selectDocuments, writeBundle, type BundleSelection, type BundleSize, type WrittenBundle } from "../../wiki/bundle.js";
 import { bodyHash, InvalidPlan, validatePlan, type ChangePlan, type Write } from "../../wiki/change.js";
 import { CHANGES, inKnowledge, SNAPSHOTS, SOURCES, TOPICS, WIKI } from "../../wiki/folders.js";
-import { sourceChunks } from "../../wiki/source.js";
+import { resolveCitations } from "../../wiki/citations.js";
+import { deltaChunks } from "../../wiki/delta.js";
+import { isAbsolute } from "../../wiki/source.js";
 import { normalizeTag } from "../../wiki/wiki.js";
 import { WIKI_COLOR } from "../colors.js";
 import { YamiModule } from "../module.js";
 import { checkedOut, checkoutSkill, COPY, MAX_DOCUMENTS, orderShape, readingListMade, type Checkout, type CheckoutOrder, type ReturnedCheckout } from "./checkout.js";
 import { absorbed, drafterAgent, extractorAgent, INGEST, pageForms, proposed } from "./ingest.js";
+import { figures, figuresMade, figuresSkill, illustratorAgent, saveFigure } from "./figures.js";
+import { bundleImported, imported, importSkill, stagingFolder, type ImportedBundle, type StagedNote } from "./import.js";
+import { claimsVerified, verified, verifierAgent, verifySkill } from "./verify.js";
+
+/** The vault folder where a bundle goes when the export names none: `exports/<name>/`. */
+export const EXPORTS = "exports";
+
+/** What an export takes: a topic and a size, or the documents, and where to write. */
+export interface ExportOptions {
+  /** The topic to export around, as a path or a link name. */
+  topic?: string;
+  /** How far to reach from the topic. Default `medium`. */
+  size?: BundleSize;
+  /** Instead of a topic and a size: the topics and sources to export. The sources the topics cite come along. */
+  documents?: string[];
+  /** A vault path, or an absolute path outside the vault. Default `exports/<name>`. */
+  folder?: string;
+  /** The bundle's name. Default: the topic's, or `Bundle <date>`. */
+  name?: string;
+  /** Whether the originals come along. Default true. */
+  originals?: boolean;
+}
+
+/** What an import takes: where the bundle is, and the session's name. */
+export interface ImportOptions {
+  /** A folder of the vault, an absolute path, or a git repository URL. */
+  from: string;
+  /** The session's name. Default `Import <bundle> <date>`. */
+  name?: string;
+}
 
 /**
  * The wiki module, built into every Yami: ingest sessions that turn sources into cited topics through
@@ -53,7 +86,7 @@ export class WikiModule extends YamiModule {
       sort: [{ property: "created", direction: "DESC" }],
     },
   ];
-  readonly checks = { "checked-out": checkedOut, proposed, absorbed };
+  readonly checks = { "checked-out": checkedOut, proposed, absorbed, imported, figures, verified };
   readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, which proposes a change document in ${CHANGES}/ that a person approves in Obsidian, with a version in ${SNAPSHOTS}/ for each applied change. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
 
   readonly cite = this.policy({
@@ -70,6 +103,16 @@ export class WikiModule extends YamiModule {
     name: "one-topic",
     description: "One subject, one topic.",
     body: `Before a new topic, call \`wiki_match\` with the subject's names. A hit means extend that topic. A near match means read the neighbors before you decide. Only a new subject gets a new topic, and its title is the name the sources use.`,
+  });
+  readonly voice = this.policy({
+    name: "encyclopedic-voice",
+    description: "A topic reads as an encyclopedia article: it states what is known, cites in parentheses, and never narrates its source.",
+    body: `A topic is an article on its subject that stands on its own, in the voice of an encyclopedia. State what is known, and put the citation in parentheses after the claim: "DINOv2 trains on 142M curated images ([[DINOv2]], p. 3)." Never make the source the subject of a sentence: not "the slides say", "the paper argues", "according to the lecture", "in this document", "the author notes". The source appears in the parentheses and in the Sources section, and nowhere else. Never recap the source in its own order, and never summarize it in a topic: the sections of a topic follow the subject, and the source note's Summary and Structure are the one place that describes the original, how it is organized, and where it is weak. No first person, no "you", no advice, no commentary of your own. Present tense for what is, past tense for what happened. Use the subject's own terms, and define each at its first use.`,
+  });
+  readonly protectedText = this.policy({
+    name: "protected-text",
+    description: "Text that a person protected stays as it is.",
+    body: `A person can protect text in a note against change by an agent. Keep every protected text as it is, letter for letter, wherever it stands in the note: do not reword it, move it, cut it, or fold it into other text. Before a modify of a note, call \`yami_protected\` with the note, and keep each text it lists in the new body. \`wiki_change\` refuses a write that drops one, with the text; then put the text back and propose again. Write around protected text: a new claim goes beside it, not in its place.`,
   });
   readonly changeApplied = this.promise({
     name: "change-applied",
@@ -102,12 +145,12 @@ export class WikiModule extends YamiModule {
 
 Two agents of the session do the reading and the drafting, each in a fresh context: \`extractor\` reads one chunk, and \`drafter\` drafts the writes of one slice. Run each with \`yami_agent\`; calls in one turn run at the same time. An agent knows only its brief and your task, so give it everything in the task. \`page-forms.md\`, in this skill's folder \`${INGEST}/\`, gives the properties and the sections of a topic and a source: read it before you assemble the plan.
 
-1. **Chunks.** Call \`wiki_chunks\` for each source. It names the file to read and its chunks: line ranges, page ranges, or the whole file. Call \`wiki_tags\` once for the tag list.
+1. **Chunks.** Call \`wiki_chunks\` for each source. It names the file to read and its chunks: line ranges, page ranges, or the whole file. Call \`wiki_tags\` once for the tag list. A source that **supersedes** an earlier capture of its file says so: with \`delta: true\` its chunks are the changed passages alone, with the lines around them, and \`citations\` lists each citation of the old source in the topics with where it stands (\`kept\` with its locator in the new text as \`moved\`, \`changed\`, or \`unknown\`); with \`delta: false\` (the copies are not texts) the chunks are the whole file and every cited passage is unknown. Extract the chunks it gives and no more; a source with no chunk changed in nothing but form, and its citations move.
 2. **Extract.** For each chunk, call \`yami_agent\` with the agent \`extractor\`, in waves of at most eight, also when you could read the chunk yourself: each worker reads with a fresh context, so the last chunk gets the care of the first. Only when the sources hold one chunk in all, extract it yourself from the extractor's brief, \`${this.layout.folders.agents}/extractor/AGENT.md\`. The task gives the source note's path, the file and the range from \`wiki_chunks\`, the source's tags, and the tag list. Each returns an Item Map. A \`partial\` chunk goes again, narrower.
 3. **Match.** Call \`wiki_match\` with every subject's name at once, aliases included, so a subject named in three chunks is one subject.
 4. **Slice.** Put every subject that hits or nears one topic into the same slice, so two drafters never write one topic. At most eight subjects per slice.
 5. **Draft.** For each slice, call \`yami_agent\` with the agent \`drafter\`. The task gives the slice (each subject with its items and its match), the source notes, their tags, and the tag list. Each returns writes. With one or two slices, draft them yourself from the drafter's brief, \`${this.layout.folders.agents}/drafter/AGENT.md\`.
-6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
+6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. For a source that supersedes another, also a modify of the old source with \`status: superseded\`, and the citations of the old source move: give each drafter the \`citations\` of its topics, so its modifies point every \`kept\` citation at the new source with its \`moved\` locator, and read each \`changed\` or \`unknown\` claim against the changed passages. A topic that cites the old source and gets no other write still gets a modify that moves its citations. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason, and the figure markers the drafters left, which a figures session makes later), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
 7. **Propose.** Call \`wiki_change\`. It validates the plan, writes it as a change document that waits for a person's approval, and links the change from this session. Nothing in the wiki changes until a person approves it in Obsidian. When the tool refuses, fix the writes it names and call it again. When it returns warnings, links to no note, fix those writes and propose the plan again; the person approves the last proposal and rejects the rest.
 8. **End.** Your work ends when the plan is proposed and covers every source. Do not wait for the approval, and do not lint the wiki for the plan's effect: the wiki holds it only after the approval. When a change of this session was rejected, the session's feedback holds the reason: read it, and propose a new plan that answers it.
 
@@ -128,7 +171,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     },
     skills: [this.ingestSkill],
     agents: [this.extractor, this.drafter],
-    policies: [this.cite, this.onePlan, this.oneTopic],
+    policies: [this.cite, this.onePlan, this.oneTopic, this.voice, this.protectedText],
     promises: [this.changeApplied, this.absorbed, this.clean],
   });
 
@@ -148,6 +191,96 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
     skills: [this.checkoutSkill],
     promises: [this.readingListMade],
     maxIterations: 2,
+  });
+
+  readonly importSkill = this.skill(importSkill);
+  readonly bundleImported = this.promise(bundleImported);
+
+  /**
+   * An import as a session: `importBundle` stages the bundle's notes in the folder of the session's name and
+   * writes the Import section, and a run merges them into the wiki through one change plan. Read-only, as an
+   * ingest. No command creates one empty: Wiki: import a bundle and `wiki_import` stage one.
+   */
+  readonly import = this.flow({
+    name: "import",
+    description: "Merge a bundle of topics and sources, staged in the session's folder, into the wiki through one change plan, which a person approves.",
+    access: "read-only",
+    command: false,
+    schema: {
+      /** Where the bundle came from: a folder, an absolute path, or a repository URL. */
+      from: { type: "text" },
+      /** The staged notes of the bundle, in the session's folder. */
+      staged: { type: "links", default: [] },
+    },
+    skills: [this.importSkill],
+    agents: [this.drafter],
+    policies: [this.cite, this.onePlan, this.oneTopic, this.voice, this.protectedText],
+    promises: [this.changeApplied, this.bundleImported, this.clean],
+  });
+
+  readonly illustrator = this.agent(illustratorAgent);
+  readonly figuresSkill = this.skill(figuresSkill);
+  readonly figuresMade = this.promise(figuresMade);
+
+  /**
+   * A figures session: makes the figures that the topics of its `topics` field mark as missing, or of every
+   * topic with a marker when the field is empty, and proposes one change that puts them in place. Read-only:
+   * a figure is saved through `wiki_figure`, and a topic changes only through `wiki_change`.
+   */
+  readonly figures = this.flow({
+    name: "figures",
+    description: "Draw the figures that topics mark as missing, save them under internal/wiki/figures/, and propose one change plan that puts each in its marker's place.",
+    access: "read-only",
+    schema: {
+      /** The topics to make figures for. Empty: every topic with a figure marker. */
+      topics: { type: "links", default: [] },
+    },
+    skills: [this.figuresSkill],
+    agents: [this.illustrator],
+    policies: [this.cite, this.onePlan, this.voice, this.protectedText],
+    promises: [this.changeApplied, this.figuresMade],
+    instructions: "With no topics in the Request section or the topics field, make the figures of every topic that has a marker.",
+  });
+
+  readonly verifier = this.agent(verifierAgent);
+  readonly verifySkill = this.skill(verifySkill);
+  readonly claimsVerified = this.promise(claimsVerified);
+
+  /**
+   * A verify session: reads each citation of the topics of its `topics` field, or of the topics most in need
+   * when the field is empty, at its locator in the source's copy, and proposes one change that fixes the claims
+   * the sources do not support and sets `verified` on each topic. Read-only: a topic changes only through
+   * `wiki_change`.
+   */
+  readonly verify = this.flow({
+    name: "verify",
+    description: "Read each citation of the topics at its place in the source, and propose one change plan that fixes the claims the sources do not support and stamps each topic verified.",
+    access: "read-only",
+    schema: {
+      /** The topics to verify. Empty: the topics with a bad citation, then the ones verified longest ago. */
+      topics: { type: "links", default: [] },
+    },
+    skills: [this.verifySkill],
+    agents: [this.verifier],
+    policies: [this.cite, this.onePlan, this.voice, this.protectedText],
+    promises: [this.changeApplied, this.claimsVerified],
+    instructions: "With no topics in the Request section or the topics field, verify the topics with a bad-citation finding first, then the ones with no verified date or the oldest one.",
+  });
+
+  readonly exportSkill = this.skill({
+    name: "export",
+    description: "Export a bundle of the wiki's notes around a subject, for another vault or another person: choose the topics that serve the request, and write them with their sources and originals as a folder that Wiki: import a bundle reads.",
+    body: `# Export
+
+A bundle is a folder of topics and sources in the wiki's own layout, with the originals the sources embed and a README that lists them. Another vault imports it with Wiki: import a bundle or \`wiki_import\`. Code writes the bundle; you choose what goes in.
+
+1. **The request.** Take it in the user's words: a subject, and how far around it to reach.
+2. **One topic, by size.** When the request is one subject, call \`wiki_export\` with \`topic\` and a \`size\`: \`minimal\` (the topic alone), \`small\` (up to 8 topics), \`medium\` (up to 25), or \`extensive\` (up to 80). Code walks the links from the topic and takes the best-connected neighbors first, and every source the topics cite comes along. Choose \`small\` for a hand-out, \`medium\` for a week's reading, \`extensive\` for a course.
+3. **A chosen set.** When the request names several subjects, or a selection code cannot make ("my midterm topics", "everything on vision but the datasets"), choose the documents as \`/wiki:checkout\` chooses a reading list: \`wiki_search\` for candidates, read the snippets, keep what serves, stop a branch where it stops serving. Then call \`wiki_export\` with \`documents\`: the paths, topics and sources. The sources the topics cite come along either way.
+4. **Where.** \`folder\` is a vault path (default \`exports/<name>\`) or an absolute path outside the vault, as the user names it. Give the bundle a \`name\` when the user does.
+
+End with one line: the folder, and the counts of topics and sources. A bundle inside the vault is not knowledge: the index skips its notes.
+`,
   });
 
   /** Returns the checkout open in the editor, the person's act. It applies while the checkout is out. */
@@ -257,7 +390,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
         const write: Write = { op: "modify", path: original, body: await this.#towardOriginals(body), base: properties.sha256, why: "the user's edits of the checkout copy" };
         // One edit the wiki refuses must not hold back the others: it stays in its copy, with the reason.
         try {
-          await validatePlan(wiki, { title: "Return", writes: [write] });
+          await validatePlan(wiki, { title: "Return", writes: [write] }, { person: true });
           writes.push(write);
           done.push(copy);
         } catch (error) {
@@ -266,8 +399,9 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
         }
       }
     }
-    const change = writes.length ? (await wiki.change({ title: `Return ${basename(session)}`, session, writes })).path : undefined;
-    if (change) await wiki.approve(change);
+    // The edits are the person's own, so a protected text they changed in a copy changes in the wiki too.
+    const change = writes.length ? (await wiki.change({ title: `Return ${basename(session)}`, session, writes }, { person: true })).path : undefined;
+    if (change) await wiki.approve(change, { person: true });
     for (const copy of done) await vault.remove(copy);
     const summary = [
       change ? `- Returned the edits of ${writes.length} cop${writes.length === 1 ? "y" : "ies"} in ${link(change)}.` : "- No copy held an edit.",
@@ -279,6 +413,111 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       d.body = replaceSection(d.body, "Return", summary);
     });
     return { ...(change && { change }), returned: writes.map((write) => write.path), skipped, summary };
+  }
+
+  /**
+   * Writes a bundle of the wiki's notes: around a `topic` by `size` (`selectBundle`), or the `documents` given
+   * (`selectDocuments`), to `folder`, a vault path (default `exports/<name>`) or an absolute path outside the
+   * vault, with the sources the topics cite and the originals they embed. Each note gets the property `bundle`,
+   * so the index skips a bundle inside the vault. It throws, and writes nothing, for a topic that is not one,
+   * a document that is not knowledge, no topic and no documents, an unknown size, and a folder under `wiki/`.
+   * `wiki_export` calls it, and the command Wiki: export a topic.
+   * @example
+   * const { folder, topics } = await wiki.exportBundle({ topic: "Reinforcement learning", size: "small" });
+   */
+  async exportBundle(options: ExportOptions): Promise<WrittenBundle> {
+    const { wiki } = this;
+    await wiki.refresh();
+    let selection: BundleSelection;
+    if (options.documents?.length) {
+      selection = await selectDocuments(wiki, options.documents);
+      if (options.topic) selection.topic = wiki.resolve(options.topic) ?? selection.topic;
+    } else if (options.topic) {
+      selection = await selectBundle(wiki, options.topic, options.size ?? "medium");
+    } else throw new Error("Name a topic to export around, or the documents to export.");
+    const name = options.name?.trim() || (selection.topic ? basename(selection.topic) : `Bundle ${timestamp().slice(0, 10)}`);
+    const folder = options.folder?.trim() || `${EXPORTS}/${name.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim()}`;
+    return writeBundle(wiki, selection, folder, { name, originals: options.originals });
+  }
+
+  /**
+   * Imports a bundle: reads it from `from` (a folder of the vault, an absolute path, or a git repository URL,
+   * cloned with the person's own git), copies its originals into `internal/wiki/originals/`, creates an
+   * `import` session, and stages each note in the session's folder with a line in the session's Import
+   * section that says where it stands: `new`, `near` a topic, or in `conflict` with a note that holds its path
+   * or its name. A note the wiki holds already, as it is, is dropped. When every staged note is new and
+   * nothing is near one, it proposes the change itself, as creates, and the session is done: a person
+   * approves it. Otherwise a run of the session merges them. It throws, and creates nothing, for a bundle it
+   * cannot read or that holds no note. `wiki_import` calls it, and the command Wiki: import a bundle.
+   * @example
+   * const { session, staged, change } = await wiki.importBundle({ from: "exports/Reinforcement learning" });
+   */
+  async importBundle(options: ImportOptions): Promise<ImportedBundle> {
+    const { vault, wiki } = this;
+    const from = options.from.trim();
+    if (!from) throw new Error("Give the bundle to import: a folder, an absolute path, or a repository URL.");
+    const bundle = await readBundle(vault, from);
+    for (const { path, data } of bundle.originals) if (!(await vault.exists(path))) await vault.writeBinary(path, data);
+    await wiki.refresh();
+    const sourceName = (p: string) => p.replace(/\/+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? p;
+    // A bundle folder inside the vault is indexed as any folder is, so its own notes are no match for its notes.
+    const own = !isAbsolute(from) && !isRepository(from) ? `${from.replace(/\/+$/, "")}/` : undefined;
+    const outside = (path: string) => !own || !path.startsWith(own);
+    const name = bundle.name ?? sourceName(from.replace(/\.git$/, ""));
+    const staged: StagedNote[] = [];
+    const dropped: ImportedBundle["dropped"] = [];
+    const plan: { note: (typeof bundle.notes)[number]; status: StagedNote["status"]; with: string[]; reason: string }[] = [];
+    for (const note of bundle.notes) {
+      const existing = wiki.note(note.path);
+      if (existing) {
+        if ((await bodyHash(existing.body)) === (await bodyHash(note.body)) && existing.description === String(note.properties.description ?? "")) {
+          dropped.push({ target: note.path, reason: "the wiki holds it already, as it is" });
+          continue;
+        }
+        plan.push({ note, status: "conflict", with: [existing.path], reason: `a note holds this path with another text: merge into ${link(existing.path)}` });
+        continue;
+      }
+      const names = [basename(note.path), ...(Array.isArray(note.properties.aliases) ? note.properties.aliases.map(String) : [])];
+      const matches = await wiki.match(names, { types: [note.type] });
+      const hit = matches.find((m) => m.match === "hit" && m.path && m.path !== note.path && outside(m.path));
+      if (hit) {
+        plan.push({ note, status: "conflict", with: [hit.path!], reason: `${link(hit.path!)} holds the name "${hit.name}": the same subject, or another that needs a name of its own` });
+        continue;
+      }
+      const near = [...new Set(matches.flatMap((m) => (m.match === "near" ? m.neighbors.map((n) => n.path).filter(outside) : [])))];
+      if (near.length) {
+        plan.push({ note, status: "near", with: near, reason: `near ${near.map(link).join(", ")}: the same subject, or a neighbor to link` });
+        continue;
+      }
+      plan.push({ note, status: "new", with: [], reason: "new to this wiki" });
+    }
+    const session = (await this.import.create({ name: options.name ?? `Import ${name} ${timestamp().slice(0, 10)}`, request: `Merge the bundle ${from} into the wiki.`, fields: { from } })).path;
+    const folder = stagingFolder(session);
+    for (const entry of plan) {
+      const path = `${folder}/${basename(entry.note.path)}.md`;
+      await writeDocument(vault, { path, properties: entry.note.properties, body: entry.note.body });
+      staged.push({ staged: path, target: entry.note.path, type: entry.note.type, status: entry.status, with: entry.with, reason: entry.reason });
+    }
+    const lines = [
+      ...staged.map((s) => `- ${link(s.staged)} → \`${s.target}\` · **${s.status}** · ${s.reason}`),
+      ...dropped.map((d) => `- \`${d.target}\` · dropped · ${d.reason}`),
+      ...bundle.skipped.map((k) => `- \`${k.path}\` · skipped · ${k.reason}`),
+    ];
+    const direct = staged.length > 0 && staged.every((s) => s.status === "new");
+    await updateDocument(vault, session, (doc) => {
+      doc.properties.staged = staged.map((s) => link(s.staged));
+      doc.body = replaceSection(doc.body, "Import", lines.join("\n") || "The bundle brought nothing that the wiki lacks.");
+      if (!staged.length || direct) doc.properties.state = "done";
+    });
+    let change: string | undefined;
+    if (direct) {
+      const writes: Write[] = staged.map((s) => {
+        const { type: _type, ...properties } = plan.find((p) => p.note.path === s.target)!.note.properties;
+        return { op: "create", path: s.target, properties, body: plan.find((p) => p.note.path === s.target)!.note.body, why: `imported from ${name}` };
+      });
+      change = (await wiki.change({ title: `Import ${name}`, notes: `Every note of the bundle is new to this wiki, so code proposed the plan at once.${dropped.length ? ` Dropped, as the wiki holds them already: ${dropped.map((d) => basename(d.target)).join(", ")}.` : ""}`, session, writes })).path;
+    }
+    return { session, name, staged, dropped, skipped: bundle.skipped, ...(change && { change }) };
   }
 
   /** The path of a checkout session of this module, or an error that says what it is instead. */
@@ -346,7 +585,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       defineTool({
         name: "lint",
         readOnly: true,
-        description: "The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, and orphan topics. Each finding names its fix. Errors fail the clean-topics promise; warnings are worth a look. Reads only.",
+        description: "The health of the notes: dead links, duplicate names, missing descriptions, uncited sources, orphan topics, figures still to make, topics in the voice of a report, citations that lead nowhere, and citations of a superseded source. Each finding names its fix. Errors fail the clean-topics promise; warnings are worth a look. Reads only.",
         input: {
           paths: z.array(z.string()).optional().describe("Check only these notes, as paths or [[link]] names."),
           folder: z.string().optional().describe(`Check only this folder, for example ${TOPICS}.`),
@@ -395,14 +634,31 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
       defineTool({
         name: "chunks",
         readOnly: true,
-        description: `Splits a source's original for the workers of an ingest: a text file into runs of at most 800 lines, a PDF into 20 pages at a time, any other file whole. A source with a text, such as the slides of a .pptx, is split as that text. Returns the file to read and each chunk's range and locator. Workers read a range with their Read tool.`,
+        description: `Splits a source's original for the workers of an ingest: a text file into runs of at most 800 lines, a PDF into 20 pages at a time, any other file whole. A source with a text, such as the slides of a .pptx, is split as that text. Returns the file to read and each chunk's range and locator. Workers read a range with their Read tool. For a source that supersedes an earlier capture of its file (both texts), the chunks are the changed passages alone, with delta true, the removed runs of the old text, and each citation of the old source in the topics with where it stands: kept with its new locator, changed, or unknown.`,
         input: {
           source: z.string().describe("The source note, as a path or a [[link]] name."),
         },
         title: ({ source }) => `Chunk ${source.slice(0, 60)}`,
         run: async ({ source }) => {
           await wiki.refresh();
-          return JSON.stringify(await sourceChunks(wiki.vault, wiki, source));
+          return JSON.stringify(await deltaChunks(wiki.vault, wiki, source));
+        },
+      }),
+      defineTool({
+        name: "citations",
+        readOnly: true,
+        description: `The citations of a topic, each with the claim it ends, the source note, the file to read (the frozen copy, or its text), and the lines or pages its locator names, so a verifier reads the source at that place. A citation that code can see leads nowhere, a locator past the file or a note that is not a source, says so in problem. A verify session calls it for each topic.`,
+        input: {
+          topic: z.string().describe("The topic, as a path or a [[link]] name."),
+        },
+        title: ({ topic }) => `Citations of ${topic.slice(0, 60)}`,
+        run: async ({ topic }) => {
+          await wiki.refresh();
+          const path = wiki.resolve(topic);
+          const note = path ? wiki.note(path) : undefined;
+          if (!note || note.type !== "topic") throw new Error(`${topic} is not a topic of the wiki.`);
+          const resolved = await resolveCitations(wiki.vault, wiki, note);
+          return JSON.stringify({ topic: note.path, verified: note.properties.verified ?? null, citations: resolved.map(({ from: _from, to: _to, ...rest }) => rest) });
         },
       }),
       defineTool({
@@ -449,6 +705,53 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
           const sources = (await session.read()).properties.sources;
           void session.start().catch((error: unknown) => console.error(`yami: the run of ${session.path} failed`, error));
           return JSON.stringify({ session: session.path, sources, run: "started" });
+        },
+      }),
+      defineTool({
+        name: "figure",
+        description: `Saves a figure for a topic under internal/wiki/figures/<topic>/<name>.svg or .png, and returns its path and the line that embeds it. Give the figure as svg text (one <svg> with a viewBox, no script, no event handler, no reference outside itself) or as png bytes in base64. Refuses a topic that is not one, a bad SVG or PNG, a file over 1 MB (SVG) or 4 MB (PNG), and a name in use unless replace is set. The topic embeds the figure through wiki_change, as any write.`,
+        input: {
+          topic: z.string().describe("The topic the figure is for, as a path or a [[link]] name."),
+          name: z.string().describe("The file name without its extension, such as encoder-decoder."),
+          svg: z.string().optional().describe("The figure as SVG text."),
+          png: z.string().optional().describe("The figure as PNG bytes in base64, when it was rendered or cropped with a tool."),
+          replace: z.boolean().optional().describe("Replace a figure of that name. Default false."),
+        },
+        title: ({ topic, name }) => `Save the figure ${name.slice(0, 40)} for ${topic.slice(0, 40)}`,
+        run: async (figure) => {
+          await wiki.refresh();
+          const path = wiki.resolve(figure.topic);
+          const topic = path && wiki.note(path)?.type === "topic" ? path : undefined;
+          return JSON.stringify(await saveFigure(wiki.vault, topic, figure));
+        },
+      }),
+      defineTool({
+        name: "export",
+        description: `Writes a bundle of the wiki's notes for another vault or another person: a folder in the wiki's layout with the topics, the sources they cite, the originals the sources embed, and a README. Give a topic and a size (${BUNDLE_SIZES.join(", ")}: the topic alone, up to 8 topics, 25, or 80, the best-connected neighbors first), or the documents to export as paths. The folder is a vault path (default ${EXPORTS}/<name>) or an absolute path outside the vault. The skill /wiki:export says how to choose. Returns the folder and what it holds; refuses a topic that is not one, a document that is not knowledge, or a folder under ${WIKI}/.`,
+        input: {
+          topic: z.string().optional().describe("The topic to export around, as a path or a [[link]] name."),
+          size: z.enum(BUNDLE_SIZES).optional().describe("How far to reach from the topic. Default medium."),
+          documents: z.array(z.string()).optional().describe("Instead of a topic and a size: the topics and sources to export, as paths or [[link]] names."),
+          folder: z.string().optional().describe(`Where to write: a vault path, or an absolute path. Default ${EXPORTS}/<name>.`),
+          name: z.string().optional().describe("The bundle's name. Default: the topic's."),
+        },
+        title: ({ topic, documents, size }) => `Export ${topic ? `${topic.slice(0, 50)} (${size ?? "medium"})` : `${documents?.length ?? 0} documents`}`,
+        run: async (options) => JSON.stringify(await this.exportBundle(options)),
+      }),
+      defineTool({
+        name: "import",
+        description: `Imports a bundle of topics and sources into the wiki: reads it from a folder of the vault, an absolute path, or a git repository URL (cloned with the person's git), copies its originals, stages its notes in an import session, and says where each stands against the wiki. When every note is new and nothing is near one, it proposes the change at once; otherwise it starts the session's run, which merges them and proposes one plan. Nothing in the wiki changes until a person approves. Returns the session, the staged notes with their status, the notes dropped as already held, and the change when one was proposed; do not merge the notes yourself. Refuses a folder it cannot read or that holds no topic or source.`,
+        input: {
+          from: z.string().describe("The bundle: a vault folder, an absolute path, or a repository URL such as https://github.com/owner/repo or …/tree/<branch>/<folder>."),
+          name: z.string().optional().describe("The session's name. Default: Import <bundle> <date>."),
+        },
+        title: ({ from }) => `Import ${from.slice(from.lastIndexOf("/") + 1).slice(0, 60) || from.slice(0, 60)}`,
+        run: async (options) => {
+          const result = await this.importBundle(options);
+          const session = this.yami.session(result.session);
+          const run = result.change || !result.staged.length ? "not needed" : "started";
+          if (run === "started") void session.start().catch((error: unknown) => console.error(`yami: the run of ${session.path} failed`, error));
+          return JSON.stringify({ ...result, run });
         },
       }),
       defineTool({

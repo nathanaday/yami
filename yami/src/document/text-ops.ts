@@ -9,12 +9,13 @@ export interface TextOp {
 
 /**
  * Returns the changes that turn `before` into `after`, in ascending order and without overlaps.
- * The diff is cleaned up to word and line boundaries, so each change reads as an edit a person would make.
+ * The diff is cleaned up to word and line boundaries, so each change reads as an edit a person would make;
+ * with `semantic: false` it stays at the character level, so two nearby changes stay two ops.
  */
-export function diffOps(before: string, after: string): TextOp[] {
+export function diffOps(before: string, after: string, options: { semantic?: boolean } = {}): TextOp[] {
   if (before === after) return [];
   const diffs = diffMain(before, after);
-  diffCleanupSemantic(diffs);
+  if (options.semantic !== false) diffCleanupSemantic(diffs);
   const ops: TextOp[] = [];
   let position = 0;
   for (const [kind, text] of diffs) {

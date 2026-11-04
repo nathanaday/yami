@@ -42,6 +42,66 @@ export class VoyageEmbedder implements Embedder {
   }
 }
 
+export interface OllamaOptions {
+  /** Where Ollama listens. Default `http://localhost:11434`. */
+  host?: string;
+  /** Default `nomic-embed-text`. */
+  model?: string;
+  /**
+   * Texts prepended to each document and each query, for a model trained with task prefixes. Default: the
+   * prefixes of `nomic-embed-text` for a model whose name starts with `nomic-embed`, none for another.
+   */
+  prefixes?: { document: string; query: string };
+  fetch?: typeof fetch;
+}
+
+/** How many texts one request to Ollama embeds. */
+export const OLLAMA_BATCH = 32;
+
+/**
+ * Ollama on the person's own computer, over `fetch` to its `/api/embed`: an embedder with no key and no
+ * network, for a model the person pulled (`ollama pull nomic-embed-text`). An error names what to do: start
+ * Ollama, or pull the model.
+ */
+export class OllamaEmbedder implements Embedder {
+  readonly id: string;
+  readonly host: string;
+  readonly model: string;
+  private readonly prefixes: { document: string; query: string };
+  private readonly fetcher: typeof fetch;
+
+  constructor(options: OllamaOptions = {}) {
+    this.host = (options.host ?? "http://localhost:11434").replace(/\/+$/, "");
+    this.model = options.model ?? "nomic-embed-text";
+    this.id = `ollama:${this.model}`;
+    this.prefixes = options.prefixes ?? (this.model.startsWith("nomic-embed") ? { document: "search_document: ", query: "search_query: " } : { document: "", query: "" });
+    this.fetcher = options.fetch ?? fetch;
+  }
+
+  async embed(texts: string[], kind: "document" | "query"): Promise<Float32Array[]> {
+    const out: Float32Array[] = [];
+    const prefix = this.prefixes[kind];
+    for (let i = 0; i < texts.length; i += OLLAMA_BATCH) {
+      let response: Response;
+      try {
+        response = await this.fetcher(`${this.host}/api/embed`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: this.model, input: texts.slice(i, i + OLLAMA_BATCH).map((text) => prefix + text) }),
+        });
+      } catch (error) {
+        throw new Error(`Ollama is not answering at ${this.host}: ${error instanceof Error ? error.message : String(error)}. Start Ollama, or turn embeddings off.`);
+      }
+      if (response.status === 404) throw new Error(`Ollama has no model named ${this.model}. Run \`ollama pull ${this.model}\`, or name a model it has.`);
+      if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${(await response.text()).slice(0, 200)}`);
+      const json = (await response.json()) as { embeddings?: number[][]; error?: string };
+      if (!json.embeddings) throw new Error(`Ollama returned no embeddings${json.error ? `: ${json.error}` : ""}.`);
+      for (const vector of json.embeddings) out.push(Float32Array.from(vector));
+    }
+    return out;
+  }
+}
+
 /**
  * The embeddings of the chunks, keyed by chunk hash, kept as one JSON file in the vault.
  * Only chunks without an entry are embedded, so a refresh costs only what changed.

@@ -106,6 +106,8 @@ Every Yami vault has a wiki, and every agent can search it, so any conversation 
 
 Nothing in the wiki changes until you approve the plan. The Yami panel shows what each plan creates, changes, and removes, with a diff for each note. Each approval saves a version before and after, so you can restore any earlier state.
 
+Every claim carries a citation you can follow: rest the pointer on one and the passage it cites appears; click to open the source there. A verify session reads each citation against its source and proposes the fixes. When a source file changes, the next ingest reads only what changed and moves the citations. With Ollama on your computer, search finds notes by meaning, with no key.
+
 ![A proposed change to the wiki, waiting for approval](docs/wiki-approval.png)
 
 ## Conversations in Your Notes
@@ -141,5 +143,6 @@ In Obsidian, turn on **Yami Wiki** under **Settings → Community plugins**, the
 | [`yami/`](yami/) | The library |
 | [`design.md`](design.md) | The design rules that the code keeps |
 | [`docs/releasing.md`](docs/releasing.md) | How each repository is checked and released, and how a plugin gets into a vault |
+| [`docs/todo.md`](docs/todo.md) | The wiki's open items, and what each became |
 
 The plugins have repositories of their own: [yami-wiki](https://github.com/nathanaday/yami-wiki), [yami-threads](https://github.com/nathanaday/yami-threads), and [obsidian-duet](https://github.com/nathanaday/obsidian-duet).
