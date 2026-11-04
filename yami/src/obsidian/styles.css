@@ -782,6 +782,81 @@ button.yami-send.is-stop svg {
   display: none !important;
 }
 
+/* Protected text: gray on a soft background, so it reads as set; in track mode, an accent underline says it can be edited. */
+
+.yami-protected {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--background-modifier-hover) 75%, transparent);
+  color: var(--text-muted);
+  box-decoration-break: clone;
+}
+
+body.yami-protected-editing .yami-protected {
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+  border-bottom: 1px dashed var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.markdown-reading-view .yami-protected-block {
+  padding-left: var(--size-4-3);
+  box-shadow: inset 3px 0 0 var(--background-modifier-border-hover);
+  color: var(--text-muted);
+}
+
+/* Citations: a citation of a source reads as a quiet link; the popover shows the passage it leads to. */
+
+.yami-citation {
+  border-bottom: 1px dotted var(--text-faint);
+  cursor: help;
+}
+
+.yami-citation:hover {
+  border-bottom-color: var(--text-accent);
+}
+
+.yami-citation-popover {
+  position: fixed;
+  z-index: var(--layer-popover);
+  max-width: min(36rem, 90vw);
+  max-height: 60vh;
+  overflow: auto;
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s);
+  font-size: var(--font-ui-small);
+}
+
+.yami-citation-part + .yami-citation-part {
+  margin-top: var(--size-4-2);
+  padding-top: var(--size-4-2);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.yami-citation-title {
+  display: block;
+  color: var(--text-accent);
+  font-weight: var(--font-medium);
+  cursor: pointer;
+}
+
+.yami-citation-text {
+  margin: var(--size-4-1) 0 0;
+  padding: var(--size-4-1) var(--size-4-2);
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: var(--font-smaller);
+  color: var(--text-normal);
+  background: var(--background-secondary);
+}
+
+.yami-citation-note {
+  margin-top: var(--size-4-1);
+  color: var(--text-muted);
+}
+
 /* Wiki: search, compare, and note lists. */
 
 .yami-wiki-status {
@@ -852,6 +927,31 @@ button.yami-send.is-stop svg {
 
 .yami-wiki-badge.is-neighbor {
   font-family: var(--font-monospace);
+}
+
+/* The export modal: a lead line, the settings, and a quiet error under the button. */
+
+.yami-export .yami-export-lead {
+  margin: 0 0 var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.yami-export .yami-export-folder input {
+  width: 100%;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-small);
+}
+
+.yami-export .yami-export-actions {
+  border-top: none;
+  justify-content: flex-end;
+}
+
+.yami-export .yami-export-error {
+  margin: 0;
+  color: var(--text-error);
+  font-size: var(--font-ui-small);
 }
 
 .modal.yami-wiki-compare {

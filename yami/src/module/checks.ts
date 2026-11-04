@@ -1,4 +1,5 @@
 import { basename, linksOf, readDocument, type Document } from "../document/document.js";
+import { excerpt, protectedLost, readProtected } from "../document/protected.js";
 import type { Properties, Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
 
@@ -99,8 +100,30 @@ const lint: Check = async (promise, context) => {
   return { status: "unmet", detail: `${findings.length} lint error(s): ${shown.join("; ")}${findings.length > 5 ? "; …" : ""}` };
 };
 
+/**
+ * Met when every text a person protected is still in its note: in the notes linked in the session's
+ * `field`, or in every note of the map when the promise names none. A note that is gone has lost its marks.
+ */
+const protectedCheck: Check = async (promise, context) => {
+  const map = await readProtected(context.vault);
+  const field = String(promise.properties.field ?? "");
+  let paths = Object.keys(map.notes);
+  if (field) {
+    const { paths: linkedPaths, missing } = await linked(field, context);
+    if (missing.length) return { status: "unmet", detail: `${field} links ${missing.join(", ")}, which are not notes` };
+    paths = linkedPaths.filter((path) => path in map.notes);
+  }
+  const lost: string[] = [];
+  for (const path of paths) {
+    const body = (await context.vault.exists(path)) ? (await readDocument(context.vault, path)).body : "";
+    for (const mark of protectedLost(map, path, body)) lost.push(`${path}: "${excerpt(mark.text)}"`);
+  }
+  if (lost.length) return { status: "unmet", detail: `protected text is gone from ${lost.length} place(s): ${lost.slice(0, 5).join("; ")}${lost.length > 5 ? "; …" : ""}` };
+  return { status: "met", detail: paths.length ? `every protected text of ${paths.length} note(s) is in place` : "no note has protected text" };
+};
+
 /** The checks that a promise can name in its `check` property. */
-export const checks: Record<string, Check> = { exists, contains, property, lint };
+export const checks: Record<string, Check> = { exists, contains, property, lint, protected: protectedCheck };
 
 /** Runs the check a promise names: one of `own`, the module's checks, or else a core check. */
 export async function runCheck(promise: Document, context: CheckContext, own: Record<string, Check> = {}): Promise<CheckResult> {

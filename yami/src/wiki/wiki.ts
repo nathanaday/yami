@@ -2,6 +2,7 @@ import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import { basename, link, LINK, linkTarget, parseDocument, PropertiesError, readDocument, writeDocument } from "../document/document.js";
 import { timestamp, type ChangeStatus } from "../document/schema.js";
+import { PROTECTED_PATH, readProtected, type ProtectedMap } from "../document/protected.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { algorithms, type Algorithm, type Hit, type Query, type Scored } from "./algorithms/index.js";
 import { Bm25, normalize, type Fields } from "./bm25.js";
@@ -25,10 +26,13 @@ import {
   type ChangePlan,
   type ChangeSummary,
   type ProposedChange,
+  type ValidateOptions,
 } from "./change.js";
 import { chunk, type Chunk } from "./chunks.js";
+import { lintCitations } from "./citations.js";
 import { EmbeddingCache, type Embedder } from "./embed.js";
-import { CACHE_PATH, ORIGINALS } from "./folders.js";
+import { BUNDLE_PROPERTY } from "./bundle.js";
+import { CACHE_PATH, ORIGINALS, WIKI_INTERNAL } from "./folders.js";
 import { lint, type Finding, type LintOptions } from "./lint.js";
 import { match, type Match, type MatchOptions } from "./match.js";
 import { TagIndex, type Neighbors, type TagCount, type TagView } from "./tags.js";
@@ -81,8 +85,12 @@ export interface WikiOptions {
 
 export const FIELD_WEIGHTS = { title: 3, aliases: 3, tags: 2, description: 2, body: 1 };
 
-/** Files that are not knowledge: the forms of the modules (agents, flows, policies, promises, and skills), and the frozen copies that sources embed. */
-const UNINDEXED = [/^internal\/[^/]+\/(agents|flows|policies|promises|skills)\//, new RegExp(`^${ORIGINALS}/`)];
+/**
+ * Files that are not knowledge: the forms of the modules (agents, flows, policies, promises, and skills), the
+ * frozen copies that sources embed, also inside an exported bundle, and the folder of a wiki session, which holds the copies of a checkout or
+ * the staged notes of an import.
+ */
+const UNINDEXED = [/^internal\/[^/]+\/(agents|flows|policies|promises|skills)\//, new RegExp(`(^|/)${ORIGINALS}/`), new RegExp(`^${WIKI_INTERNAL}/sessions/[^/]+/`)];
 
 /** A seed of a graph query: a note and its weight. */
 export interface Seed {
@@ -131,6 +139,18 @@ export class Wiki {
 
   get embedder(): Embedder | undefined {
     return this.options.embedder;
+  }
+
+  /** Why the embedder's last call failed, for a host to show; cleared by a call that works. */
+  embedderProblem: string | undefined;
+
+  /**
+   * Replaces the embedder, or removes it with nothing, for a host whose setting changed while the wiki runs.
+   * The cache follows: a new embedder reads the cache file again and keeps it only when the file names it.
+   */
+  setEmbedder(embedder: Embedder | undefined): void {
+    this.options.embedder = embedder;
+    this.cache = embedder ? new EmbeddingCache(this.vault, embedder, this.options.cachePath ?? CACHE_PATH) : undefined;
   }
 
   /** The algorithm of a query that names none, as the option gives it now. */
@@ -308,10 +328,20 @@ export class Wiki {
     return match(this, names, options);
   }
 
-  /** The health of the notes: each finding names its fix. */
+  /**
+   * The health of the notes: each finding names its fix. A protected text map that does not parse is a finding
+   * on the map itself. The citations of the topics are checked against the sources' files (`lintCitations`).
+   */
   async lint(options: LintOptions = {}): Promise<Finding[]> {
     await this.ensure();
-    return lint(this, options);
+    let guarded: ProtectedMap | undefined;
+    let broken: Finding[] = [];
+    try {
+      guarded = await readProtected(this.vault);
+    } catch (error) {
+      broken = [{ path: PROTECTED_PATH, check: "bad-protected-map", severity: "error", message: error instanceof Error ? error.message : String(error), fix: "fix the JSON, or remove the file and protect the texts again" }];
+    }
+    return [...broken, ...lint(this, options, guarded), ...(await lintCitations(this, options))];
   }
 
   /** The notes that a query's `types`, `tags`, and `folder` keep. */
@@ -417,10 +447,10 @@ export class Wiki {
     return !UNINDEXED.some((pattern) => pattern.test(path)) && !exclude.some((entry) => path === entry || path.startsWith(`${entry}/`));
   }
 
-  /** Whether the index keeps a note with these properties. A copy of another note, such as a checkout copy, is not knowledge of its own. */
+  /** Whether the index keeps a note with these properties. A copy of another note, such as a checkout copy, and a note of an exported bundle are not knowledge of their own. */
   private keeps(properties: Properties): boolean {
     const type = typeof properties.type === "string" ? properties.type : undefined;
-    return !(type && this.options.skipTypes.includes(type)) && properties.copy_of === undefined;
+    return !(type && this.options.skipTypes.includes(type)) && properties.copy_of === undefined && properties[BUNDLE_PROPERTY] === undefined;
   }
 
   /** Every version of the knowledge base, oldest first. */
@@ -461,10 +491,10 @@ export class Wiki {
    * @example
    * const { path, warnings } = await wiki.change({ title: "Ingest DINOv2", session, writes: [{ op: "create", path, properties, body, why }] });
    */
-  change(plan: ChangePlan): Promise<ProposedChange> {
+  change(plan: ChangePlan, options: ValidateOptions = {}): Promise<ProposedChange> {
     return this.queued(async () => {
       await this.refresh();
-      const warnings = await validatePlan(this, plan);
+      const warnings = await validatePlan(this, plan, options);
       const writes = await resolveWrites(this, plan);
       const now = timestamp();
       const path = await changePath(this.vault, plan.title, now);
@@ -484,16 +514,17 @@ export class Wiki {
    * one after another. It throws, and writes nothing, for a change that is not `proposed` (the message
    * names its status), for a document that no longer parses, and for a plan that no longer validates
    * (`InvalidPlan`, with the problems; the change stays proposed). A write that fails puts the knowledge
-   * base back at the version before, sets `failed` with the error, and throws.
+   * base back at the version before, sets `failed` with the error, and throws. A plan that drops text a
+   * person protected is refused, unless `person` says the plan is the person's own, as a checkout's return is.
    * @example
    * const { before, after, creates } = await wiki.approve("internal/wiki/changes/2026-10-15 1432 Ingest DINOv2.md");
    */
-  approve(path: string): Promise<AppliedChange> {
+  approve(path: string, options: ValidateOptions = {}): Promise<AppliedChange> {
     return this.queued(async () => {
       await this.refresh();
       const proposal = await readProposal(this.vault, path);
       if (proposal.properties.status !== "proposed") throw new Error(`${basename(path)} is ${String(proposal.properties.status)}, not proposed; only a proposed change can be approved.`);
-      const warnings = await validatePlan(this, { title: proposal.title, writes: proposal.writes });
+      const warnings = await validatePlan(this, { title: proposal.title, writes: proposal.writes }, options);
       const state = await captured(this.vault);
       const before = state.captured && state.latest ? state.latest : await snapshot(this.vault);
       const now = timestamp();
