@@ -1,5 +1,6 @@
-import { Notice, type Command, type Plugin } from "obsidian";
+import { Notice, type Command, type Editor, type Plugin } from "obsidian";
 import { basename } from "../document/document.js";
+import { excerpt } from "../document/protected.js";
 import type { ChangeStatus, FormKind } from "../document/schema.js";
 import type { YamiModule } from "../module/module.js";
 import type { SessionAct } from "../module/session.js";
@@ -476,6 +477,88 @@ export function addWikiCommands(yami: ObsidianYami): void {
   addCommand(plugin, { id: "wiki-approve-change", name: "Wiki: approve a change", callback: onPicked("approve", "The change to approve") });
   addCommand(plugin, { id: "wiki-reject-change", name: "Wiki: reject a change", callback: onPicked("reject", "The change to reject") });
 }
+
+/**
+ * Protect and unprotect the selected text, and switch how the editor treats protected text. The editor's
+ * menu offers the first two on a selection. The store does the work; `yami.protected` is it.
+ */
+export function addProtectedCommands(yami: ObsidianYami): void {
+  const { app, plugin } = yami;
+  const store = yami.protected;
+  const selectionOf = (editor: Editor) => editor.getSelection();
+  const touched = (path: string, text: string) => {
+    const value = text.replace(/\r\n?/g, "\n").trim();
+    return store.marks(path).some((mark) => mark.text.includes(value) || value.includes(mark.text));
+  };
+  const protect = (path: string, editor: Editor) => {
+    const text = selectionOf(editor);
+    try {
+      const changed = store.protect(path, text, editor.getValue());
+      new Notice(changed ? `Protected "${excerpt(text, 40)}" in ${basename(path)}. Agents may not change it.` : "That text is protected already.");
+    } catch (error) {
+      new Notice(`Yami: ${error instanceof Error ? error.message : String(error)}`, 10_000);
+    }
+  };
+  const unprotect = (path: string, editor: Editor) => {
+    try {
+      const changed = store.unprotect(path, selectionOf(editor));
+      new Notice(changed ? `Unprotected the text in ${basename(path)}.` : "No protected text is selected.");
+    } catch (error) {
+      new Notice(`Yami: ${error instanceof Error ? error.message : String(error)}`, 10_000);
+    }
+  };
+  addCommand(plugin, {
+    id: "protect-selection",
+    name: "Protect the selected text",
+    icon: "lock",
+    editorCheckCallback: (checking, editor, ctx) => {
+      const path = ctx.file?.path;
+      if (!path || !selectionOf(editor).trim()) return false;
+      if (!checking) protect(path, editor);
+      return true;
+    },
+  });
+  addCommand(plugin, {
+    id: "unprotect-selection",
+    name: "Unprotect the selected text",
+    icon: "lock-open",
+    editorCheckCallback: (checking, editor, ctx) => {
+      const path = ctx.file?.path;
+      if (!path || !selectionOf(editor).trim() || !touched(path, selectionOf(editor))) return false;
+      if (!checking) unprotect(path, editor);
+      return true;
+    },
+  });
+  addCommand(plugin, {
+    id: "toggle-protected-editing",
+    name: "Toggle editing of protected text",
+    icon: "pencil-line",
+    callback: () => {
+      const mode = store.toggleEditing();
+      new Notice(mode === "track" ? PROTECTED_EDITABLE : PROTECTED_LOCKED);
+    },
+  });
+  plugin.registerEvent(
+    app.workspace.on("editor-menu", (menu, editor, info) => {
+      const path = info.file?.path;
+      const text = selectionOf(editor);
+      if (!path || !text.trim()) return;
+      const unprotects = touched(path, text);
+      menu.addItem((item) =>
+        item
+          .setTitle(unprotects ? "Unprotect this text" : "Protect this text")
+          .setIcon(unprotects ? "lock-open" : "lock")
+          .onClick(() => (unprotects ? unprotect(path, editor) : protect(path, editor))),
+      );
+    }),
+  );
+}
+
+/** The notices of Toggle editing of protected text: public API, as the README names them. */
+export const PROTECTED_EDITABLE = "Protected text is editable: your edits move the protection with them. Run the command again to lock it.";
+export const PROTECTED_LOCKED = "Protected text is locked: an edit inside it is dropped.";
+/** The notice when the editor drops an edit of protected text. */
+export const PROTECTED_BLOCKED = "This text is protected. Run Toggle editing of protected text to edit it.";
 
 /** The texts of the export and import prompts: public API, as the README table "The prompts" has them. */
 export const EXPORT_PLACEHOLDER = "The topic to export around";

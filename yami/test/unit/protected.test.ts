@@ -77,14 +77,14 @@ describe("the protected text map", () => {
     expect(marksOf(followEdit(lost, TOPIC, BODY, [{ from: 0, to: 1, insert: "x" }]), TOPIC).map((m) => m.text)).toEqual([MINE, "nowhere in the body"]);
   });
 
-  it("reads an empty map when the vault has none, writes and reads one back, removes an empty one, and refuses a broken one", async () => {
+  it("reads an empty map when the vault has none, writes and reads one back, and refuses a broken one", async () => {
     expect(await readProtected(vault)).toEqual({ version: 1, notes: {} });
     const map = protect({ version: 1, notes: {} }, TOPIC, MINE, { since: "s" });
     await writeProtected(vault, map);
     expect(await vault.exists(PROTECTED_PATH)).toBe(true);
     expect(await readProtected(vault)).toEqual(map);
     await writeProtected(vault, { version: 1, notes: {} });
-    expect(await vault.exists(PROTECTED_PATH)).toBe(false);
+    expect(await readProtected(vault)).toEqual({ version: 1, notes: {} });
     await vault.write(PROTECTED_PATH, "{ not json");
     await expect(readProtected(vault)).rejects.toThrow(`${PROTECTED_PATH} does not parse`);
     await vault.write(PROTECTED_PATH, JSON.stringify({ version: 2, notes: {} }));

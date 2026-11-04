@@ -213,6 +213,15 @@ The wiki and threads are in `yami`, and a Yami has them unless the host leaves o
 6. **Work outside the vault uses the harness's own settings.** The folders an agent may edit and the commands it may run without asking are the user's Claude Code and Codex settings, which every session loads. The run skill reads each repository's instruction files.
 7. **The person's own flows.** Threads takes vault flows. A person writes them, and the forms they name, under `internal/threads/`, with the commands or by hand. Their sessions go in `threads/` beside the threads and run through the one loop. They are not threads, and get no thread field: no thread rule of this section applies to them.
 
+## Protected text
+
+A person can protect text in a note against change by an agent. The rules:
+
+1. **The map is the person's record**, `internal/yami/protected.json`, and a mark is the exact text, not a position: it holds through edits elsewhere, and a note that no longer holds it has lost it. The map is state that no base can compute and no document owns, since it spans notes, so it is the one state file of Yami's own, and `yami/document` defines its form and its functions, pure, for every host. Duet's contribution ledger stays its own: it tracks authorship by position through every edit, which is another question.
+2. **Code refuses to lose it.** A change plan that drops a mark, or removes a note with one, is refused at the proposal and again at the approval; an act of the person's own, such as the return of a checkout, passes. The core check `protected` and the lint warning `protected-lost` say when a mark is gone by another way. The tool `yami_protected` tells an agent what to keep, and the wiki's flows carry the policy.
+3. **The editor keeps the person from breaking their own rule**, and lets them when they mean to. In `block` mode an edit inside protected text is dropped and a notice says why; in `track` mode the edit goes through and the mark follows it. A command switches, and a host's option sets the default. The marks show as gray text on a soft background.
+4. **An agent's live edit is put back.** The hub's guard restores a mark that an agent's edit of a shared note removed, maps the change at the character level so the agent's other edits stay, and says so. The person's typing is never touched: the hub names the agent of each change.
+
 ## Conversations and shared documents
 
 1. Every conversation with an agent is a conversation note in `conversations/`, whatever started it: a person, a module session, or another plugin. The note is the record.
@@ -286,7 +295,7 @@ A change is done when these pass, and the report says which ran:
 
 ## Do not
 
-1. Do not add a state file, a schema, or a ledger for one feature. Add a module.
+1. Do not add a state file, a schema, or a ledger for one feature. Add a module. The protected text map is the one exception, and the Protected text section says why.
 2. Do not store what a base can compute.
 3. Do not put a module's code outside its folder, or a workflow's code in a plugin outside its modules.
 4. Do not call a harness SDK outside its adapter.

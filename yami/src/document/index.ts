@@ -48,6 +48,7 @@ export {
   emptyProtected,
   excerpt,
   followEdit,
+  mapThrough,
   marksOf,
   protect,
   PROTECTED_PATH,

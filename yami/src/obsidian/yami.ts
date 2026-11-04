@@ -14,7 +14,10 @@ import { ChangeFeed } from "./change-feed.js";
 import { showFolderColors } from "./colors.js";
 import { watchModules } from "./discovery.js";
 import { checkModuleIcons } from "./icons.js";
-import { addConversationCommands, addModuleCommands, addNewModuleCommand, addSessionCommands, addWikiCommands, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
+import { addConversationCommands, addModuleCommands, addNewModuleCommand, addProtectedCommands, addSessionCommands, addWikiCommands, PROTECTED_BLOCKED, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
+import { protectedExtension, protectedPostProcessor } from "./protected/editor.js";
+import { protectedGuard } from "./protected/guard.js";
+import { ProtectedStore, type ProtectedEditing } from "./protected/store.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
 import { NoteSessions, type AgentWork, type NoteEvents, type NoteSessionsOptions } from "./note-sessions.js";
@@ -37,7 +40,7 @@ export interface AgentEntry {
   color?: string;
 }
 
-export type CommandGroup = "conversations" | "sessions" | "wiki" | "modules";
+export type CommandGroup = "conversations" | "sessions" | "wiki" | "modules" | "protected";
 
 export interface YamiPluginOptions {
   /**
@@ -74,6 +77,12 @@ export interface YamiPluginOptions {
   commands?: Partial<Record<CommandGroup, boolean>>;
   /** A status bar item that says which agents work. Default true. */
   statusBar?: boolean;
+  /**
+   * How the editor treats text that a person protected: `block` (the default) drops an edit inside it;
+   * `track` lets the edit through and moves the protection with it. Toggle editing of protected text
+   * switches for the session. A function is read at each use, so the mode can follow a setting.
+   */
+  protectedEditing?: ProtectedEditing | (() => ProtectedEditing);
   /** Each module's folders in the module's colors in the file explorer, and `internal/` in gray. Default true. */
   folderColors?: boolean;
 }
@@ -109,6 +118,8 @@ export class ObsidianYami extends Yami {
   readonly hub: CollabHub;
   /** The conversation notes, with their message box. Other plugins start conversations with it. */
   readonly conversations: ConversationManager;
+  /** The text that a person protected against change by an agent, and how the editor treats it. */
+  readonly protected: ProtectedStore;
   #registered: ConversationAgent[];
   /** The agents that `setAgents` removed, so that a run that is live keeps its agent's name and color. */
   #retired: ConversationAgent[] = [];
@@ -158,6 +169,17 @@ export class ObsidianYami extends Yami {
     this.plugin = plugin;
     this.hub = hub;
     this.conversations = conversations;
+    this.protected = new ProtectedStore(this.vault, () => read(options.protectedEditing ?? "block"));
+    this.protected.install(plugin, app);
+    void this.protected.load();
+    plugin.registerEditorExtension(protectedExtension(this.protected) as never);
+    plugin.registerMarkdownPostProcessor(protectedPostProcessor(this.protected));
+    plugin.register(hub.observe(protectedGuard(this.protected, (message) => new Notice(message, 8_000))));
+    plugin.register(this.protected.onBlocked(() => new Notice(PROTECTED_BLOCKED)));
+    // The body's class tells the stylesheet the mode. A test without a DOM has no body.
+    const body = () => (globalThis as { document?: { body?: HTMLElement } }).document?.body;
+    plugin.register(this.protected.onChange(() => body()?.toggleClass("yami-protected-editing", this.protected.editing === "track")));
+    plugin.register(() => body()?.removeClass("yami-protected-editing"));
 
     conversations.install(plugin);
     watchWiki(app, plugin, this.wiki);
@@ -194,12 +216,13 @@ export class ObsidianYami extends Yami {
         .finally(() => uninstallCollab(hub));
     });
 
-    const groups = { conversations: true, sessions: true, wiki: true, modules: true, ...options.commands };
+    const groups = { conversations: true, sessions: true, wiki: true, modules: true, protected: true, ...options.commands };
     if (groups.conversations) this.#agentCommands.push(addConversationCommands(this));
     if (groups.sessions) this.#agentCommands.push(addSessionCommands(this));
     // The wiki commands are the wiki module's: a Yami without the module has nothing for them to act on.
     if (groups.wiki && this.module(WIKI)) addWikiCommands(this);
     if (groups.modules) addNewModuleCommand(this);
+    if (groups.protected) addProtectedCommands(this);
     checkModuleIcons(this.modules);
     const syncCommands = addModuleCommands(this);
     plugin.register(

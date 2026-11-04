@@ -63,12 +63,8 @@ export async function readProtected(vault: Vault): Promise<ProtectedMap> {
   return { version: PROTECTED_VERSION, notes };
 }
 
-/** Writes the map, or removes the file when no note has a mark. */
+/** Writes the map, also an empty one: a file that says nothing is protected is not a missing file. */
 export async function writeProtected(vault: Vault, map: ProtectedMap): Promise<void> {
-  if (!Object.keys(map.notes).length) {
-    if (await vault.exists(PROTECTED_PATH)) await vault.remove(PROTECTED_PATH);
-    return;
-  }
   await vault.write(PROTECTED_PATH, `${JSON.stringify(map, null, 2)}\n`);
 }
 
@@ -153,8 +149,7 @@ export function followEdit(map: ProtectedMap, path: string, before: string, ops:
   const after = applyShift(before, ops);
   const next: ProtectedMark[] = [];
   for (const range of ranges) {
-    const from = mapPosition(range.from, ops, "start");
-    const to = mapPosition(range.to, ops, "end");
+    const { from, to } = mapThrough(range, ops);
     const text = clean(after.slice(from, Math.max(from, to)));
     if (text) next.push(text === range.mark.text ? range.mark : { ...range.mark, text });
   }
@@ -174,6 +169,12 @@ function applyShift(text: string, ops: TextOp[]): string {
     position = op.to;
   }
   return result + text.slice(position);
+}
+
+/** A range mapped through ascending ops on the text it was in: where the same text sits after them. Text inserted at either edge stays outside. */
+export function mapThrough(range: { from: number; to: number }, ops: TextOp[]): { from: number; to: number } {
+  const from = mapPosition(range.from, ops, "start");
+  return { from, to: Math.max(from, mapPosition(range.to, ops, "end")) };
 }
 
 /** A position mapped through ascending ops: a start moves after text inserted at it, an end before, and a position inside a deleted range goes to its start. */

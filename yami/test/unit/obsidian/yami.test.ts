@@ -119,6 +119,7 @@ async function fakePlugin() {
     register: (callback: () => void) => unload.push(callback),
     registerEvent: () => undefined,
     registerEditorExtension: () => undefined,
+    registerMarkdownPostProcessor: () => undefined,
   } as unknown as Plugin;
   return {
     plugin,

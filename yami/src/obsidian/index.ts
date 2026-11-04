@@ -14,7 +14,10 @@ export { ObsidianConversations } from "./conversation/obsidian-conversations.js"
 export { type PermissionContext, PermissionPrompts } from "./prompts/permission-modal.js";
 export { type QuestionForm, renderQuestions } from "./prompts/question-form.js";
 export { folderColorRules, showFolderColors } from "./colors.js";
-export { age, COMMAND_PREFIX, EXPORT_PLACEHOLDER, IMPORT_HINT, IMPORT_PLACEHOLDER, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
+export { age, COMMAND_PREFIX, EXPORT_PLACEHOLDER, IMPORT_HINT, IMPORT_PLACEHOLDER, PROTECTED_BLOCKED, PROTECTED_EDITABLE, PROTECTED_LOCKED, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
+export { PROTECTED_BLOCK_CLASS, PROTECTED_CLASS, protectedExtension, protectedPostProcessor } from "./protected/editor.js";
+export { GUARD_ORIGIN, protectedGuard } from "./protected/guard.js";
+export { ProtectedStore, type ProtectedEditing } from "./protected/store.js";
 export type { AgentWork, NoteAgent, NoteSession, NoteSessions, NoteSessionSetup, NoteSessionsOptions, SessionIds } from "./note-sessions.js";
 export { checkModuleIcons, moduleIcon } from "./icons.js";
 export { watchModules } from "./discovery.js";

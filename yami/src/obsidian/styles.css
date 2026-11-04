@@ -782,6 +782,27 @@ button.yami-send.is-stop svg {
   display: none !important;
 }
 
+/* Protected text: gray on a soft background, so it reads as set; in track mode, an accent underline says it can be edited. */
+
+.yami-protected {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--background-modifier-hover) 75%, transparent);
+  color: var(--text-muted);
+  box-decoration-break: clone;
+}
+
+body.yami-protected-editing .yami-protected {
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+  border-bottom: 1px dashed var(--interactive-accent);
+  color: var(--text-normal);
+}
+
+.markdown-reading-view .yami-protected-block {
+  padding-left: var(--size-4-3);
+  box-shadow: inset 3px 0 0 var(--background-modifier-border-hover);
+  color: var(--text-muted);
+}
+
 /* Wiki: search, compare, and note lists. */
 
 .yami-wiki-status {
