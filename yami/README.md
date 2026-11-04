@@ -1364,4 +1364,4 @@ await copyStyles(["styles.css", `${testVault}/.obsidian/plugins/my-plugin/styles
 - `npm run bench` runs the retrieval benchmark against the vault in `YAMI_BENCH_VAULT`; see [The benchmark](#the-benchmark).
 - `YAMI_LIVE_THREAD=1 npm run test:live` also takes one thread from stub to closed with a real Claude Code, on a scratch repository outside the vault (`test/live/thread.test.ts`); without the variable it skips. `npm test` never runs it.
 - `npm run test:live` runs the agent scenarios against the real CLIs, for both harnesses: streaming, approvals, `beforeFileChange`, interrupt, a command stopped on interrupt, queued messages, instructions, skills, the agent tool in a session, a read-only session's commands (tests in a repository outside the vault, writes that fail, and no network), and resume; for Claude Code also that a skill set's `agents/` gives no subagent.
-- `npm run test:obsidian` in `plugins/yami-wiki/` and `plugins/yami-threads/` drives the real Obsidian app with `yami/obsidian` and the views.
+- `npm run test:obsidian` in the yami-wiki and yami-threads repositories drives the real Obsidian app with `yami/obsidian` and the views.
