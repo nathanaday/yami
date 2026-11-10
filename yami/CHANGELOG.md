@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.24.0 · pages of a template
+
+The wiki's knowledge is pages of a template and sources. A template, a document in the vault, says what kind of page a note is, the properties of its own, the sections it holds, and how to write it. The wiki installs eight, and a person edits them and adds their own.
+
+### Breaking
+- **Topics are pages.** The pages folder is `wiki/pages/` (`vault.folders.pages`), not `wiki/topics/`; `Folders.topics` is gone, and `Folders.legacyTopics` names the old folder. At the first start, the wiki module moves `wiki/topics/` to `wiki/pages/` with every link into it, the protected map, and the paths of each change document (`moveLegacyTopics`); when `wiki/pages/` exists, each note moves on its own, and one whose name is taken stays, with a problem. A snapshot that holds the topics folder restores into the pages folder, and `mapFolders` maps the topics folder of a layout to its pages, so a bundle in the older layout imports.
+- **A page's `type` names its template.** `topic` is one template of eight. `TOPIC`, `TOPIC_STATUSES`, and `TOPIC_KINDS` are gone from `yami/document`: `PAGE` holds the properties of every page and `PAGE_STATUSES` its statuses; a template adds its own. `topic` left `DOCUMENT_TYPES`. `kind` is retired: lint marks a page that holds it with `kind-retired`, and names its type (`overview` is a `portal`, `concept` and `entity` are `topic`).
+- **A page is a note of the pages folder**, of any template (`wiki.isPage`). Lint, the bundles, the figures, the citations, the verify session, and the delta of a superseded source take every page, and only the pages: a note elsewhere with `type: topic` is no page.
+- **Change validation reads the type from the properties**, not from the folder, and validates a page by its template's schema: a create with no `type` is a `topic`; a source cannot go in the pages folder, nor a page in the sources folder; a modify may change `type`. A missing or misordered section is a warning of the proposal.
+- The wiki module's policy `one-topic` is `one-page`, and the promise `clean-topics` is `clean-pages`. `page-forms.md`, beside the ingest skill, is `page-rules.md`, with the rules of every page; the templates hold the rest.
+- The `figures` and `verify` flows take the field `pages`, not `topics`; their checks read `topics` in a session that has no `pages`. The tools keep their parameter `topic`, which now names any page.
+- The command Wiki: export a topic is Wiki: export a page (`yami-wiki-export`, the same id), and `EXPORT_PLACEHOLDER` reads `The page to export around`.
+- `Finding.severity` has `info`, for a to-do such as a stub.
+- `DocumentKind` adds `template`; the kinds that a session links are `LinkedDocumentKind`, which `FIELD_OF`, `KIND_OF`, and `NewSession.add` take.
+
+### Added
+- **Templates.** `TEMPLATE.md` in `<internal>/wiki/templates/<name>/` (`TEMPLATE`, `TEMPLATE_FORM` in `yami/document`; `vault.folders.templates`): a header with `name`, `description`, `properties`, `sections`, `cites`, and `checks`, and a body that says when to use it and how to write each section. The wiki module installs `topic`, `event`, `glossary`, `list`, `portal`, `stub`, `timeline`, and `source` (`BUILT_IN_TEMPLATES` in `yami/wiki`), with `YamiModule.template` as the builder; the index leaves them out.
+- **A person's own templates.** Any other folder of `templates/` is a template, and its name a type. `parseSchema` in `yami/document` reads its `properties`, each as a field type or a map of `type`, `required`, `default`, and `values` (`FIELD_TYPES`). A template that declares a property of every page, takes the type of Yami's own documents (`RESERVED_TEMPLATE_NAMES`), names an unknown check, or sits as a flat file is a problem in `wiki.templateProblems`; a broken copy of a built-in template falls back to the library's text.
+- `wiki.templates()`, `wiki.template(name)`, `wiki.templateOf(note)`, `wiki.templateNames()`, and `wiki.isPage(note)`; in `yami/wiki`, `readTemplates`, `parseTemplate`, `templateSchema`, `templatePath`, `sectionHeadings`, `sectionProblems`, `pageSkeleton`, `starterTemplate`, `DEFAULT_TEMPLATE`, and the types `Template`, `TemplateProblem`, and `TemplateCheck`.
+- **Template checks**, a registry (`templateChecks`): `chronological` holds a timeline's entry lines to date order, and `coverage` lists the pages under a portal's `tag` that it does not link. A template names its checks; each finding is a lint warning.
+- **Lint by template**: `unknown-template`, `bad-property`, `missing-section` (a source once it is absorbed), the template checks, `stub` (info), and `misplaced` (a source among the pages, or a page among the sources). `no-sources` applies to a page whose template has `cites: true`. A template that does not read is also a problem in `yami.problems` at each start.
+- The read-only tool `wiki_templates`, which lists the templates with their problems. `wiki_search` and `wiki_match` take the type `page` for every page, as `wiki.filter` does.
+- `WikiModule.newPage({ template, name, description })`, a page from a template through a change that the person proposes and approves in one step, and `WikiModule.newTemplate(name)`, a starter template. In Obsidian, the commands Wiki: new page (`yami-wiki-new-page`) and Wiki: new template (`yami-wiki-new-template`), with the prompts `NEW_PAGE_TEMPLATE`, `NEW_PAGE_NAME`, `NEW_PAGE_DESCRIPTION`, and `NEW_TEMPLATE_NAME`.
+- The extractor suggests a template for each subject; the drafter chooses one, reads its `TEMPLATE.md`, and writes a stub for a subject the sources say too little about.
+- `SOURCE` has `supersedes`, and its `status` takes `superseded`, which the ingest of a superseding source sets.
+
 ## 0.23.0 · folders a vault chooses
 
 A vault keeps its wiki and Yami's internal folder where the person wants them, moves them with every link into them, and holds nothing of Yami's at its root.

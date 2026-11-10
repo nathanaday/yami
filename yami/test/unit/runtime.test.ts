@@ -136,13 +136,13 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/installed.json",
     "internal/wiki/policies/cite-every-claim/POLICY.md",
     "internal/wiki/policies/encyclopedic-voice/POLICY.md",
+    "internal/wiki/policies/one-page/POLICY.md",
     "internal/wiki/policies/one-plan/POLICY.md",
-    "internal/wiki/policies/one-topic/POLICY.md",
     "internal/wiki/policies/protected-text/POLICY.md",
     "internal/wiki/promises/bundle-imported/PROMISE.md",
     "internal/wiki/promises/change-applied/PROMISE.md",
     "internal/wiki/promises/claims-verified/PROMISE.md",
-    "internal/wiki/promises/clean-topics/PROMISE.md",
+    "internal/wiki/promises/clean-pages/PROMISE.md",
     "internal/wiki/promises/figures-made/PROMISE.md",
     "internal/wiki/promises/reading-list-made/PROMISE.md",
     "internal/wiki/promises/sources-absorbed/PROMISE.md",
@@ -152,11 +152,19 @@ describe("what a Yami adds to the vault and to its agents", () => {
     "internal/wiki/skills/figures/SKILL.md",
     "internal/wiki/skills/import/SKILL.md",
     "internal/wiki/skills/ingest/SKILL.md",
-    "internal/wiki/skills/ingest/page-forms.md",
+    "internal/wiki/skills/ingest/page-rules.md",
     "internal/wiki/skills/verify/SKILL.md",
+    "internal/wiki/templates/event/TEMPLATE.md",
+    "internal/wiki/templates/glossary/TEMPLATE.md",
+    "internal/wiki/templates/list/TEMPLATE.md",
+    "internal/wiki/templates/portal/TEMPLATE.md",
+    "internal/wiki/templates/source/TEMPLATE.md",
+    "internal/wiki/templates/stub/TEMPLATE.md",
+    "internal/wiki/templates/timeline/TEMPLATE.md",
+    "internal/wiki/templates/topic/TEMPLATE.md",
     "internal/wiki/wiki.md",
   ];
-  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"];
+  const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_templates", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"];
 
   it("writes the base skill and the documents of the wiki and threads, and nothing at the vault's root, and gives each agent its tools and three skill sets, as the README lists them", async () => {
     t = await testYami();

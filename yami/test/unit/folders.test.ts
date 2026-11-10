@@ -33,7 +33,7 @@ async function knowledge(vault: FsVault): Promise<void> {
   await vault.writeBinary(`${f.originals}/abc.pdf`, new Uint8Array([1, 2, 3]));
   await vault.writeBinary(`${f.figures}/RL/loop.svg`, new TextEncoder().encode("<svg viewBox='0 0 1 1'/>"));
   await note(vault, `${f.sources}/Sutton (source).md`, { type: "source", description: "The RL book.", file: `[[${f.originals}/abc.pdf]]`, sha256: "abc", status: "absorbed" }, `![[${f.originals}/abc.pdf]]\n`);
-  await note(vault, `${f.topics}/RL.md`, { type: "topic", description: "Learning by reward.", sources: [link(`${f.sources}/Sutton (source).md`)] }, `An agent learns from reward ([[Sutton (source)]], ch. 1).\n\n![[${f.figures}/RL/loop.svg]]\n`);
+  await note(vault, `${f.pages}/RL.md`, { type: "topic", description: "Learning by reward.", sources: [link(`${f.sources}/Sutton (source).md`)] }, `An agent learns from reward ([[Sutton (source)]], ch. 1).\n\n![[${f.figures}/RL/loop.svg]]\n`);
 }
 
 afterEach(async () => {
@@ -46,8 +46,8 @@ describe("the folder settings", () => {
     expect(DEFAULT_FOLDERS.settings).toEqual({ internal: "internal", wiki: "wiki" });
     const f = new Folders({ internal: " system/yami/ ", wiki: "library//wiki" });
     expect(f.settings).toEqual({ internal: "system/yami", wiki: "library/wiki" });
-    expect([f.topics, f.sources, f.wikiInternal, f.changes, f.originals, f.figures, f.protected]).toEqual([
-      "library/wiki/topics",
+    expect([f.pages, f.sources, f.wikiInternal, f.changes, f.originals, f.figures, f.protected]).toEqual([
+      "library/wiki/pages",
       "library/wiki/sources",
       "system/yami/wiki",
       "system/yami/wiki/changes",
@@ -55,8 +55,8 @@ describe("the folder settings", () => {
       "system/yami/wiki/figures",
       "system/yami/yami/protected.json",
     ]);
-    expect(f.inKnowledge("library/wiki/topics/RL.md")).toBe(true);
-    expect(f.inKnowledge("wiki/topics/RL.md")).toBe(false);
+    expect(f.inKnowledge("library/wiki/pages/RL.md")).toBe(true);
+    expect(f.inKnowledge("wiki/pages/RL.md")).toBe(false);
   });
 
   it("refuse a hidden folder, an empty name, a character a name cannot take, and folders that overlap", () => {
@@ -83,8 +83,8 @@ describe("the folder settings", () => {
 
   it("map the wiki's paths from one layout to another where a path starts, and nowhere else", () => {
     const to = new Folders({ internal: "system", wiki: "library/wiki" });
-    const text = "[[wiki/topics/RL|RL]] ![[internal/wiki/originals/abc.pdf]] (wiki/sources/S.md) my/wiki/topics/x wikiwiki/topics/y";
-    expect(mapFolders(text, DEFAULT_FOLDERS, to)).toBe("[[library/wiki/topics/RL|RL]] ![[system/wiki/originals/abc.pdf]] (library/wiki/sources/S.md) my/wiki/topics/x wikiwiki/topics/y");
+    const text = "[[wiki/pages/RL|RL]] ![[internal/wiki/originals/abc.pdf]] (wiki/sources/S.md) my/wiki/pages/x wikiwiki/pages/y";
+    expect(mapFolders(text, DEFAULT_FOLDERS, to)).toBe("[[library/wiki/pages/RL|RL]] ![[system/wiki/originals/abc.pdf]] (library/wiki/sources/S.md) my/wiki/pages/x wikiwiki/pages/y");
     expect(mapFolders(text, DEFAULT_FOLDERS, DEFAULT_FOLDERS)).toBe(text);
   });
 });
@@ -99,27 +99,27 @@ describe("a vault with folders of its own", () => {
     expect(files).toContain("system/yami/yami/skills/run/SKILL.md");
     expect(yami.problems).toEqual([]);
     const ingest = await vault.read("system/yami/wiki/skills/ingest/SKILL.md");
-    expect(ingest).toContain("`library/wiki/topics/`");
+    expect(ingest).toContain("`library/wiki/pages/`");
     expect(ingest).toContain("`system/yami/wiki/skills/ingest/`");
     expect(ingest).toContain("`system/yami/wiki/agents/extractor/AGENT.md`");
     expect(ingest).not.toMatch(/(?<![/\w])(internal|wiki)\/(topics|wiki)/);
-    expect(await vault.read("system/yami/wiki/skills/ingest/page-forms.md")).toContain("[[library/wiki/sources/DINOv2|DINOv2]]");
+    expect(await vault.read("system/yami/wiki/skills/ingest/page-rules.md")).toContain("[[library/wiki/sources/DINOv2|DINOv2]]");
     const wiki = yami.module("wiki") as WikiModule;
     expect(wiki.layout.folder).toBe("library/wiki");
     expect(wiki.layout.sessions).toBe("system/yami/wiki/sessions");
     const change = yami.tools().tools.find((tool) => tool.name === "wiki_change")!;
-    expect(change.description).toContain("library/wiki/topics/");
+    expect(change.description).toContain("library/wiki/pages/");
     expect(yami.agents).toEqual([]);
   });
 
   it("changes only notes of its own topics and sources, and keeps its changes and versions in its internal folder", async () => {
     const vault = await vaultWith({ internal: "system", wiki: "library/wiki" });
     const yami = await enabled(vault);
-    await expect(yami.wiki.change({ title: "Old place", writes: [{ op: "create", path: "wiki/topics/RL.md", properties: { description: "d" }, body: "b" }] })).rejects.toThrow(/under library\/wiki\/topics\/ or library\/wiki\/sources\//);
-    const proposed = await yami.wiki.change({ title: "New topic", writes: [{ op: "create", path: "library/wiki/topics/RL.md", properties: { description: "Learning by reward." }, body: "An agent learns.\n" }] });
+    await expect(yami.wiki.change({ title: "Old place", writes: [{ op: "create", path: "wiki/pages/RL.md", properties: { description: "d" }, body: "b" }] })).rejects.toThrow(/under library\/wiki\/pages\/ or library\/wiki\/sources\//);
+    const proposed = await yami.wiki.change({ title: "New topic", writes: [{ op: "create", path: "library/wiki/pages/RL.md", properties: { description: "Learning by reward." }, body: "An agent learns.\n" }] });
     expect(proposed.path.startsWith("system/wiki/changes/")).toBe(true);
     await yami.wiki.approve(proposed.path);
-    expect((await readDocument(vault, "library/wiki/topics/RL.md")).properties.type).toBe("topic");
+    expect((await readDocument(vault, "library/wiki/pages/RL.md")).properties.type).toBe("topic");
     expect((await yami.wiki.versions()).map((v) => v.path)).toEqual(["system/wiki/snapshots/v1.md", "system/wiki/snapshots/v2.md"]);
   });
 
@@ -151,9 +151,9 @@ describe("moving the folders", () => {
     const vault = await vaultWith();
     const yami = await enabled(vault);
     await knowledge(vault);
-    const proposed = await yami.wiki.change({ title: "A note", writes: [{ op: "create", path: "wiki/topics/MDP.md", properties: { description: "States and actions." }, body: "An MDP has states.\n" }] });
+    const proposed = await yami.wiki.change({ title: "A note", writes: [{ op: "create", path: "wiki/pages/MDP.md", properties: { description: "States and actions." }, body: "An MDP has states.\n" }] });
     await yami.wiki.approve(proposed.path);
-    await writeProtected(vault, protect(await readProtected(vault), "wiki/topics/RL.md", "An agent learns from reward", { since: "2026-11-09T12:00:00" }));
+    await writeProtected(vault, protect(await readProtected(vault), "wiki/pages/RL.md", "An agent learns from reward", { since: "2026-11-09T12:00:00" }));
 
     const moved = await yami.moveFolders({ internal: "system", wiki: "library/wiki" });
     expect(moved.moved).toEqual([
@@ -165,9 +165,9 @@ describe("moving the folders", () => {
     expect(await vault.exists("wiki")).toBe(false);
     const installed = JSON.parse(await vault.read("system/wiki/installed.json")) as Record<string, string>;
     expect(Object.keys(installed).every((path) => path.startsWith("system/wiki/"))).toBe(true);
-    expect(Object.keys((await readProtected(vault, "system/yami/protected.json")).notes)).toEqual(["library/wiki/topics/RL.md"]);
+    expect(Object.keys((await readProtected(vault, "system/yami/protected.json")).notes)).toEqual(["library/wiki/pages/RL.md"]);
     // The vault here does not update links as Obsidian does; the move does.
-    const rl = await vault.read("library/wiki/topics/RL.md");
+    const rl = await vault.read("library/wiki/pages/RL.md");
     expect(rl).toContain("![[system/wiki/figures/RL/loop.svg]]");
     expect(rl).toContain("[[Sutton (source)]]");
     expect((await readDocument(vault, "library/wiki/sources/Sutton (source).md")).properties.file).toBe("[[system/wiki/originals/abc.pdf]]");
@@ -176,21 +176,21 @@ describe("moving the folders", () => {
     expect(again.folders.settings).toEqual({ internal: "system", wiki: "library/wiki" });
     const next = await enabled(again);
     expect(next.problems).toEqual([]);
-    expect(await again.read("system/wiki/skills/ingest/SKILL.md")).toContain("`library/wiki/topics/`");
+    expect(await again.read("system/wiki/skills/ingest/SKILL.md")).toContain("`library/wiki/pages/`");
     const applied = await next.wiki.changeDetails(proposed.path.replace(/^internal\//, "system/"));
-    expect(applied.writes.map((w) => w.path)).toEqual(["library/wiki/topics/MDP.md"]);
+    expect(applied.writes.map((w) => w.path)).toEqual(["library/wiki/pages/MDP.md"]);
     expect((await next.wiki.versions()).map((v) => v.archive)).toEqual(["system/wiki/snapshots/v1.json.gz", "system/wiki/snapshots/v2.json.gz"]);
     // A version from before the move comes back at the new paths, with its links moved too.
     await next.wiki.restore(1);
-    expect(await again.exists("library/wiki/topics/MDP.md")).toBe(false);
-    expect(await again.read("library/wiki/topics/RL.md")).toContain("![[system/wiki/figures/RL/loop.svg]]");
-    expect(await again.exists("wiki/topics/RL.md")).toBe(false);
+    expect(await again.exists("library/wiki/pages/MDP.md")).toBe(false);
+    expect(await again.read("library/wiki/pages/RL.md")).toContain("![[system/wiki/figures/RL/loop.svg]]");
+    expect(await again.exists("wiki/pages/RL.md")).toBe(false);
   });
 
   it("moves the targets of wiki links and markdown links, and leaves prose and other links alone", () => {
     const move = (path: string) => (path.startsWith("wiki/") ? `my wiki/${path.slice(5)}` : path);
-    expect(moveLinks("See [[wiki/topics/RL|RL]], ![[wiki/x.png]], [m](wiki/topics/A%20B.md), [[notes/wiki/y]], and wiki/topics/RL in prose.", move)).toBe(
-      "See [[my wiki/topics/RL|RL]], ![[my wiki/x.png]], [m](my%20wiki/topics/A%20B.md), [[notes/wiki/y]], and wiki/topics/RL in prose.",
+    expect(moveLinks("See [[wiki/pages/RL|RL]], ![[wiki/x.png]], [m](wiki/pages/A%20B.md), [[notes/wiki/y]], and wiki/pages/RL in prose.", move)).toBe(
+      "See [[my wiki/pages/RL|RL]], ![[my wiki/x.png]], [m](my%20wiki/pages/A%20B.md), [[notes/wiki/y]], and wiki/pages/RL in prose.",
     );
   });
 
@@ -202,7 +202,7 @@ describe("moving the folders", () => {
     await expect(yami.moveFolders({ internal: "wiki/internal", wiki: "kb" })).rejects.toThrow(/overlaps wiki/);
     await vault.write("library/wiki/note.md", "mine\n");
     await expect(yami.moveFolders({ wiki: "library/wiki" })).rejects.toThrow(/something is there already/);
-    await yami.wiki.change({ title: "Waits", writes: [{ op: "create", path: "wiki/topics/A.md", properties: { description: "d" }, body: "b\n" }] });
+    await yami.wiki.change({ title: "Waits", writes: [{ op: "create", path: "wiki/pages/A.md", properties: { description: "d" }, body: "b\n" }] });
     await expect(yami.moveFolders({ wiki: "kb" })).rejects.toThrow(/waits for approval/);
     const internalOnly = await yami.moveFolders({ internal: "system" });
     expect(internalOnly.moved).toEqual([{ from: "internal", to: "system" }]);

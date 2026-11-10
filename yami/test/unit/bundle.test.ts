@@ -9,7 +9,7 @@ import { testYami, type FsVault, type TestYami } from "../../src/testing/index.j
 import { BUNDLE_README, isRepository, readBundle, repositoryParts, selectBundle, writeBundle, type Wiki } from "../../src/wiki/index.js";
 import { DEFAULT_FOLDERS } from "../../src/document/index.js";
 
-const { originals: ORIGINALS, sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { originals: ORIGINALS, sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami;
 let vault: FsVault;
@@ -79,8 +79,8 @@ describe("selectBundle", () => {
     expect(small.topics).not.toContain(`${TOPICS}/Sourdough.md`);
     const two = await selectBundle(wiki, "Q-learning", "medium");
     expect(two.topics).toHaveLength(5);
-    await expect(selectBundle(wiki, "Sutton (source)")).rejects.toThrow("is not a topic of the wiki");
-    await expect(selectBundle(wiki, "Nowhere")).rejects.toThrow("is not a topic of the wiki");
+    await expect(selectBundle(wiki, "Sutton (source)")).rejects.toThrow("is not a page of the wiki");
+    await expect(selectBundle(wiki, "Nowhere")).rejects.toThrow("is not a page of the wiki");
     await expect(selectBundle(wiki, "Q-learning", "huge" as never)).rejects.toThrow('"huge" is not a size');
   });
 });
@@ -97,8 +97,8 @@ describe("writeBundle and readBundle", () => {
       `exports/RL/${ORIGINALS}/abc123.md`,
       `exports/RL/${ORIGINALS}/abc123.pdf`,
       `exports/RL/${ORIGINALS}/abc123/image1.png`,
-      `exports/RL/${SOURCES}/Sutton (source).md`,
       `exports/RL/${TOPICS}/Reinforcement learning.md`,
+      `exports/RL/${SOURCES}/Sutton (source).md`,
     ]);
     const topic = await readDocument(vault, `exports/RL/${TOPICS}/Reinforcement learning.md`);
     expect(topic.properties).toMatchObject({ type: "topic", description: "Learning by reward.", bundle: "Reinforcement learning" });
@@ -122,12 +122,12 @@ describe("writeBundle and readBundle", () => {
     const files = (await readdir(folder, { recursive: true, withFileTypes: true })).filter((e) => e.isFile()).map((e) => join(e.parentPath, e.name).slice(folder.length + 1)).sort();
     expect(files).toEqual([
       "README.md",
-      `${SOURCES}/Sutton (source).md`,
       `${TOPICS}/Deep Q-network.md`,
       `${TOPICS}/Markov decision process.md`,
       `${TOPICS}/Policy gradient.md`,
       `${TOPICS}/Q-learning.md`,
       `${TOPICS}/Reinforcement learning.md`,
+      `${SOURCES}/Sutton (source).md`,
     ]);
     expect(await readFile(join(folder, "README.md"), "utf8")).toContain("# Value methods");
     const bundle = await readBundle(vault, folder);
@@ -153,11 +153,11 @@ describe("writeBundle and readBundle", () => {
     expect(bundle.skipped).toEqual([
       { path: "Broken.md", reason: expect.stringContaining("its properties do not parse") },
       { path: "Diary.md", reason: "it has no type" },
-      { path: "Session.md", reason: "its type is session, not topic or source" },
+      { path: "Session.md", reason: "its type is session, not a page's or a source's" },
     ]);
     expect(bundle.name).toBeUndefined();
     await vault.write("empty/only.txt", "x");
-    await expect(readBundle(vault, "empty")).rejects.toThrow("No topic or source under empty");
+    await expect(readBundle(vault, "empty")).rejects.toThrow("No page or source under empty");
     await expect(readBundle(vault, "nowhere")).rejects.toThrow("No files under nowhere");
   });
 
@@ -182,8 +182,8 @@ describe("exportBundle", () => {
     const chosen = await module.exportBundle({ documents: ["Sourdough", `${TOPICS}/Deep Q-network.md`], name: "Odd pair", folder: "out/pair" });
     expect(chosen).toMatchObject({ name: "Odd pair", topics: [`${TOPICS}/Sourdough.md`, `${TOPICS}/Deep Q-network.md`], sources: [] });
     expect(await vault.exists(`out/pair/${TOPICS}/Sourdough.md`)).toBe(true);
-    await expect(module.exportBundle({})).rejects.toThrow("Name a topic to export around, or the documents to export.");
-    await expect(module.exportBundle({ documents: ["Nowhere"] })).rejects.toThrow("is not a topic or a source of the wiki");
+    await expect(module.exportBundle({})).rejects.toThrow("Name a page to export around, or the documents to export.");
+    await expect(module.exportBundle({ documents: ["Nowhere"] })).rejects.toThrow("is not a page or a source of the wiki");
     const exportTool = tool("wiki_export");
     expect(exportTool.readOnly).toBeFalsy();
     const result = JSON.parse((await runTool(exportTool, { topic: "Q-learning", size: "small", folder: "out/q" }, signal)).text);
@@ -205,12 +205,12 @@ describe("importBundle", () => {
       expect(result.name).toBe("RL");
       expect(result.session).toBe("internal/wiki/sessions/Import RL 2026-11-04.md");
       expect(result.staged.map((s) => [s.target, s.status])).toEqual([
-        [`${SOURCES}/Sutton (source).md`, "new"],
         [`${TOPICS}/Deep Q-network.md`, "new"],
         [`${TOPICS}/Markov decision process.md`, "new"],
         [`${TOPICS}/Policy gradient.md`, "new"],
         [`${TOPICS}/Q-learning.md`, "new"],
         [`${TOPICS}/Reinforcement learning.md`, "new"],
+        [`${SOURCES}/Sutton (source).md`, "new"],
       ]);
       expect(result.dropped).toEqual([]);
       expect(result.change).toMatch(/^internal\/wiki\/changes\/.*Import RL\.md$/);
@@ -232,7 +232,8 @@ describe("importBundle", () => {
       expect(topic.properties).toMatchObject({ type: "topic", description: "A value method.", created: "2026-11-04T12:00:00" });
       expect(topic.properties.bundle).toBeUndefined();
       expect(topic.body).toContain("Q-learning learns action values");
-      expect(await fresh.yami.wiki.lint({ paths: [`${TOPICS}/Q-learning.md`] })).toEqual([]);
+      // The bundle's topics are short, so their template finds sections to add, and nothing else.
+      expect((await fresh.yami.wiki.lint({ paths: [`${TOPICS}/Q-learning.md`] })).map((f) => f.check)).toEqual(["missing-section"]);
     } finally {
       await fresh.dispose();
     }
@@ -255,7 +256,7 @@ describe("importBundle", () => {
     expect(by[`${TOPICS}/Q-learning.md`]).toMatchObject({ status: "conflict", with: [`${TOPICS}/Q-learning.md`], reason: expect.stringContaining("a note holds this path with another text") });
     expect(by[`${TOPICS}/Deep Q-network.md`]).toMatchObject({ status: "conflict", with: [`${TOPICS}/DQN.md`], reason: expect.stringContaining('holds the name "Deep Q-network"') });
     expect(by[`${TOPICS}/Markov decision process.md`]).toMatchObject({ status: "near", with: [`${TOPICS}/Markov decision processes.md`] });
-    expect(result.dropped.map((d) => d.target).sort()).toEqual([`${SOURCES}/Sutton (source).md`, `${TOPICS}/Policy gradient.md`, `${TOPICS}/Reinforcement learning.md`]);
+    expect(result.dropped.map((d) => d.target).sort()).toEqual([`${TOPICS}/Policy gradient.md`, `${TOPICS}/Reinforcement learning.md`, `${SOURCES}/Sutton (source).md`]);
     expect(result.change).toBeUndefined();
     const session = await readDocument(vault, result.session);
     expect(session.properties).toMatchObject({ state: "open", changes: [] });

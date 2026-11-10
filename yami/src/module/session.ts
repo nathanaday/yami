@@ -5,7 +5,7 @@ import { SESSION_STATES, type SessionState } from "../document/schema.js";
 import type { Properties } from "../document/vault.js";
 import { AGENT_RUN_LINE, isLiveRun, type AgentRun, type AgentRunStatus } from "./agent-run.js";
 import { linkedDocuments, type LinkedDocument } from "./links.js";
-import type { ActionResult, DocumentRef, Flow, SessionAction, YamiModule } from "./module.js";
+import type { ActionResult, DocumentRef, Flow, LinkedDocumentKind, SessionAction, YamiModule } from "./module.js";
 import { readProgress, type ProgressLine } from "./progress.js";
 import { isJudged } from "./review.js";
 import { KILL } from "./fresh-run.js";
@@ -120,7 +120,7 @@ export interface NewSession {
   /** The module's session fields. */
   fields?: Properties;
   /** Documents linked on top of the flow's, for example a policy or an agent of another module. */
-  add?: DocumentRef[];
+  add?: DocumentRef<LinkedDocumentKind>[];
 }
 
 interface LiveRun {

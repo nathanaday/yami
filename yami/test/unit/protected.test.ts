@@ -5,7 +5,7 @@ import { runCheck, type WikiModule } from "../../src/index.js";
 import { testYami, type FsVault, type TestYami } from "../../src/testing/index.js";
 import { InvalidPlan, type Wiki } from "../../src/wiki/index.js";
 
-const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami;
 let vault: FsVault;

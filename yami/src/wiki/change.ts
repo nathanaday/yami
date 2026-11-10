@@ -1,9 +1,10 @@
 import { basename, link, LINK, linkTarget, parseDocument, PropertiesError, readDocument, sectionText, serializeDocument, updateDocument, writeDocument, type Document } from "../document/document.js";
-import { SOURCE, timestamp, TOPIC, validate, withDefaults, type ChangeStatus } from "../document/schema.js";
+import { timestamp, validate, withDefaults, type ChangeStatus } from "../document/schema.js";
 import { excerpt, protectedLost, readProtected, type ProtectedMap } from "../document/protected.js";
 import type { Properties, Vault } from "../document/vault.js";
 import type { Folders } from "../document/folders.js";
 import { hashBytes } from "./source.js";
+import { DEFAULT_TEMPLATE, sectionProblems, templateSchema, type Template } from "./templates.js";
 import { readArchive, versions } from "./versions.js";
 import type { Wiki } from "./wiki.js";
 
@@ -145,8 +146,23 @@ export class InvalidPlan extends Error {
   }
 }
 
-const SCHEMA_OF = { topic: TOPIC, source: SOURCE } as const;
-const typeOf = (folders: Folders, path: string) => (path.startsWith(`${folders.topics}/`) ? "topic" : "source");
+/** The type of a note at a path with these properties: `source` in the sources folder; else the template its `type` names, or `topic`. */
+function typeOf(folders: Folders, path: string, properties: Properties = {}): string {
+  if (!folders.inPages(path)) return "source";
+  return typeof properties.type === "string" && properties.type.trim() ? properties.type : DEFAULT_TEMPLATE;
+}
+
+/** The template of a note's type, or the problem: a type that names no template, or a page or a source in the other's folder. */
+function templateFor(wiki: Wiki, path: string, type: unknown): Template | string {
+  const folders = wiki.folders;
+  if (folders.inPages(path) && type === "source") return `a source goes in ${folders.sources}/, not with the pages`;
+  if (!folders.inPages(path) && type !== undefined && type !== "source") return `a note in ${folders.sources}/ has type source`;
+  const name = typeOf(folders, path, { type });
+  const template = wiki.template(name);
+  if (template) return template;
+  const names = wiki.templateNames().filter((n) => n !== "source");
+  return `the type ${name} names no template; a page's type is one of ${names.join(", ")}, or a template of ${folders.templates}/`;
+}
 
 /** How a plan is checked: `person` for a plan of the person's own edits, such as the return of a checkout, which may change the text they protected. */
 export interface ValidateOptions {
@@ -183,7 +199,7 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan, options: Valida
     const label = `write ${i + 1} (${write.op} ${write.path})`;
     if (!["create", "modify", "remove"].includes(write.op)) problems.push(`${label}: op must be create, modify, or remove`);
     if (typeof write.path !== "string" || !folders.inKnowledge(write.path) || write.path.includes("..")) {
-      problems.push(`${label}: the path must be a note under ${folders.topics}/ or ${folders.sources}/`);
+      problems.push(`${label}: the path must be a note under ${folders.pages}/ or ${folders.sources}/`);
       continue;
     }
     if (seen.has(write.path)) problems.push(`${label}: the plan writes this note twice`);
@@ -192,11 +208,15 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan, options: Valida
     if (write.op === "create") {
       if (exists) problems.push(`${label}: the note exists; use modify`);
       created.add(write.path);
-      const type = typeOf(folders, write.path);
-      const properties = withDefaults({ ...write.properties, type }, SCHEMA_OF[type]);
-      if (write.properties?.type && write.properties.type !== type) problems.push(`${label}: a note in this folder has type ${type}`);
-      for (const error of validate(properties, SCHEMA_OF[type])) problems.push(`${label}: ${error}`);
-      if (!String(properties.description ?? "").trim()) problems.push(`${label}: description is empty`);
+      const template = templateFor(wiki, write.path, write.properties?.type);
+      if (typeof template === "string") problems.push(`${label}: ${template}`);
+      else {
+        const schema = templateSchema(template);
+        const properties = withDefaults({ ...write.properties, type: template.name }, schema);
+        for (const error of validate(properties, schema)) problems.push(`${label}: ${error}`);
+        if (!String(properties.description ?? "").trim()) problems.push(`${label}: description is empty`);
+        if (typeof write.body === "string") warnings.push(...sectionProblems(write.body, template).map((p) => `${write.path} ${p}`));
+      }
       if (typeof write.body !== "string") problems.push(`${label}: a create needs a body`);
     } else if (!exists) {
       problems.push(`${label}: no note at this path`);
@@ -204,9 +224,14 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan, options: Valida
       problems.push(`${label}: the note changed since its base was read; read it again`);
     } else if (write.op === "modify") {
       const note = wiki.note(write.path)!;
-      const type = note.type === "source" ? "source" : "topic";
       const merged = merge(note.properties, write.properties ?? {});
-      for (const error of validate(merged, SCHEMA_OF[type])) problems.push(`${label}: ${error}`);
+      const template = templateFor(wiki, write.path, merged.type);
+      if (typeof template === "string") problems.push(`${label}: ${template}`);
+      else {
+        for (const error of validate({ ...merged, type: template.name }, templateSchema(template))) problems.push(`${label}: ${error}`);
+        const retyped = (merged.type ?? DEFAULT_TEMPLATE) !== (note.properties.type ?? DEFAULT_TEMPLATE);
+        if (typeof write.body === "string" || retyped) warnings.push(...sectionProblems(write.body ?? note.body, template).map((p) => `${write.path} ${p}`));
+      }
       if (!String(merged.description ?? "").trim()) problems.push(`${label}: description is empty`);
       if (write.properties === undefined && write.body === undefined) problems.push(`${label}: a modify changes properties or the body`);
       if (guarded && typeof write.body === "string") {
@@ -257,10 +282,10 @@ export async function resolveWrites(wiki: Wiki, plan: ChangePlan): Promise<Propo
   for (const { op, path, why, properties, body } of plan.writes) {
     const resolved: ProposedWrite = { op, path, ...(why?.trim() && { why: why.trim() }) };
     if (op === "create") {
-      const type = typeOf(wiki.folders, path);
-      // The type first, so the note reads as the page forms show it.
+      const type = typeOf(wiki.folders, path, properties);
+      // The type first, so the note reads as its template shows it.
       const { type: _given, ...rest } = properties ?? {};
-      resolved.properties = withDefaults({ type, ...rest }, SCHEMA_OF[type]);
+      resolved.properties = withDefaults({ type, ...rest }, templateSchema(wiki.template(type) ?? { name: type, properties: {} }));
       resolved.body = cleanBody(body);
     } else {
       resolved.hash = await textHash(await wiki.vault.read(path));
@@ -428,7 +453,7 @@ function parseWrites(vault: Vault, path: string, body: string): ProposedWrite[] 
     const heading = WRITE_HEADING.exec(line);
     if (heading) {
       const target = heading[2]!.trim();
-      if (!vault.folders.inKnowledge(target)) throw unreadable(path, `${heading[1]} ${target} is not a note under ${vault.folders.topics}/ or ${vault.folders.sources}/`);
+      if (!vault.folders.inKnowledge(target)) throw unreadable(path, `${heading[1]} ${target} is not a note under ${vault.folders.pages}/ or ${vault.folders.sources}/`);
       part = { op: heading[1] as Write["op"], path: target, prose: [] };
       parts.push(part);
       continue;

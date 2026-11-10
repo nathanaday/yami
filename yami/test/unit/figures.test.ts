@@ -6,7 +6,7 @@ import { testYami, type FsVault, type TestYami } from "../../src/testing/index.j
 import { figureMarker, figureMarkers, fromBase64, pngProblem, svgProblem, type Wiki } from "../../src/wiki/index.js";
 import { DEFAULT_FOLDERS } from "../../src/document/index.js";
 
-const { figures: FIGURES, sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { figures: FIGURES, sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami;
 let vault: FsVault;
@@ -89,8 +89,8 @@ describe("the figure files", () => {
     expect(png.path).toBe(`${FIGURES}/Autoencoder/photo.png`);
     expect(await runTool(figure, { topic: "Autoencoder", name: "encoder-decoder", svg: SVG }, signal)).toMatchObject({ isError: true, text: expect.stringContaining("give another name, or set replace") });
     expect((await runTool(figure, { topic: "Autoencoder", name: "encoder-decoder", svg: SVG, replace: true }, signal)).isError).toBe(false);
-    expect(await runTool(figure, { topic: "Sutton (source)", name: "x", svg: SVG }, signal)).toMatchObject({ isError: true, text: "Sutton (source) is not a topic of the wiki." });
-    expect(await runTool(figure, { topic: "Nowhere", name: "x", svg: SVG }, signal)).toMatchObject({ isError: true, text: "Nowhere is not a topic of the wiki." });
+    expect(await runTool(figure, { topic: "Sutton (source)", name: "x", svg: SVG }, signal)).toMatchObject({ isError: true, text: "Sutton (source) is not a page of the wiki." });
+    expect(await runTool(figure, { topic: "Nowhere", name: "x", svg: SVG }, signal)).toMatchObject({ isError: true, text: "Nowhere is not a page of the wiki." });
     expect(await runTool(figure, { topic: "Autoencoder", name: "x", svg: "<svg><script></script></svg>" }, signal)).toMatchObject({ isError: true, text: "The SVG is refused: the SVG holds a <script>." });
     expect(await runTool(figure, { topic: "Autoencoder", name: "x", png: "AAAA" }, signal)).toMatchObject({ isError: true, text: "The PNG is refused: the bytes are not a PNG." });
     expect(await runTool(figure, { topic: "Autoencoder", name: "x" }, signal)).toMatchObject({ isError: true, text: expect.stringContaining("svg text, or as png") });
@@ -111,20 +111,20 @@ describe("the figures flow", () => {
     const session = (await module.figures.create({ name: "Figures", exact: true })).path;
     const check = async (properties: Record<string, unknown>) => runCheck({ path: "p", properties: { check: "figures" }, body: "" }, { vault, wiki, path: session, properties }, module.checks);
     // Every topic with a marker, when the field is empty.
-    expect(await check({ topics: [], changes: [] })).toMatchObject({ status: "unmet", detail: expect.stringContaining("figures still to make in Autoencoder (1)") });
-    expect(await check({ topics: [link(`${TOPICS}/Decoder.md`)], changes: [] })).toMatchObject({ status: "met", detail: "no figure marker is left in 1 topic(s), in the wiki or in the standing changes" });
-    expect(await check({ topics: ["[[Nowhere]]"], changes: [] })).toMatchObject({ status: "unmet", detail: "topics links Nowhere, which are not notes" });
+    expect(await check({ pages: [], changes: [] })).toMatchObject({ status: "unmet", detail: expect.stringContaining("figures still to make in Autoencoder (1)") });
+    expect(await check({ pages: [link(`${TOPICS}/Decoder.md`)], changes: [] })).toMatchObject({ status: "met", detail: "no figure marker is left in 1 page(s), in the wiki or in the standing changes" });
+    expect(await check({ pages: ["[[Nowhere]]"], changes: [] })).toMatchObject({ status: "unmet", detail: "pages links Nowhere, which are not notes" });
     // A standing change that puts the figure in the marker's place meets it before the approval.
     const body = (await readDocument(vault, `${TOPICS}/Autoencoder.md`)).body.replace(MARKER, `![[${FIGURES}/Autoencoder/encoder-decoder.svg]]\n*Figure: the encoder narrows the input to a code that the decoder expands ([[Sutton (source)]], p. 4).*`);
     const proposal = await wiki.change({ title: "Figures for Autoencoder", session, writes: [{ op: "modify", path: `${TOPICS}/Autoencoder.md`, body, why: "the figure" }] });
     await wiki.refresh();
     const properties = (await readDocument(vault, session)).properties;
     expect(properties.changes).toEqual([link(proposal.path)]);
-    expect(await check({ ...properties, topics: [] })).toMatchObject({ status: "met" });
-    expect(await check({ ...properties, topics: [link(`${TOPICS}/Autoencoder.md`)] })).toMatchObject({ status: "met" });
+    expect(await check({ ...properties, pages: [] })).toMatchObject({ status: "met" });
+    expect(await check({ ...properties, pages: [link(`${TOPICS}/Autoencoder.md`)] })).toMatchObject({ status: "met" });
     await wiki.approve(proposal.path);
     await wiki.refresh();
-    expect(await check({ topics: [], changes: [] })).toMatchObject({ status: "met", detail: "no topic has a figure to make" });
+    expect(await check({ pages: [], changes: [] })).toMatchObject({ status: "met", detail: "no page has a figure to make" });
     expect((await wiki.lint()).filter((f) => f.check === "figure-missing")).toEqual([]);
   });
 
@@ -135,7 +135,7 @@ describe("the figures flow", () => {
     expect(drafter).toContain("%% figure:");
     expect(await vault.read("internal/wiki/skills/ingest/SKILL.md")).toContain("the figure markers the drafters left");
     expect(await vault.read("internal/wiki/skills/figures/SKILL.md")).toContain("call `yami_agent` with the agent `illustrator`");
-    expect(await vault.read("internal/wiki/skills/ingest/page-forms.md")).toContain("figure-missing");
+    expect(await vault.read("internal/wiki/skills/ingest/page-rules.md")).toContain("figure-missing");
     expect(t.yami.problems).toEqual([]);
   });
 });

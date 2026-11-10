@@ -23,9 +23,9 @@ beforeEach(async () => {
   module = t.yami.module("wiki") as WikiModule;
   ({ vault } = t);
   wiki = t.yami.wiki;
-  await note("wiki/topics/Reinforcement learning.md", { type: "topic", description: "Learning by reward." }, "An agent learns from reward. See [[Q-learning]] and [[SSL]].\n");
-  await note("wiki/topics/Q-learning.md", { type: "topic", description: "A value method." }, "Q-learning learns action values.\n");
-  await note("wiki/topics/Self-supervised learning.md", { type: "topic", description: "Labels from data.", aliases: ["SSL"] }, "No labels.\n");
+  await note("wiki/pages/Reinforcement learning.md", { type: "topic", description: "Learning by reward." }, "An agent learns from reward. See [[Q-learning]] and [[SSL]].\n");
+  await note("wiki/pages/Q-learning.md", { type: "topic", description: "A value method." }, "Q-learning learns action values.\n");
+  await note("wiki/pages/Self-supervised learning.md", { type: "topic", description: "Labels from data.", aliases: ["SSL"] }, "No labels.\n");
   await note("notes/Mine.md", {}, "My own note.\n");
 });
 afterEach(async () => {
@@ -38,7 +38,7 @@ const order = {
   name: "Reinforcement learning",
   documents: [
     { path: "Reinforcement learning", why: "the overview" },
-    { path: "wiki/topics/Q-learning.md", why: "the first method" },
+    { path: "wiki/pages/Q-learning.md", why: "the first method" },
   ],
   notes: "Left out deep RL: the wiki has no topic yet.",
 };
@@ -60,7 +60,7 @@ describe("checkout", () => {
     );
     expect(sectionText(session.body, "Notes")).toBe("Left out deep RL: the wiki has no topic yet.");
     const copy = await readDocument(vault, COPY);
-    expect(copy.properties).toMatchObject({ copy_of: "[[wiki/topics/Reinforcement learning|Reinforcement learning]]", checkout: `[[${FOLDER}|${DATE} Reinforcement learning]]` });
+    expect(copy.properties).toMatchObject({ copy_of: "[[wiki/pages/Reinforcement learning|Reinforcement learning]]", checkout: `[[${FOLDER}|${DATE} Reinforcement learning]]` });
     expect(copy.properties.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(copy.body).toBe("An agent learns from reward. See [[Q-learning]] and [[SSL]].\n");
   });
@@ -68,13 +68,13 @@ describe("checkout", () => {
   it("keeps copies out of the wiki's index, so search finds each subject once", async () => {
     await checkout(order);
     await wiki.refresh();
-    expect((await wiki.search("reward")).map((h) => h.path)).toEqual(["wiki/topics/Reinforcement learning.md"]);
+    expect((await wiki.search("reward")).map((h) => h.path)).toEqual(["wiki/pages/Reinforcement learning.md"]);
     expect(await wiki.lint()).not.toContainEqual(expect.objectContaining({ check: "duplicate-name" }));
   });
 
   it("refuses a note that is not knowledge, a document twice, a why of more than one line, no request, and a name taken", async () => {
     await expect(checkout({ ...order, documents: [{ path: "notes/Mine.md", why: "x" }] })).rejects.toThrow("only knowledge is checked out");
-    await expect(checkout({ ...order, documents: [{ path: "Q-learning", why: "x" }, { path: "wiki/topics/Q-learning.md", why: "y" }] })).rejects.toThrow("twice");
+    await expect(checkout({ ...order, documents: [{ path: "Q-learning", why: "x" }, { path: "wiki/pages/Q-learning.md", why: "y" }] })).rejects.toThrow("twice");
     await expect(checkout({ ...order, documents: [{ path: "Q-learning", why: "a\nb" }] })).rejects.toThrow("a why of one line");
     await expect(checkout({ ...order, request: " " })).rejects.toThrow("request is empty");
     await expect(checkout({ ...order, documents: [] })).rejects.toThrow("one document or more");
@@ -82,7 +82,7 @@ describe("checkout", () => {
     await checkout(order);
     expect((await checkout(order)).session).toBe(`${FOLDER} (2).md`);
     await wiki.refresh();
-    expect(wiki.resolve("Reinforcement learning")).toBe("wiki/topics/Reinforcement learning.md");
+    expect(wiki.resolve("Reinforcement learning")).toBe("wiki/pages/Reinforcement learning.md");
   });
 
   it("is a tool of the wiki module, which a plain conversation can call", async () => {
@@ -96,15 +96,15 @@ describe("checkout", () => {
     const tool = checkoutTool();
     const signal = new AbortController().signal;
     const bad = { ...order, name: "Other", documents: [{ path: "Nothing", why: "x" }] };
-    await expect(tool.run(bad, { signal })).rejects.toThrow("Nothing is not a note of wiki/topics/ or wiki/sources/; only knowledge is checked out.");
-    expect(await runTool(tool, bad, signal)).toEqual({ isError: true, text: "Nothing is not a note of wiki/topics/ or wiki/sources/; only knowledge is checked out." });
+    await expect(tool.run(bad, { signal })).rejects.toThrow("Nothing is not a note of wiki/pages/ or wiki/sources/; only knowledge is checked out.");
+    expect(await runTool(tool, bad, signal)).toEqual({ isError: true, text: "Nothing is not a note of wiki/pages/ or wiki/sources/; only knowledge is checked out." });
     expect(await vault.list(SESSIONS)).toEqual([]);
   });
 });
 
 describe("returnCheckout", () => {
   it("removes copies with no edit, and makes no change, even when they hold links by alias or in another case", async () => {
-    await note("wiki/topics/Q-learning.md", { type: "topic", description: "A value method." }, "Q-learning learns action values; see [[reinforcement learning]] and [[SSL]].\n");
+    await note("wiki/pages/Q-learning.md", { type: "topic", description: "A value method." }, "Q-learning learns action values; see [[reinforcement learning]] and [[SSL]].\n");
     await checkout(order);
     const result = await returnCheckout(SESSION);
     expect(result).toEqual({ returned: [], skipped: [], summary: "- No copy held an edit." });
@@ -119,9 +119,9 @@ describe("returnCheckout", () => {
     await checkout(order);
     await updateDocument(vault, COPY, (d) => (d.body = `An agent learns from reward, with a policy. See [[${FOLDER}/Q-learning (checkout)|Q-learning]] and [[SSL]].\n`));
     const result = await returnCheckout(SESSION);
-    expect(result.returned).toEqual(["wiki/topics/Reinforcement learning.md"]);
+    expect(result.returned).toEqual(["wiki/pages/Reinforcement learning.md"]);
     expect(result.change).toMatch(new RegExp(`^internal/wiki/changes/.* Return ${DATE} Reinforcement learning\\.md$`));
-    expect((await readDocument(vault, "wiki/topics/Reinforcement learning.md")).body).toBe("An agent learns from reward, with a policy. See [[wiki/topics/Q-learning|Q-learning]] and [[SSL]].\n");
+    expect((await readDocument(vault, "wiki/pages/Reinforcement learning.md")).body).toBe("An agent learns from reward, with a policy. See [[wiki/pages/Q-learning|Q-learning]] and [[SSL]].\n");
     expect((await readDocument(vault, SESSION)).properties.changes).toEqual([`[[${result.change!.slice(0, -3)}|${result.change!.slice(result.change!.lastIndexOf("/") + 1, -3)}]]`]);
     expect(await vault.list(FOLDER)).toEqual([]);
     await expect(returnCheckout(SESSION)).rejects.toThrow("returned already");
@@ -131,12 +131,12 @@ describe("returnCheckout", () => {
     await checkout(order);
     await updateDocument(vault, COPY, (d) => (d.body = "My edit.\n"));
     await updateDocument(vault, `${FOLDER}/Q-learning (checkout).md`, (d) => (d.body = "Q-learning, edited by me.\n"));
-    await note("wiki/topics/Reinforcement learning.md", { type: "topic", description: "Learning by reward." }, "Changed in the wiki meanwhile.\n");
+    await note("wiki/pages/Reinforcement learning.md", { type: "topic", description: "Learning by reward." }, "Changed in the wiki meanwhile.\n");
     const result = await returnCheckout(SESSION);
     expect(result.skipped).toEqual([{ copy: COPY, reason: "its original changed since the checkout" }]);
-    expect(result.returned).toEqual(["wiki/topics/Q-learning.md"]);
+    expect(result.returned).toEqual(["wiki/pages/Q-learning.md"]);
     expect(await vault.list(FOLDER)).toEqual([COPY]);
-    expect((await readDocument(vault, "wiki/topics/Reinforcement learning.md")).body).toBe("Changed in the wiki meanwhile.\n");
+    expect((await readDocument(vault, "wiki/pages/Reinforcement learning.md")).body).toBe("Changed in the wiki meanwhile.\n");
     expect(sectionText((await readDocument(vault, SESSION)).body, "Return")).toContain(`- Kept [[${FOLDER}/Reinforcement learning (checkout)|Reinforcement learning (checkout)]]: its original changed since the checkout. Its edits stay in the copy.`);
   });
 });
@@ -150,18 +150,18 @@ describe("what review found", () => {
 
   it("keeps two originals of one name apart, and returns two edits as one change", async () => {
     await note("wiki/sources/Q-learning.md", { type: "source", description: "The Q-learning paper.", file: "[[x.pdf]]" }, "The paper.\n");
-    const made = await checkout({ ...order, documents: [{ path: "wiki/topics/Q-learning.md", why: "a" }, { path: "wiki/sources/Q-learning.md", why: "b" }] });
+    const made = await checkout({ ...order, documents: [{ path: "wiki/pages/Q-learning.md", why: "a" }, { path: "wiki/sources/Q-learning.md", why: "b" }] });
     expect(made.copies).toEqual([`${FOLDER}/Q-learning (checkout).md`, `${FOLDER}/Q-learning (checkout) 2.md`]);
     for (const copy of made.copies) await updateDocument(vault, copy, (d) => (d.body = `${d.body.trim()} Edited.\n`));
     const result = await returnCheckout(SESSION);
-    expect(result.returned.sort()).toEqual(["wiki/sources/Q-learning.md", "wiki/topics/Q-learning.md"]);
+    expect(result.returned.sort()).toEqual(["wiki/pages/Q-learning.md", "wiki/sources/Q-learning.md"]);
     expect((await readDocument(vault, result.change!)).properties.modifies).toBe(2);
   });
 
   it("keeps a copy whose original is gone, leaves a note of the user's own alone, and takes trailing newlines as no edit", async () => {
     await checkout(order);
     await updateDocument(vault, COPY, (d) => (d.body = "Edited.\n"));
-    await vault.remove("wiki/topics/Reinforcement learning.md");
+    await vault.remove("wiki/pages/Reinforcement learning.md");
     await updateDocument(vault, `${FOLDER}/Q-learning (checkout).md`, (d) => (d.body = `${d.body}\n\n\n`));
     await vault.write(`${FOLDER}/My notes.md`, "Mine.\n");
     const result = await returnCheckout(SESSION);
@@ -174,7 +174,7 @@ describe("what review found", () => {
     const made = await checkout({ ...order, documents: [{ path: "Q-learning", why: "a" }, { path: "wiki/sources/Draft.md", why: "b" }] });
     for (const copy of made.copies) await updateDocument(vault, copy, (d) => (d.body = "Edited.\n"));
     const result = await returnCheckout(SESSION);
-    expect(result.returned).toEqual(["wiki/topics/Q-learning.md"]);
+    expect(result.returned).toEqual(["wiki/pages/Q-learning.md"]);
     expect(result.skipped).toEqual([{ copy: `${FOLDER}/Draft (checkout).md`, reason: "the wiki refused the edit: description is empty" }]);
   });
 
@@ -182,7 +182,7 @@ describe("what review found", () => {
     await checkout(order);
     await updateDocument(vault, COPY, (d) => (d.body = `See [[${FOLDER}/Q-learning (checkout)]] and ![[${FOLDER}/Q-learning (checkout)#Top]].\n`));
     await returnCheckout(SESSION);
-    expect((await readDocument(vault, "wiki/topics/Reinforcement learning.md")).body).toBe("See [[wiki/topics/Q-learning|Q-learning]] and ![[wiki/topics/Q-learning#Top]].\n");
+    expect((await readDocument(vault, "wiki/pages/Reinforcement learning.md")).body).toBe("See [[wiki/pages/Q-learning|Q-learning]] and ![[wiki/pages/Q-learning#Top]].\n");
   });
 });
 

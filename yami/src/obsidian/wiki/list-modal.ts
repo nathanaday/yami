@@ -52,7 +52,7 @@ export class NoteListModal extends FuzzySuggestModal<NoteRow> {
 }
 
 export function findingRows(wiki: Wiki, findings: Finding[]): NoteRow[] {
-  const rank = { error: 0, warning: 1 };
+  const rank = { error: 0, warning: 1, info: 2 };
   return [...findings]
     .sort((a, b) => rank[a.severity] - rank[b.severity] || a.check.localeCompare(b.check) || a.path.localeCompare(b.path))
     .map((finding) => ({
@@ -69,7 +69,7 @@ export function matchRows(wiki: Wiki, matches: Match[]): NoteRow[] {
     const name = (path: string) => wiki.note(path)?.name ?? path;
     const head: NoteRow = match.path
       ? { path: match.path, title: name(match.path), badge: "hit", tone: "hit", detail: `holds "${match.name}"` }
-      : { title: match.name, badge: match.match, tone: match.match, detail: match.match === "near" ? "close to the notes below" : "no topic or source is close" };
+      : { title: match.name, badge: match.match, tone: match.match, detail: match.match === "near" ? "close to the notes below" : "no page or source is close" };
     const neighbors = match.neighbors.map((n): NoteRow => ({ path: n.path, title: name(n.path), badge: n.score.toFixed(2), tone: "neighbor", detail: `neighbor of "${match.name}"` }));
     return [head, ...neighbors];
   });

@@ -64,7 +64,7 @@ describe("the agent tool", () => {
     expect(child!.options.approval).toBe("accept-edits");
     expect(child!.options.skills).toEqual(worker!.options.skills);
     expect(child!.options.cwd).toBe(t!.root);
-    expect(names(child!)).toEqual(["yami_check", "yami_protected", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations"]);
+    expect(names(child!)).toEqual(["yami_check", "yami_protected", "wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_templates", "wiki_neighbors", "wiki_chunks", "wiki_citations"]);
     const [prompt] = child!.prompts;
     expect(prompt).toMatch(/^You are the agent "team:reader" of Yami: Reads the greeting and reports it\.\n\nA caller gave you the task below\. You work in a fresh context/);
     expect(prompt).toContain("You are read-only: change no file. You can run commands that only read or check, such as git log or the tests.");

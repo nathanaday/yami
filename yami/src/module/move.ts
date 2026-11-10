@@ -56,18 +56,53 @@ export async function moveFolders(yami: Yami, settings: Partial<FolderSettings>)
   }
   const move = (path: string) => movedPath(movedPath(path, from.internal, to.internal), from.wiki, to.wiki);
   const installed = await moveRecords(vault, to, move);
-  if (moved.length) {
-    // What Yami installed it writes again for the new folders at the next start; an edit here would read as a person's.
-    for (const path of await vault.list("")) {
-      if (installed.has(path)) continue;
-      const text = await vault.read(path);
-      const links = moveLinks(text, move);
-      const next = path.startsWith(`${to.changes}/`) ? moveWritePaths(links, move) : links;
-      if (next !== text) await vault.write(path, next);
-    }
-  }
+  if (moved.length) await moveNoteLinks(vault, to, move, installed);
   await vault.write(FOLDER_SETTINGS, folderSettingsText(to.settings));
   return { from: from.settings, to: to.settings, moved };
+}
+
+/**
+ * Moves the pages of a wiki from before yami 0.24, which kept them in `<wiki>/topics/`, to `<wiki>/pages/`,
+ * with every link into them, the protected text map, and the notes that each change document names, as
+ * `moveFolders` does. With no pages folder yet, the folder moves whole. With one, as when another device of a
+ * synced vault made it, each file moves on its own, and one whose name the pages folder holds already stays.
+ * Returns the files left in the topics folder, which the wiki module reports as a problem. The wiki module calls
+ * it at each start, before it installs its documents.
+ */
+export async function moveLegacyTopics(vault: Vault): Promise<string[]> {
+  const { legacyTopics, pages } = vault.folders;
+  if (!(await vault.exists(legacyTopics))) return [];
+  const files = await vault.files(legacyTopics);
+  if (!files.length) return [];
+  let move: (path: string) => string;
+  if (!(await vault.exists(pages))) {
+    await vault.rename(legacyTopics, pages);
+    move = (path) => movedPath(path, legacyTopics, pages);
+  } else {
+    const moved = new Set<string>();
+    for (const file of files) {
+      const target = movedPath(file, legacyTopics, pages);
+      if (await vault.exists(target)) continue;
+      await vault.rename(file, target);
+      moved.add(file);
+      if (file.endsWith(".md")) moved.add(file.slice(0, -3));
+    }
+    move = (path) => (moved.has(path) ? movedPath(path, legacyTopics, pages) : path);
+  }
+  await moveNoteLinks(vault, vault.folders, move, await moveRecords(vault, vault.folders, move));
+  return vault.files(legacyTopics);
+}
+
+/** Moves the links of every note but the ones Yami installed, and the paths that each change document names. */
+async function moveNoteLinks(vault: Vault, folders: Folders, move: (path: string) => string, installed: Set<string>): Promise<void> {
+  // What Yami installed it writes again for the new folders at the next start; an edit here would read as a person's.
+  for (const path of await vault.list("")) {
+    if (installed.has(path)) continue;
+    const text = await vault.read(path);
+    const links = moveLinks(text, move);
+    const next = path.startsWith(`${folders.changes}/`) ? moveWritePaths(links, move) : links;
+    if (next !== text) await vault.write(path, next);
+  }
 }
 
 const WIKILINK = /(!?\[\[)([^\]|#^\n]+)/g;

@@ -36,6 +36,7 @@ import { BUNDLE_PROPERTY } from "./bundle.js";
 import { lint, type Finding, type LintOptions } from "./lint.js";
 import { match, type Match, type MatchOptions } from "./match.js";
 import { TagIndex, type Neighbors, type TagCount, type TagView } from "./tags.js";
+import { DEFAULT_TEMPLATE, readTemplates, type Template, type TemplateProblem } from "./templates.js";
 import { tokens } from "./tokens.js";
 import { captured, snapshot, versions, writeArchive, type Captured, type SnapshotOptions, type Version } from "./versions.js";
 
@@ -86,13 +87,13 @@ export interface WikiOptions {
 export const FIELD_WEIGHTS = { title: 3, aliases: 3, tags: 2, description: 2, body: 1 };
 
 /**
- * Files that are not knowledge: the forms of the modules (agents, flows, policies, promises, and skills), the
+ * Files that are not knowledge: the forms of the modules (agents, flows, policies, promises, and skills) and the wiki's templates, the
  * frozen copies that sources embed, also inside an exported bundle, and the folder of a wiki session, which holds the copies of a checkout or
  * the staged notes of an import.
  */
 function unindexed(folders: Folders): RegExp[] {
   return [
-    new RegExp(`^${escapeRegExp(folders.internal)}/[^/]+/(agents|flows|policies|promises|skills)/`),
+    new RegExp(`^${escapeRegExp(folders.internal)}/[^/]+/(agents|flows|policies|promises|skills|templates)/`),
     new RegExp(`^${escapeRegExp(folders.originals)}/`),
     // A bundle holds its originals in the default layout.
     new RegExp(`/${escapeRegExp(DEFAULT_FOLDERS.originals)}/`),
@@ -131,6 +132,9 @@ export class Wiki {
   /** Snapshots, restores, proposals, approvals, and rejections run one at a time, in the order they arrive. */
   private serial: Promise<unknown> = Promise.resolve();
   private readonly unindexed: RegExp[];
+  private templateMap = new Map<string, Template>();
+  /** The templates of the last refresh that do not read, each with what is wrong. */
+  templateProblems: TemplateProblem[] = [];
   readonly options: Required<Pick<WikiOptions, "exclude" | "skipTypes" | "defaultAlgorithm">> & WikiOptions;
 
   constructor(
@@ -186,6 +190,9 @@ export class Wiki {
       const key = path.slice(path.lastIndexOf("/") + 1, -3).toLowerCase();
       this.everyName.set(key, [...(this.everyName.get(key) ?? []), path]);
     }
+    const read = await readTemplates(this.vault, all);
+    this.templateMap = read.templates;
+    this.templateProblems = read.problems;
     const paths = all.filter((path) => this.reads(path, exclude));
     const notes: Note[] = [];
     for (const path of paths) {
@@ -292,6 +299,37 @@ export class Wiki {
     return this.byPath.get(path);
   }
 
+  /** Whether a note is a page of the wiki: a note in the pages folder, of any template. */
+  isPage(note: Note | string): boolean {
+    return this.folders.inPages(typeof note === "string" ? note : note.path);
+  }
+
+  /** The template with a name, as the last refresh read it. */
+  template(name: string): Template | undefined {
+    return this.templateMap.get(name);
+  }
+
+  /** The names of the templates, as the last refresh read them. */
+  templateNames(): string[] {
+    return [...this.templateMap.keys()].sort();
+  }
+
+  /** The template of a page: the one its `type` names, or `topic` for a page with no type. Undefined for a type that names no template. */
+  templateOf(note: Note): Template | undefined {
+    return this.templateMap.get(note.type?.trim() || DEFAULT_TEMPLATE);
+  }
+
+  /**
+   * The vault's templates: its own, and the library's built-in ones it has no copy of. It reads the vault again
+   * first when the index is stale. `templateProblems` says why a template of the vault is left out.
+   * @example
+   * const names = (await wiki.templates()).map((t) => t.name);
+   */
+  async templates(): Promise<Template[]> {
+    await this.ensure();
+    return [...this.templateMap.values()].sort((a, b) => (a.name < b.name ? -1 : 1));
+  }
+
   /**
    * Finds the note a link names, as Obsidian does, among every note of the vault: a path, with or
    * without `.md`, or a name; a name that several notes share goes to the shortest path. The note may
@@ -359,11 +397,12 @@ export class Wiki {
     return [...broken, ...lint(this, options, guarded), ...(await lintCitations(this, options))];
   }
 
-  /** The notes that a query's `types`, `tags`, and `folder` keep. */
+  /** The notes that a query's `types`, `tags`, and `folder` keep. The type `page` keeps every page. */
   filter(query: Pick<Query, "types" | "tags" | "folder">): (note: Note) => boolean {
     const tags = (query.tags ?? []).map(normalizeTag);
+    const typed = (note: Note) => (note.type !== undefined && query.types!.includes(note.type)) || (query.types!.includes("page") && this.isPage(note));
     return (note) =>
-      (!query.types?.length || (note.type !== undefined && query.types.includes(note.type))) &&
+      (!query.types?.length || typed(note)) &&
       tags.every((tag) => note.tags.includes(tag)) &&
       (!query.folder || note.path.startsWith(`${query.folder.replace(/\/$/, "")}/`));
   }

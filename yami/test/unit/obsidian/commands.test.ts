@@ -25,7 +25,7 @@ import { testYami, type TestYami } from "../../../src/testing/index.js";
 import { Hello } from "../../fixtures/hello.js";
 import { DEFAULT_FOLDERS } from "../../../src/document/index.js";
 
-const { topics: TOPICS } = DEFAULT_FOLDERS;
+const { pages: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami | undefined;
 afterEach(async () => {
@@ -202,21 +202,63 @@ describe("the export and import commands of the wiki", () => {
       notify: (work: Promise<unknown>) => (done = work.then((result) => void (result !== undefined && shown.push(result)), (error: Error) => void shown.push(`Yami: ${error.message}`))),
     } as unknown as ObsidianYami;
     addWikiCommands(host);
-    expect([...commands.values()].filter((c) => c.id.endsWith("port")).map((c) => `${c.id} · ${c.name}`)).toEqual(["yami-wiki-export · Wiki: export a topic", "yami-wiki-import · Wiki: import a bundle"]);
+    expect([...commands.values()].filter((c) => c.id.endsWith("port")).map((c) => `${c.id} · ${c.name}`)).toEqual(["yami-wiki-export · Wiki: export a page", "yami-wiki-import · Wiki: import a bundle"]);
     commands.get("yami-wiki-import")!.callback!();
     await done;
     expect(asked).toEqual([["A folder of the vault, an absolute path, or a GitHub repository URL", "Import the bundle"]]);
     expect(shown).toEqual([{ message: "1 note(s) staged. Approve its change in the panel.", open: expect.stringMatching(/^internal\/wiki\/sessions\/Import drop /) }]);
     expect((await readDocument(vault, (shown[0] as { open: string }).open)).properties).toMatchObject({ flow: "import", state: "done", from: "drop" });
-    // The export command picks the topic, then opens the modal (a Modal of Obsidian, which this test cannot open): the pick is what the test sees.
+    // The export command picks the page, then opens the modal (a Modal of Obsidian, which this test cannot open): the pick is what the test sees.
     const opened: string[] = [];
     (await import("../../../src/obsidian/wiki/export-modal.js")).WikiExportModal.prototype.open = function (this: { topic: string }) {
       opened.push(this.topic);
     };
     commands.get("yami-wiki-export")!.callback!();
     await done;
-    expect(picked).toEqual([["The topic to export around", "Baguette · A long loaf.", "Levain · A starter.", "Sourdough · Bread from a starter."]]);
-    expect(opened).toEqual([`drop/Baguette.md`]);
+    // A note of type topic outside the pages folder, such as the folder the bundle came from, is no page.
+    expect(picked).toEqual([["The page to export around", "Levain · A starter.", "Sourdough · Bread from a starter."]]);
+    expect(opened).toEqual([`${TOPICS}/Levain.md`]);
+  });
+});
+
+describe("the template commands of the wiki", () => {
+  it("make a page of a picked template through an applied change, and a template of the person's own", async () => {
+    t = await testYami({ threads: false });
+    const { yami, vault } = t;
+    const commands = new Map<string, Command>();
+    const shown: unknown[] = [];
+    const picked: string[][] = [];
+    const answers = ["NeurIPS 2025", "The 2025 conference.", "Person"];
+    let done: Promise<void> = Promise.resolve();
+    const host = {
+      app: {},
+      plugin: { addCommand: (command: Command) => commands.set(command.id, command) },
+      wiki: yami.wiki,
+      module: (id: string) => yami.module(id),
+      conversationFolder: "conversations",
+      pick: async <T,>(items: T[], label: (item: T) => string, placeholder: string) => (picked.push([placeholder, ...items.map(label)]), items.find((item) => label(item).startsWith("event"))),
+      ask: async () => answers.shift(),
+      notify: (work: Promise<unknown>) => (done = work.then((result) => void (result !== undefined && shown.push(result)), (error: Error) => void shown.push(`Yami: ${error.message}`))),
+    } as unknown as ObsidianYami;
+    addWikiCommands(host);
+    commands.get("yami-wiki-new-page")!.callback!();
+    await done;
+    expect(picked[0]![0]).toBe("The template of the new page");
+    expect(picked[0]!.slice(1).map((label) => label.split(" · ")[0])).toEqual(["event", "glossary", "list", "portal", "stub", "timeline", "topic"]);
+    expect(shown).toEqual([{ message: "Created wiki/pages/NeurIPS 2025.md from the event template. internal/wiki/templates/event/TEMPLATE.md says how to write each section.", open: `${TOPICS}/NeurIPS 2025.md` }]);
+    const page = await readDocument(vault, `${TOPICS}/NeurIPS 2025.md`);
+    expect(page.properties).toMatchObject({ type: "event", description: "The 2025 conference.", date: "", status: "draft" });
+    expect(page.body).toBe("## Summary\n\n## Proceedings\n\n## Related\n\n## Sources\n\n## Notes\n");
+    expect((await yami.wiki.changes("all")).map((c) => [c.title, c.status])).toEqual([["New page NeurIPS 2025", "applied"]]);
+    commands.get("yami-wiki-new-template")!.callback!();
+    await done;
+    expect(shown[1]).toEqual({ message: "Created the template internal/wiki/templates/person/TEMPLATE.md. Its name is the type of its pages.", open: "internal/wiki/templates/person/TEMPLATE.md" });
+    expect((await yami.wiki.templates()).find((t) => t.name === "person")).toMatchObject({ builtIn: false, sections: ["Summary", "Related", "Sources", "Notes"] });
+    expect(yami.wiki.templateProblems).toEqual([]);
+    answers.push("person");
+    commands.get("yami-wiki-new-template")!.callback!();
+    await done;
+    expect(shown[2]).toBe("Yami: The template person exists: internal/wiki/templates/person/TEMPLATE.md.");
   });
 });
 
@@ -296,7 +338,7 @@ describe("the change commands of the wiki", () => {
     await write(`${TOPICS}/C.md`, { type: "topic", description: "By hand." }, "x\n");
     await run("yami-wiki-approve-change");
     expect(picked.pop()).toEqual(["The change to approve", "C · 1 created · just now"]);
-    expect(shown.pop()).toBe("Yami: The change plan is not valid:\n- write 1 (create wiki/topics/C.md): the note exists; use modify");
+    expect(shown.pop()).toBe("Yami: The change plan is not valid:\n- write 1 (create wiki/pages/C.md): the note exists; use modify");
     expect((await readDocument(vault, c.path)).properties.status).toBe("proposed");
     await run("yami-wiki-reject-change");
     expect(picked.pop()).toEqual(["The change to reject", "C · 1 created · just now"]);

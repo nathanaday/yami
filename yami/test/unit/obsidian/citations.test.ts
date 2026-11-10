@@ -26,7 +26,7 @@ import { captureSource, Wiki } from "../../../src/wiki/index.js";
 import { installDom } from "./dom.js";
 import { DEFAULT_FOLDERS } from "../../../src/document/index.js";
 
-const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 let root: string;
 let vault: FsVault;

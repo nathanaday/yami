@@ -332,7 +332,7 @@ export async function passageText(vault: Vault, resolved: CitationTarget): Promi
 export async function lintCitations(wiki: Wiki, options: LintOptions = {}): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const note of selectNotes(wiki, options)) {
-    if (note.type !== "topic") continue;
+    if (!wiki.isPage(note)) continue;
     const bad = (await resolveCitations(wiki.vault, wiki, note)).filter((c) => c.problem && wiki.resolve(c.target));
     if (!bad.length) continue;
     const shown = bad.slice(0, 3).map((c) => `${c.text}: ${c.problem}`);
@@ -341,7 +341,7 @@ export async function lintCitations(wiki: Wiki, options: LintOptions = {}): Prom
       check: "bad-citation",
       severity: "warning",
       message: `has ${bad.length} citation${bad.length === 1 ? "" : "s"} that lead${bad.length === 1 ? "s" : ""} nowhere: ${shown.join("; ")}${bad.length > 3 ? "; …" : ""}`,
-      fix: "cite the source note at a place its copy has, or run a verify session on the topic (Wiki: new verify), which reads each citation and proposes the fix",
+      fix: "cite the source note at a place its copy has, or run a verify session on the page (Wiki: new verify), which reads each citation and proposes the fix",
     });
   }
   return findings;

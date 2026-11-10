@@ -1,14 +1,16 @@
 import { basename, linkTarget } from "../document/document.js";
 import { excerpt, protectedLost, type ProtectedMap } from "../document/protected.js";
+import { validate } from "../document/schema.js";
 import { figureMarkers } from "./figures.js";
+import { sectionProblems, templateChecks, templateSchema } from "./templates.js";
 import { normalizeName } from "./tokens.js";
 import type { Note, Wiki } from "./wiki.js";
 
 export interface Finding {
   path: string;
   check: string;
-  /** `error`: a promise with the `lint` check is unmet. `warning`: worth a look. */
-  severity: "error" | "warning";
+  /** `error`: a promise with the `lint` check is unmet. `warning`: worth a look. `info`: a to-do, such as a stub to write. */
+  severity: "error" | "warning" | "info";
   message: string;
   fix: string;
 }
@@ -20,13 +22,13 @@ export interface LintOptions {
   folder?: string;
 }
 
-/** The typed notes the wiki maintains, and that lint holds to their form. */
-const KNOWLEDGE = new Set(["topic", "source"]);
+/** What the `kind` of a topic before yami 0.24 became. */
+const KIND_TYPES: Record<string, string> = { concept: "topic", entity: "topic", overview: "portal" };
 
 /**
  * Phrases that make the source the subject of a sentence, which an encyclopedia article never does: the claim
  * comes first, and the source goes in the parentheses after it. The source note's Summary is allowed to be about
- * the source, so only topics are checked.
+ * the source, so only pages are checked.
  */
 const SOURCE_NOUN = "(?:slides?|lectures?|papers?|chapters?|videos?|textbook|course|document|notes|deck|presentation|authors?|instructor|professor|speaker|tutorial|article|book|talk)";
 const META_VOICE = [
@@ -39,7 +41,7 @@ const META_VOICE = [
   /\bnote that\b/i,
 ];
 
-/** The phrases of `META_VOICE` in a topic's body, outside its code blocks and its Notes section, each once. */
+/** The phrases of `META_VOICE` in a page's body, outside its code blocks and its Notes section, each once. */
 export function metaVoice(body: string): string[] {
   const kept: string[] = [];
   let fence: string | undefined;
@@ -74,7 +76,12 @@ export function selectNotes(wiki: Wiki, options: LintOptions = {}): Note[] {
   return wiki.notes.filter((note) => (!wanted.size || wanted.has(note.path)) && (!folder || note.path.startsWith(`${folder}/`)));
 }
 
-/** The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions, uncited sources, orphans, topics with figures still to make, topics in the voice of a report on their source, and notes that lost a text a person protected. */
+/**
+ * The health of the notes: properties that do not parse, dead links, duplicate names, missing descriptions,
+ * pages that their template does not fit (its properties, its sections, and its checks), stubs, uncited
+ * sources, orphans, pages with figures still to make, pages in the voice of a report on their source, and notes
+ * that lost a text a person protected.
+ */
 export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedMap): Finding[] {
   const findings: Finding[] = [];
   const add = (note: Note, check: string, severity: Finding["severity"], message: string, fix: string) =>
@@ -111,11 +118,46 @@ export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedM
     if (others.size) {
       add(note, "duplicate-name", "warning", `shares a name or alias with ${[...others].join(", ")}; a link by name is ambiguous`, "rename one, or drop the alias");
     }
-    if (!note.type || !KNOWLEDGE.has(note.type)) continue;
+    const page = wiki.isPage(note);
+    const inSources = note.path.startsWith(`${wiki.folders.sources}/`);
+    if (page && note.type === "source") {
+      add(note, "misplaced", "warning", `is a source in ${wiki.folders.pages}/, where the pages are`, `move it to ${wiki.folders.sources}/, or give it the type of a page's template`);
+      continue;
+    }
+    if (inSources && note.type !== "source") {
+      add(note, "misplaced", "warning", `has the type ${String(note.type ?? "none")} in ${wiki.folders.sources}/, where only sources are`, `move a page to ${wiki.folders.pages}/; a source has type: source`);
+      continue;
+    }
+    if (!page && note.type !== "source") continue;
     if (!note.description.trim()) add(note, "no-description", "error", "has no description", "add a one-sentence description property");
-    if (note.type === "topic") {
-      if (!note.links.some((path) => wiki.note(path)?.type === "source")) add(note, "no-sources", "warning", "cites no source", "link the sources of its claims in the sources property");
-      if (!note.backlinks.length) add(note, "orphan", "warning", "no note links to it", "link it from a related topic");
+    const template = page ? wiki.templateOf(note) : wiki.template("source");
+    if (page && !template) {
+      const problem = wiki.templateProblems.find((p) => p.path.startsWith(`${wiki.folders.templates}/${note.type}/`));
+      add(note, "unknown-template", "warning", `has the type ${String(note.type)}, which names no template${problem ? `: ${problem.path} has a problem` : ""}`, problem ? `fix the template: ${problem.message}` : `set type to one of ${wiki.templateNames().filter((n) => n !== "source").join(", ")}, or add the template to ${wiki.folders.templates}/`);
+    }
+    if (template && !note.problem) {
+      for (const error of validate({ ...note.properties, type: template.name }, templateSchema(template))) {
+        if (error !== "description is missing") add(note, "bad-property", "warning", `${error}, as the ${template.name} template has it`, `fix the property, or change the template in ${template.path}`);
+      }
+      if (page || note.properties.status !== "pending") {
+        for (const problem of sectionProblems(note.body, template)) add(note, "missing-section", "warning", problem, `add the sections the template asks for, in its order; ${template.path} says how to write each`);
+      }
+      for (const name of template.checks) {
+        const check = templateChecks[name]!;
+        for (const message of check.run(wiki, note)) add(note, name, "warning", message, check.fix);
+      }
+    }
+    if (page && typeof note.properties.kind === "string" && !(template && "kind" in template.properties)) {
+      const type = KIND_TYPES[note.properties.kind];
+      add(note, "kind-retired", "info", `has kind: ${note.properties.kind}; the template in type says what kind of page it is now`, type ? `set type: ${type}, and remove kind` : "set type to its template, and remove kind");
+    }
+    if (page && note.type === "stub") {
+      const becomes = typeof note.properties.becomes === "string" ? note.properties.becomes : undefined;
+      add(note, "stub", "info", `is a stub${becomes ? `, which becomes: ${becomes}` : ""}`, `write it as a page of ${becomes && wiki.template(becomes) ? `the ${becomes} template` : "its template"}: set type, and write the template's sections`);
+    }
+    if (page) {
+      if (template?.cites && !note.links.some((path) => wiki.note(path)?.type === "source")) add(note, "no-sources", "warning", "cites no source", "link the sources of its claims in the sources property");
+      if (!note.backlinks.length) add(note, "orphan", "warning", "no note links to it", "link it from a related page");
       const figures = figureMarkers(note.body);
       if (figures.length) {
         add(note, "figure-missing", "warning", `has ${figures.length} figure${figures.length === 1 ? "" : "s"} to make: ${figures.map((f) => `"${f.shows}"`).join(", ")}`, "run a figures session on it (Wiki: new figures), which draws each figure and replaces the marker with its embed");
@@ -129,8 +171,8 @@ export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedM
         add(note, "meta-voice", "warning", `speaks of its source or its reader instead of its subject: ${phrases.map((p) => `"${p}"`).join(", ")}`, "state the claim, and put the citation in parentheses after it; the source note's Summary is the place to describe the source");
       }
     }
-    if (note.type === "source" && !note.backlinks.some((path) => wiki.note(path)?.type === "topic")) {
-      add(note, "uncited", "warning", "no topic cites it", "absorb it: write or extend the topics it supports, and cite it there");
+    if (note.type === "source" && !note.backlinks.some((path) => wiki.isPage(path))) {
+      add(note, "uncited", "warning", "no page cites it", "absorb it: write or extend the pages it supports, and cite it there");
     }
   }
   return findings;

@@ -49,7 +49,7 @@ describe("OllamaEmbedder", () => {
     const root = await mkdtemp(join(tmpdir(), "yami-ollama-"));
     try {
       const vault = new FsVault(root);
-      await vault.write("wiki/topics/Bread.md", "---\ntype: topic\ndescription: Bread.\n---\nFlour and water.\n");
+      await vault.write("wiki/pages/Bread.md", "---\ntype: topic\ndescription: Bread.\n---\nFlour and water.\n");
       const wiki = new Wiki(vault);
       expect(wiki.embedder).toBeUndefined();
       expect(await wiki.vectors()).toBeUndefined();
@@ -75,7 +75,7 @@ describe("hybrid with an embedder that fails", () => {
     const root = await mkdtemp(join(tmpdir(), "yami-ollama-"));
     try {
       const vault = new FsVault(root);
-      await vault.write("wiki/topics/Bread.md", "---\ntype: topic\ndescription: Bread.\n---\nFlour and water make bread.\n");
+      await vault.write("wiki/pages/Bread.md", "---\ntype: topic\ndescription: Bread.\n---\nFlour and water make bread.\n");
       const wiki = new Wiki(vault, { embedder: new OllamaEmbedder({ fetch: (async () => { throw new TypeError("fetch failed"); }) as typeof fetch }) });
       const hits = await wiki.search("bread", { algorithm: "hybrid" });
       expect(hits[0]!.why).toContain("lexical (embedder failed)");

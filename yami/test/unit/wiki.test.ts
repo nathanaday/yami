@@ -11,7 +11,7 @@ import { CHANGE_STATUSES } from "../../src/document/index.js";
 import { FsVault, testYami } from "../../src/testing/index.js";
 import { DEFAULT_FOLDERS } from "../../src/document/index.js";
 
-const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 const linksOfSession = (value: unknown) => (value as string[]).map(linkTarget);
 
@@ -38,10 +38,10 @@ const note = (path: string, properties: Record<string, unknown>, body: string) =
 
 /** A small vault: two clusters of notes, linked within each cluster, and one bridge. */
 async function fixture() {
-  await note(`${TOPICS}/Codex harness.md`, { type: "topic", description: "How Yami runs Codex.", tags: ["yami/agent"], sources: [link(`${SOURCES}/codex-notes.md`)] }, "## What it is\n\nThe adapter runs app-server over stdio ([[codex-notes]]). See [[Interrupt]] and [[Claude harness]].\n");
+  await note(`${TOPICS}/Codex harness.md`, { type: "topic", description: "How Yami runs Codex.", tags: ["yami/agent"], sources: [link(`${SOURCES}/codex-notes.md`)] }, "## Definition\n\nThe adapter runs app-server over stdio ([[codex-notes]]).\n\n## Explanation\n\nSee [[Interrupt]] and [[Claude harness]].\n\n## Related\n\n## Sources\n\n## Notes\n");
   await note(`${TOPICS}/Claude harness.md`, { type: "topic", description: "How Yami runs Claude Code.", tags: ["yami/agent"], sources: [link(`${SOURCES}/codex-notes.md`)] }, "## What it is\n\nOne process for each session ([[codex-notes]]). It has a stall watchdog. See [[Interrupt]].\n");
   await note(`${TOPICS}/Interrupt.md`, { type: "topic", description: "Stopping a turn in either harness.", tags: ["yami/agent"], sources: [link(`${SOURCES}/codex-notes.md`)] }, "## Definition\n\nAn interrupt stops the current turn ([[codex-notes]]). Codex stops its server; see [[Codex harness]].\n");
-  await note(`${SOURCES}/codex-notes.md`, { type: "source", description: "Notes on the Codex app-server protocol.", tags: ["yami/agent"], file: "[[attachments/codex.pdf]]", status: "absorbed" }, "![[attachments/codex.pdf]]\n\n## Summary\n\nThe protocol is JSON-RPC over stdio.\n");
+  await note(`${SOURCES}/codex-notes.md`, { type: "source", description: "Notes on the Codex app-server protocol.", tags: ["yami/agent"], file: "[[attachments/codex.pdf]]", status: "absorbed" }, "![[attachments/codex.pdf]]\n\n## Summary\n\nThe protocol is JSON-RPC over stdio.\n\n## Structure\n\n## Notes\n");
   await note(`${TOPICS}/Sourdough.md`, { type: "topic", description: "Bread from a wild yeast starter.", tags: ["cooking/bread"], sources: [] }, "## Definition\n\nA starter of flour and water ferments. See [[Levain]].\n");
   await note(`${TOPICS}/Levain.md`, { type: "topic", description: "A sourdough starter, in the French usage.", tags: ["cooking/bread"], aliases: ["Starter"], sources: [] }, "## Definition\n\nLevain is the starter ([[Sourdough]]).\n");
   await note("journal/2026-10-14.md", {}, "Baked [[Sourdough]] today. Codex turns can be slow.\n");
@@ -90,7 +90,7 @@ describe("Wiki index", () => {
     expect(wiki.notes.map((n) => n.path)).not.toContain("conversations/old chat.md");
     expect(wiki.notes).toHaveLength(7);
     const codex = wiki.note(`${TOPICS}/Codex harness.md`)!;
-    expect(codex.links.sort()).toEqual([`${SOURCES}/codex-notes.md`, `${TOPICS}/Claude harness.md`, `${TOPICS}/Interrupt.md`]);
+    expect(codex.links.sort()).toEqual([`${TOPICS}/Claude harness.md`, `${TOPICS}/Interrupt.md`, `${SOURCES}/codex-notes.md`]);
     expect(wiki.note(`${TOPICS}/Interrupt.md`)!.backlinks.sort()).toEqual([`${TOPICS}/Claude harness.md`, `${TOPICS}/Codex harness.md`]);
     expect(wiki.note(`${TOPICS}/Sourdough.md`)!.backlinks).toContain("journal/2026-10-14.md");
     expect(wiki.resolve("[[Levain|the starter]]")).toBe(`${TOPICS}/Levain.md`);
@@ -257,13 +257,13 @@ describe("lint", () => {
     await wiki.refresh();
     const findings = await wiki.lint();
     const of = (path: string) => findings.filter((f) => f.path === path).map((f) => f.check).sort();
-    expect(of(`${TOPICS}/Broken.md`)).toEqual(["dead-link", "no-description", "no-sources", "orphan"]);
+    expect(of(`${TOPICS}/Broken.md`)).toEqual(["dead-link", "missing-section", "no-description", "no-sources", "orphan"]);
     expect(of(`${SOURCES}/unread.md`)).toEqual(["uncited"]);
     // The link [[Levain]] now resolves to the shorter path, other/Levain.md, so the topic lost its backlink: what duplicate-name warns about.
-    expect(of(`${TOPICS}/Levain.md`)).toEqual(["duplicate-name", "no-sources", "orphan"]);
+    expect(of(`${TOPICS}/Levain.md`)).toEqual(["duplicate-name", "missing-section", "no-sources", "orphan"]);
     expect(of(`${TOPICS}/Codex harness.md`)).toEqual([]);
     expect(findings.find((f) => f.check === "dead-link")).toMatchObject({ severity: "error", message: "links [[Nowhere]], which is not a note" });
-    expect(await wiki.lint({ paths: ["[[Broken]]"] })).toHaveLength(4);
+    expect(await wiki.lint({ paths: ["[[Broken]]"] })).toHaveLength(5);
     expect((await wiki.lint({ folder: SOURCES })).map((f) => f.path)).toEqual([`${SOURCES}/unread.md`]);
   });
 
@@ -530,7 +530,7 @@ describe("a note whose properties do not parse", () => {
     expect(findings).toEqual([
       expect.objectContaining({ path: "tool/old.md", check: "bad-properties", severity: "error", message: expect.stringMatching(/^its properties do not parse: Nested mappings/) }),
     ]);
-    expect((await wiki.lint({ folder: "wiki/topics" })).some((f) => f.check === "bad-properties")).toBe(false);
+    expect((await wiki.lint({ folder: "wiki/pages" })).some((f) => f.check === "bad-properties")).toBe(false);
   });
 
   it("names the note when a read of it fails", async () => {
@@ -548,13 +548,13 @@ describe("the wiki module", () => {
   it("installs its documents and serves search, match, and lint as tools", async () => {
     await fixture();
     const { yami, ingest } = await enabled();
-    for (const file of ["internal/wiki/skills/ingest/SKILL.md", "internal/wiki/agents/extractor/AGENT.md", "internal/wiki/agents/drafter/AGENT.md", "internal/wiki/skills/ingest/page-forms.md", "internal/wiki/promises/sources-absorbed/PROMISE.md"]) {
+    for (const file of ["internal/wiki/skills/ingest/SKILL.md", "internal/wiki/agents/extractor/AGENT.md", "internal/wiki/agents/drafter/AGENT.md", "internal/wiki/skills/ingest/page-rules.md", "internal/wiki/templates/event/TEMPLATE.md", "internal/wiki/promises/sources-absorbed/PROMISE.md"]) {
       expect(await vault.exists(file), file).toBe(true);
     }
     const { path } = await ingest.create({ name: "Ingest codex", exact: true, fields: { sources: [link(`${SOURCES}/codex-notes.md`)] } });
     expect((await readDocument(vault, path)).properties.sources).toEqual([link(`${SOURCES}/codex-notes.md`)]);
     const set = { tools: yami.tools().tools.filter((t) => t.name.startsWith("wiki_")) };
-    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"]);
+    expect(set.tools.map((t) => t.name)).toEqual(["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_templates", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"]);
     const signal = new AbortController().signal;
     const search = JSON.parse((await runTool(set.tools[0]!, { text: "codex harness", limit: 1 }, signal)).text);
     expect(search.hits[0].path).toBe(`${TOPICS}/Codex harness.md`);
@@ -651,12 +651,12 @@ describe("change", () => {
       expect.arrayContaining([
         "the plan needs a title",
         expect.stringContaining("write 1 (create notes/Outside.md): the path must be a note under"),
-        "write 2 (create wiki/topics/Levain.md): the note exists; use modify",
-        "write 3 (create wiki/topics/Blank.md): description is empty",
-        "write 4 (modify wiki/topics/Missing.md): no note at this path",
-        "write 5 (modify wiki/topics/Sourdough.md): a modify changes properties or the body",
-        "write 6 (remove wiki/topics/Sourdough.md): the plan writes this note twice",
-        "write 7 (create wiki/topics/Bad status.md): status must be one of draft, stable, contested, deprecated",
+        "write 2 (create wiki/pages/Levain.md): the note exists; use modify",
+        "write 3 (create wiki/pages/Blank.md): description is empty",
+        "write 4 (modify wiki/pages/Missing.md): no note at this path",
+        "write 5 (modify wiki/pages/Sourdough.md): a modify changes properties or the body",
+        "write 6 (remove wiki/pages/Sourdough.md): the plan writes this note twice",
+        "write 7 (create wiki/pages/Bad status.md): status must be one of draft, stable, contested, deprecated",
       ]),
     );
     expect(await wiki.versions()).toEqual([]);
@@ -674,7 +674,7 @@ describe("change", () => {
       creates: 1,
       modifies: 1,
       removes: 1,
-      warnings: ["wiki/topics/App-server protocol.md links [[Nowhere]], which is not a note"],
+      warnings: ["wiki/pages/App-server protocol.md has no ## Explanation, ## Related, ## Sources, ## Notes sections, which the topic template asks for", "wiki/sources/codex-notes.md has no ## Structure, ## Notes sections, which the source template asks for", "wiki/pages/App-server protocol.md links [[Nowhere]], which is not a note"],
     });
 
     // Nothing under wiki/ changed, and there is no version.
@@ -687,11 +687,11 @@ describe("change", () => {
     const change = await readDocument(vault, result.path);
     expect(change.properties).toEqual({ type: "change", module: "wiki", title: "Ingest the codex notes", status: "proposed", creates: 1, modifies: 1, removes: 1, session: link(sessionPath), created: expect.any(String) });
     expect(change.body).toContain("# Ingest the codex notes\n\nWaiting for approval. A person applies it with Wiki: approve this change, or refuses it with Wiki: reject this change.\n\n## Summary");
-    expect(change.body).toContain("- **create** [[wiki/topics/App-server protocol|App-server protocol]] · the source explains it and no topic does");
+    expect(change.body).toContain("- **create** [[wiki/pages/App-server protocol|App-server protocol]] · the source explains it and no topic does");
     expect(change.body).toContain("- **remove** Sourdough · off topic");
     expect(change.body).toContain("Adds the protocol topic");
     expect(change.body).toContain("### modify · wiki/sources/codex-notes.md\n\nabsorbed\n\n<!-- hash: ");
-    expect(change.body).toContain("### remove · wiki/topics/Sourdough.md\n\noff topic\n\n<!-- hash: ");
+    expect(change.body).toContain("### remove · wiki/pages/Sourdough.md\n\noff topic\n\n<!-- hash: ");
     expect(change.body).toContain("``````markdown\n---\ntype: topic\n");
 
     // The document reads back as the plan, each note whole: the defaults of a create, the merge of a modify.
@@ -716,7 +716,7 @@ describe("change", () => {
     const sessionPath = await session(wiki);
     const { path } = await wiki.change(codexPlan(sessionPath));
     const result = await wiki.approve(path);
-    expect(result).toEqual({ path, title: "Ingest the codex notes", status: "applied", before: 1, after: 2, creates: 1, modifies: 1, removes: 1, warnings: ["wiki/topics/App-server protocol.md links [[Nowhere]], which is not a note"] });
+    expect(result).toEqual({ path, title: "Ingest the codex notes", status: "applied", before: 1, after: 2, creates: 1, modifies: 1, removes: 1, warnings: ["wiki/pages/App-server protocol.md has no ## Explanation, ## Related, ## Sources, ## Notes sections, which the topic template asks for", "wiki/sources/codex-notes.md has no ## Structure, ## Notes sections, which the source template asks for", "wiki/pages/App-server protocol.md links [[Nowhere]], which is not a note"] });
 
     const created = await readDocument(vault, `${TOPICS}/App-server protocol.md`);
     expect(created.properties).toMatchObject({ type: "topic", status: "draft", kind: "concept", description: "The JSON-RPC protocol of codex app-server." });
@@ -762,13 +762,13 @@ describe("change", () => {
     await note(`${TOPICS}/New.md`, { type: "topic", description: "Made by hand in between." }, "x");
     const error = await wiki.approve(path).catch((e: Error) => e);
     expect(error).toBeInstanceOf(InvalidPlan);
-    expect((error as InvalidPlan).problems).toEqual(["write 1 (create wiki/topics/New.md): the note exists; use modify"]);
+    expect((error as InvalidPlan).problems).toEqual(["write 1 (create wiki/pages/New.md): the note exists; use modify"]);
     expect((await readDocument(vault, path)).properties.status).toBe("proposed");
     expect(await wiki.versions()).toEqual([]);
 
     const { path: gone } = await wiki.change({ title: "Gone", writes: [{ op: "modify", path: `${TOPICS}/Levain.md`, body: "y" }] });
     await vault.remove(`${TOPICS}/Levain.md`);
-    await expect(wiki.approve(gone)).rejects.toThrow("write 1 (modify wiki/topics/Levain.md): no note at this path");
+    await expect(wiki.approve(gone)).rejects.toThrow("write 1 (modify wiki/pages/Levain.md): no note at this path");
     expect(await wiki.changes()).toHaveLength(2);
   });
 
@@ -804,20 +804,20 @@ describe("change", () => {
     const wiki = await fixture();
     const { path } = await wiki.change(create("New"));
     const text = await vault.read(path);
-    await vault.write(path, text.replace("### create · wiki/topics/New.md", "### create · notes/New.md"));
+    await vault.write(path, text.replace("### create · wiki/pages/New.md", "### create · notes/New.md"));
     await expect(wiki.approve(path)).rejects.toThrow("The change document ");
-    await expect(wiki.approve(path)).rejects.toThrow("does not parse: create notes/New.md is not a note under wiki/topics/ or wiki/sources/. Its Writes section is what an approval applies");
+    await expect(wiki.approve(path)).rejects.toThrow("does not parse: create notes/New.md is not a note under wiki/pages/ or wiki/sources/. Its Writes section is what an approval applies");
     await vault.write(path, text.replace(/`{5,}\n$/, ""));
     await expect(wiki.changeDetails(path)).rejects.toThrow("has a markdown block with no end");
     await vault.write(path, text.replace("---\ntype: topic", "---\ntype: topic: bad"));
-    await expect(wiki.approve(path)).rejects.toThrow("the note of create wiki/topics/New.md:");
+    await expect(wiki.approve(path)).rejects.toThrow("the note of create wiki/pages/New.md:");
     await vault.write(path, text.replace(/## Writes[\s\S]*$/, "## Writes\n"));
     await expect(wiki.approve(path)).rejects.toThrow("its Writes section holds no write");
     expect((await readDocument(vault, path)).properties.status).toBe("proposed");
     expect(await vault.exists(`${TOPICS}/New.md`)).toBe(false);
     expect(await wiki.versions()).toEqual([]);
     await expect(wiki.approve("internal/wiki/changes/none.md")).rejects.toThrow("There is no change document at internal/wiki/changes/none.md.");
-    await expect(wiki.approve(`${TOPICS}/Levain.md`)).rejects.toThrow("wiki/topics/Levain.md is not a change document.");
+    await expect(wiki.approve(`${TOPICS}/Levain.md`)).rejects.toThrow("wiki/pages/Levain.md is not a change document.");
   });
 
   it("gives the words for each status, and the document's status line starts with them", () => {
@@ -1162,7 +1162,7 @@ describe("links in a table", () => {
       title: "Add a table",
       writes: [{ op: "create", path: `${TOPICS}/Steps.md`, properties: { description: "Steps." }, body: table }],
     });
-    expect(result.warnings).toEqual(["wiki/topics/Steps.md links [[Nowhere]], which is not a note"]);
+    expect(result.warnings.filter((w) => w.includes(" links "))).toEqual(["wiki/pages/Steps.md links [[Nowhere]], which is not a note"]);
   });
 });
 
@@ -1195,14 +1195,14 @@ describe("links to notes the index leaves out", () => {
       title: "Link the session",
       writes: [{ op: "create", path: `${TOPICS}/Linked.md`, properties: { description: "Links." }, body: "From [[internal/wiki/sessions/Ingest codex]] and [[Nowhere]]." }],
     });
-    expect(result.warnings).toEqual(["wiki/topics/Linked.md links [[Nowhere]], which is not a note"]);
+    expect(result.warnings.filter((w) => w.includes(" links "))).toEqual(["wiki/pages/Linked.md links [[Nowhere]], which is not a note"]);
   });
 });
 
 describe("copies, agent files, and base hashes", () => {
   it("leaves a copy and a module's agent files out of the index", async () => {
     const wiki = await fixture();
-    await note("librarian/x/Levain (checkout).md", { copy_of: "[[wiki/topics/Levain|Levain]]" }, "Levain is the starter.\n");
+    await note("librarian/x/Levain (checkout).md", { copy_of: "[[wiki/pages/Levain|Levain]]" }, "Levain is the starter.\n");
     await vault.write("internal/threads/agents/validator.md", "---\nname: validator\n---\nValidate the starter.\n");
     await wiki.refresh();
     expect(wiki.notes.map((n) => n.path)).not.toContain("librarian/x/Levain (checkout).md");

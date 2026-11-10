@@ -119,7 +119,7 @@ export function mapRange(delta: LineDelta, range: LineRange): LineRange | undefi
  */
 export function movedCitations(wiki: Wiki, oldSource: string, delta: LineDelta | undefined): MovedCitation[] {
   const out: MovedCitation[] = [];
-  const topics = wiki.notes.filter((note): note is Note => note.type === "topic" && note.links.includes(oldSource));
+  const topics = wiki.notes.filter((note): note is Note => wiki.isPage(note) && note.links.includes(oldSource));
   for (const topic of topics) {
     for (const citation of citations(topic.body)) {
       if (wiki.resolve(citation.target) !== oldSource) continue;

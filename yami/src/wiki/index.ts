@@ -49,6 +49,23 @@ export { CITATION, citations, claimBefore, lintCitations, parseLocator, passage,
 export { cosine, EmbeddingCache, OLLAMA_BATCH, OllamaEmbedder, VoyageEmbedder, type Embedder, type OllamaOptions, type VoyageOptions } from "./embed.js";
 export { FIGURE_MARKER, figureMarker, figureMarkers, fromBase64, MAX_PNG_BYTES, MAX_SVG_BYTES, pngProblem, svgProblem, type FigureMarker } from "./figures.js";
 export { lint, metaVoice, selectNotes, type Finding, type LintOptions } from "./lint.js";
+export { BUILT_IN_TEMPLATES } from "./template-texts.js";
+export {
+  DEFAULT_TEMPLATE,
+  pageSkeleton,
+  parseTemplate,
+  readTemplates,
+  RESERVED_TEMPLATE_NAMES,
+  sectionHeadings,
+  sectionProblems,
+  starterTemplate,
+  templateChecks,
+  templatePath,
+  templateSchema,
+  type Template,
+  type TemplateCheck,
+  type TemplateProblem,
+} from "./templates.js";
 export type { Neighbors, TagCount, TagView } from "./tags.js";
 export { match, THRESHOLD, type Match, type MatchOptions, type Neighbor } from "./match.js";
 export {
