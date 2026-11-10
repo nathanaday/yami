@@ -410,21 +410,51 @@ export function addWikiCommands(yami: ObsidianYami): void {
   });
   addCommand(plugin, {
     id: "wiki-export",
-    name: "Wiki: export a topic",
+    name: "Wiki: export a page",
     callback: () =>
       yami.notify(
         (async () => {
           await wiki.ensure();
-          const topics = wiki.notes.filter((note) => note.type === "topic").sort((a, b) => a.name.localeCompare(b.name));
-          if (!topics.length) return "The wiki has no topic to export.";
+          const topics = wiki.notes.filter((note) => wiki.isPage(note)).sort((a, b) => a.name.localeCompare(b.name));
+          if (!topics.length) return "The wiki has no page to export.";
           const topic = await yami.pick(topics, (note) => `${note.name}${note.description ? ` · ${note.description}` : ""}`, EXPORT_PLACEHOLDER);
           if (!topic) return;
           const module = yami.module(WIKI_ID) as WikiModule;
           new WikiExportModal(app, module, topic.path, (written) => {
             const inVault = !/^([A-Za-z]:[\\/]|[\\/])/.test(written.folder);
-            void yami.notify(Promise.resolve({ message: `Exported ${written.topics.length} topic(s) and ${written.sources.length} source(s) to ${written.folder}.`, open: inVault ? `${written.folder.replace(/\/+$/, "")}/${written.readme}` : undefined }));
+            void yami.notify(Promise.resolve({ message: `Exported ${written.topics.length} page(s) and ${written.sources.length} source(s) to ${written.folder}.`, open: inVault ? `${written.folder.replace(/\/+$/, "")}/${written.readme}` : undefined }));
           }).open();
         })(),
+      ),
+  });
+  addCommand(plugin, {
+    id: "wiki-new-page",
+    name: "Wiki: new page",
+    callback: () =>
+      yami.notify(
+        (async () => {
+          const templates = (await wiki.templates()).filter((t) => t.name !== "source");
+          const template = await yami.pick(templates, (t) => `${t.name} · ${t.description}`, NEW_PAGE_TEMPLATE);
+          if (!template) return;
+          const name = await yami.ask(NEW_PAGE_NAME, `Create the ${template.name}`);
+          if (!name) return;
+          const description = await yami.ask(NEW_PAGE_DESCRIPTION, `Create ${name}`);
+          if (!description) return;
+          const path = await (yami.module(WIKI_ID) as WikiModule).newPage({ template: template.name, name, description });
+          return { message: `Created ${path} from the ${template.name} template. ${template.path} says how to write each section.`, open: path };
+        })(),
+      ),
+  });
+  addCommand(plugin, {
+    id: "wiki-new-template",
+    name: "Wiki: new template",
+    callback: () =>
+      yami.notify(
+        yami.ask(NEW_TEMPLATE_NAME, "Create the template").then(async (name) => {
+          if (!name) return;
+          const path = await (yami.module(WIKI_ID) as WikiModule).newTemplate(name);
+          return { message: `Created the template ${path}. Its name is the type of its pages.`, open: path };
+        }),
       ),
   });
   addCommand(plugin, {
@@ -561,7 +591,11 @@ export const PROTECTED_LOCKED = "Protected text is locked: an edit inside it is 
 export const PROTECTED_BLOCKED = "This text is protected. Run Toggle editing of protected text to edit it.";
 
 /** The texts of the export and import prompts: public API, as the README table "The prompts" has them. */
-export const EXPORT_PLACEHOLDER = "The topic to export around";
+export const EXPORT_PLACEHOLDER = "The page to export around";
+export const NEW_PAGE_TEMPLATE = "The template of the new page";
+export const NEW_PAGE_NAME = "The name of the new page, which is its title";
+export const NEW_PAGE_DESCRIPTION = "One sentence on what its subject is";
+export const NEW_TEMPLATE_NAME = "The name of the new template, such as person";
 export const IMPORT_PLACEHOLDER = "A folder of the vault, an absolute path, or a GitHub repository URL";
 export const IMPORT_HINT = "Import the bundle";
 /** The texts of the reject prompt: public API, as the README table "The prompts" has them. */

@@ -56,18 +56,36 @@ export async function moveFolders(yami: Yami, settings: Partial<FolderSettings>)
   }
   const move = (path: string) => movedPath(movedPath(path, from.internal, to.internal), from.wiki, to.wiki);
   const installed = await moveRecords(vault, to, move);
-  if (moved.length) {
-    // What Yami installed it writes again for the new folders at the next start; an edit here would read as a person's.
-    for (const path of await vault.list("")) {
-      if (installed.has(path)) continue;
-      const text = await vault.read(path);
-      const links = moveLinks(text, move);
-      const next = path.startsWith(`${to.changes}/`) ? moveWritePaths(links, move) : links;
-      if (next !== text) await vault.write(path, next);
-    }
-  }
+  if (moved.length) await moveNoteLinks(vault, to, move, installed);
   await vault.write(FOLDER_SETTINGS, folderSettingsText(to.settings));
   return { from: from.settings, to: to.settings, moved };
+}
+
+/**
+ * Moves the pages of a wiki from before yami 0.24, which kept them in `<wiki>/topics/`, to `<wiki>/pages/`,
+ * with every link into them, the protected text map, and the notes that each change document names, as
+ * `moveFolders` does. It does nothing, and returns false, when the vault has no topics folder, or has a pages
+ * folder already. The wiki module calls it at each start, before it installs its documents.
+ */
+export async function moveLegacyTopics(vault: Vault): Promise<boolean> {
+  const { legacyTopics, pages } = vault.folders;
+  if (!(await vault.exists(legacyTopics)) || (await vault.exists(pages))) return false;
+  await vault.rename(legacyTopics, pages);
+  const move = (path: string) => movedPath(path, legacyTopics, pages);
+  await moveNoteLinks(vault, vault.folders, move, await moveRecords(vault, vault.folders, move));
+  return true;
+}
+
+/** Moves the links of every note but the ones Yami installed, and the paths that each change document names. */
+async function moveNoteLinks(vault: Vault, folders: Folders, move: (path: string) => string, installed: Set<string>): Promise<void> {
+  // What Yami installed it writes again for the new folders at the next start; an edit here would read as a person's.
+  for (const path of await vault.list("")) {
+    if (installed.has(path)) continue;
+    const text = await vault.read(path);
+    const links = moveLinks(text, move);
+    const next = path.startsWith(`${folders.changes}/`) ? moveWritePaths(links, move) : links;
+    if (next !== text) await vault.write(path, next);
+  }
 }
 
 const WIKILINK = /(!?\[\[)([^\]|#^\n]+)/g;

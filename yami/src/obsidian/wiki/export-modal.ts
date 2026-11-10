@@ -5,14 +5,14 @@ import { BUNDLE_SIZES, selectBundle, type BundleSize, type WrittenBundle } from 
 
 /** What each size means, in the dropdown. */
 const SIZE_WORDS: Record<BundleSize, string> = {
-  minimal: "the topic alone",
-  small: "up to 8 topics",
-  medium: "up to 25 topics",
-  extensive: "up to 80 topics",
+  minimal: "the page alone",
+  small: "up to 8 pages",
+  medium: "up to 25 pages",
+  extensive: "up to 80 pages",
 };
 
 /**
- * Exports a bundle around a topic: the person picks the size, with the count of topics and sources each
+ * Exports a bundle around a page: the person picks the size, with the count of pages and sources each
  * size would take, and the folder, a vault path or an absolute path, and selects Export. The modal has the
  * class `yami-export`; its size dropdown `.yami-export-size select`, its folder field `.yami-export-folder input`,
  * and its button `.yami-export-run`. `done` gets what was written; `WikiModule.exportBundle` does the work.
@@ -26,7 +26,7 @@ export class WikiExportModal extends Modal {
   constructor(
     app: App,
     private readonly module: WikiModule,
-    /** The topic, as a vault path. */
+    /** The page, as a vault path. */
     private readonly topic: string,
     private readonly done: (written: WrittenBundle) => void,
   ) {
@@ -38,8 +38,8 @@ export class WikiExportModal extends Modal {
   override onOpen(): void {
     const { contentEl } = this;
     this.setTitle(`Export ${basename(this.topic)}`);
-    contentEl.createEl("p", { cls: "yami-export-lead", text: "A bundle is a folder of topics and sources in the wiki's layout, with the originals the sources embed and a README. Another vault imports it with Wiki: import a bundle." });
-    const size = new Setting(contentEl).setName("Size").setDesc("How far to reach from the topic over its links. The sources the topics cite always come along.");
+    contentEl.createEl("p", { cls: "yami-export-lead", text: "A bundle is a folder of pages and sources in the wiki's layout, with the originals the sources embed and a README. Another vault imports it with Wiki: import a bundle." });
+    const size = new Setting(contentEl).setName("Size").setDesc("How far to reach from the page over its links. The sources the pages cite always come along.");
     size.settingEl.addClass("yami-export-size");
     size.addDropdown((dropdown) => {
       for (const option of BUNDLE_SIZES) dropdown.addOption(option, this.label(option));
@@ -93,7 +93,7 @@ export class WikiExportModal extends Modal {
     for (const size of BUNDLE_SIZES) {
       try {
         const selection = await selectBundle(this.module.wiki, this.topic, size);
-        this.counts.set(size, `${selection.topics.length} topic${selection.topics.length === 1 ? "" : "s"}, ${selection.sources.length} source${selection.sources.length === 1 ? "" : "s"}`);
+        this.counts.set(size, `${selection.topics.length} page${selection.topics.length === 1 ? "" : "s"}, ${selection.sources.length} source${selection.sources.length === 1 ? "" : "s"}`);
       } catch {
         return;
       }

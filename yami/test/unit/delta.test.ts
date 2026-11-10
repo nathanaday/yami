@@ -8,7 +8,7 @@ import { FsVault, testYami } from "../../src/testing/index.js";
 import { captureSource, changedRuns, CONTEXT_LINES, deltaChunks, lineDelta, mapRange, movedCitations, Wiki } from "../../src/wiki/index.js";
 import { DEFAULT_FOLDERS } from "../../src/document/index.js";
 
-const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 let root = "";
 let vault: FsVault;
@@ -151,7 +151,7 @@ describe("a source that supersedes another", () => {
       expect(result).toMatchObject({ delta: true, supersedes: `${SOURCES}/notes (source).md`, citations: [] });
       expect(await t.vault.read("internal/wiki/skills/ingest/SKILL.md")).toContain("A source that **supersedes** an earlier capture");
       expect(await t.vault.read("internal/wiki/agents/drafter/AGENT.md")).toContain("## A superseded source");
-      expect(await t.vault.read("internal/wiki/skills/ingest/page-forms.md")).toContain("superseded-citation");
+      expect(await t.vault.read("internal/wiki/skills/ingest/page-rules.md")).toContain("superseded-citation");
     } finally {
       t.dispose();
     }

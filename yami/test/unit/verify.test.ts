@@ -7,7 +7,7 @@ import { testYami, type FsVault, type TestYami } from "../../src/testing/index.j
 import { captureSource, type Wiki } from "../../src/wiki/index.js";
 import { DEFAULT_FOLDERS } from "../../src/document/index.js";
 
-const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami;
 let vault: FsVault;
@@ -46,7 +46,7 @@ describe("the citations tool", () => {
     expect(result.citations[0].source).toBe(`${SOURCES}/notes (source).md`);
     expect(result.citations[0].from).toBeUndefined();
     expect(JSON.parse((await runTool(citations, { topic: `${TOPICS}/Decoder.md` }, signal)).text).verified).toBe("2026-01-01T00:00:00");
-    expect(await runTool(citations, { topic: "notes (source)" }, signal)).toMatchObject({ isError: true, text: "notes (source) is not a topic of the wiki." });
+    expect(await runTool(citations, { topic: "notes (source)" }, signal)).toMatchObject({ isError: true, text: "notes (source) is not a page of the wiki." });
   });
 });
 
@@ -60,17 +60,17 @@ describe("the verify flow", () => {
     const skill = await vault.read("internal/wiki/skills/verify/SKILL.md");
     expect(skill).toContain("call `yami_agent` with the agent `verifier`");
     expect(skill).toContain(`at most ${VERIFY_BATCH} in one session`);
-    expect(await vault.read("internal/wiki/skills/ingest/page-forms.md")).toContain("verified:");
+    expect(await vault.read("internal/wiki/skills/ingest/page-rules.md")).toContain("verified:");
     expect(t.yami.problems).toEqual([]);
 
     const session = (await module.verify.create({ name: "Verify", exact: true })).path;
     const created = String((await readDocument(vault, session)).properties.created);
     const check = async (properties: Record<string, unknown>) =>
       runCheck({ path: "p", properties: { check: "verified" }, body: "" }, { vault, wiki, path: session, properties: { created, ...properties } }, module.checks);
-    expect(await check({ topics: [], changes: [] })).toMatchObject({ status: "unmet", detail: expect.stringContaining("no topic is verified") });
-    expect(await check({ topics: ["[[Nowhere]]"], changes: [] })).toMatchObject({ status: "unmet", detail: "topics links Nowhere, which are not notes" });
+    expect(await check({ pages: [], changes: [] })).toMatchObject({ status: "unmet", detail: expect.stringContaining("no page is verified") });
+    expect(await check({ pages: ["[[Nowhere]]"], changes: [] })).toMatchObject({ status: "unmet", detail: "pages links Nowhere, which are not notes" });
     // A date before the session does not count.
-    expect(await check({ topics: [link(`${TOPICS}/Decoder.md`)], changes: [] })).toMatchObject({ status: "unmet", detail: expect.stringContaining("not verified in this session: Decoder") });
+    expect(await check({ pages: [link(`${TOPICS}/Decoder.md`)], changes: [] })).toMatchObject({ status: "unmet", detail: expect.stringContaining("not verified in this session: Decoder") });
 
     const stamp = "2099-01-01T00:00:00";
     const body = (await readDocument(vault, `${TOPICS}/Autoencoder.md`)).body.replace(" It has nine layers ([[notes (source)]], lines 40-41).", "");
@@ -86,11 +86,11 @@ describe("the verify flow", () => {
     const properties = (await readDocument(vault, session)).properties;
     expect(properties.changes).toEqual([link(proposal.path)]);
     // With the field empty, the topics are the ones the standing change modifies.
-    expect(await check({ ...properties, topics: [] })).toMatchObject({ status: "met", detail: "2 topic(s) verified, in the wiki or in the standing changes" });
-    expect(await check({ ...properties, topics: [link(`${TOPICS}/Autoencoder.md`)] })).toMatchObject({ status: "met" });
+    expect(await check({ ...properties, pages: [] })).toMatchObject({ status: "met", detail: "2 page(s) verified, in the wiki or in the standing changes" });
+    expect(await check({ ...properties, pages: [link(`${TOPICS}/Autoencoder.md`)] })).toMatchObject({ status: "met" });
     await wiki.approve(proposal.path);
     await wiki.refresh();
-    expect(await check({ topics: [link(`${TOPICS}/Autoencoder.md`), link(`${TOPICS}/Decoder.md`)], changes: [] })).toMatchObject({ status: "met" });
+    expect(await check({ pages: [link(`${TOPICS}/Autoencoder.md`), link(`${TOPICS}/Decoder.md`)], changes: [] })).toMatchObject({ status: "met" });
     expect((await readDocument(vault, `${TOPICS}/Decoder.md`)).properties.verified).toBe(stamp);
     expect((await wiki.lint()).filter((f) => f.check === "bad-citation")).toEqual([]);
   });

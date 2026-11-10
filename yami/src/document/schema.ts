@@ -12,7 +12,8 @@ export interface Field {
 
 export type Schema = Record<string, Field>;
 
-export const DOCUMENT_TYPES = ["module", "session", "conversation", "topic", "source", "snapshot", "change"] as const;
+/** The types of Yami's own documents. A page of the wiki has a type of its own: the name of its template. */
+export const DOCUMENT_TYPES = ["module", "session", "conversation", "source", "snapshot", "change"] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 export const SESSION_STATES = ["open", "running", "done", "failed", "needs-attention", "stopped"] as const;
@@ -92,6 +93,24 @@ export const FORMS = {
 } as const;
 export type FormKind = keyof typeof FORMS;
 
+/**
+ * `TEMPLATE.md`: a kind of page of the wiki, in `<internal>/wiki/templates/<name>/`. The name is the `type` of
+ * its pages. The body says when to use the template and how to write each section.
+ */
+export const TEMPLATE: Schema = form({
+  /** The template's own properties, in the field form of a schema, beside the properties of every page. */
+  properties: { type: "map" },
+  /** The sections that a page of the template holds, in this order. Other sections may go between them. */
+  sections: { type: "list", default: [] },
+  /** Whether the page's claims cite sources. Default true. */
+  cites: { type: "boolean", default: true },
+  /** The template checks that lint runs on its pages, by name. */
+  checks: { type: "list", default: [] },
+});
+
+/** Where a template is: `<internal>/wiki/templates/<name>/TEMPLATE.md`. Not a form of every module: only the wiki has templates. */
+export const TEMPLATE_FORM = { folder: "templates", file: "TEMPLATE.md", schema: TEMPLATE } as const;
+
 export const SESSION: Schema = {
   type: typed("session"),
   module: { type: "text", required: true },
@@ -136,24 +155,25 @@ export const CONVERSATION: Schema = {
   module: { type: "link" },
 };
 
-export const TOPIC_STATUSES = ["draft", "stable", "contested", "deprecated"] as const;
-export const TOPIC_KINDS = ["concept", "entity", "overview"] as const;
+export const PAGE_STATUSES = ["draft", "stable", "contested", "deprecated"] as const;
 
-/** A note the wiki maintains about one subject. */
-export const TOPIC: Schema = {
-  type: typed("topic"),
+/** The properties of every page of the wiki, whatever its template. A template adds properties of its own. */
+export const PAGE: Schema = {
+  /** The name of the page's template. */
+  type: { type: "text", required: true },
   description: { type: "text", required: true },
   tags: { type: "list", default: [] },
   aliases: { type: "list", default: [] },
-  /** Every source the topic cites. */
+  /** Every source the page cites. */
   sources: links,
-  status: { type: "text", values: TOPIC_STATUSES, default: "draft" },
-  kind: { type: "text", values: TOPIC_KINDS },
+  status: { type: "text", values: PAGE_STATUSES, default: "draft" },
   created: { type: "date" },
   updated: { type: "date" },
+  /** When a verify session last read each citation of the page at its place. */
+  verified: { type: "date" },
 };
 
-export const SOURCE_STATUSES = ["pending", "absorbed"] as const;
+export const SOURCE_STATUSES = ["pending", "absorbed", "superseded"] as const;
 export const AUTHORITIES = ["official", "primary", "secondary", "community", "synthetic", "unknown"] as const;
 
 /** A note that stands for one original the wiki learned from. */
@@ -170,6 +190,8 @@ export const SOURCE: Schema = {
   from: { type: "link" },
   /** The SHA-256 of the captured content. */
   sha256: { type: "text" },
+  /** The earlier capture of the same file, which this one replaces. */
+  supersedes: { type: "link" },
   status: { type: "text", values: SOURCE_STATUSES, default: "pending" },
   authority: { type: "text", values: AUTHORITIES },
   created: { type: "date" },
@@ -219,6 +241,45 @@ export const CHANGE: Schema = {
   /** Why the change failed. */
   error: { type: "text" },
 };
+
+export const FIELD_TYPES: readonly FieldType[] = ["text", "number", "boolean", "date", "list", "link", "links", "map"];
+
+/**
+ * A schema from a document's map of fields, such as a template's `properties`. A field is its type, as in
+ * `location: text`, or a map of `type`, `required`, `default`, and `values`. Each field that does not read
+ * gives a problem, and stays out of the schema.
+ */
+export function parseSchema(map: unknown): { schema: Schema; problems: string[] } {
+  const schema: Schema = {};
+  const problems: string[] = [];
+  if (map === undefined || map === null) return { schema, problems };
+  if (typeof map !== "object" || Array.isArray(map)) return { schema, problems: ["properties must be names with fields, such as date: {type: date, required: true}"] };
+  for (const [name, raw] of Object.entries(map as Record<string, unknown>)) {
+    const spec = typeof raw === "string" ? { type: raw } : raw;
+    if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+      problems.push(`the property ${name} must be a field type, or a map with type`);
+      continue;
+    }
+    const { type, required, values, ...rest } = spec as Record<string, unknown>;
+    const field: Field = { type: type as FieldType };
+    const before = problems.length;
+    if (!FIELD_TYPES.includes(type as FieldType)) problems.push(`the property ${name} has the type ${String(type)}; a type is one of ${FIELD_TYPES.join(", ")}`);
+    if (required !== undefined && typeof required !== "boolean") problems.push(`the property ${name}: required must be true or false`);
+    else if (required) field.required = true;
+    if (values !== undefined) {
+      if (type !== "text" || !Array.isArray(values) || !values.every((v) => typeof v === "string")) problems.push(`the property ${name}: values must be a list of texts, for a text property`);
+      else field.values = values;
+    }
+    if ("default" in rest) {
+      if (FIELD_TYPES.includes(type as FieldType) && !matches(rest.default, type as FieldType)) problems.push(`the property ${name}: its default must be ${describe(type as FieldType)}`);
+      else field.default = rest.default;
+    }
+    const unknown = Object.keys(rest).filter((key) => key !== "default");
+    if (unknown.length) problems.push(`the property ${name} has ${unknown.join(", ")}; a field has only type, required, default, and values`);
+    if (problems.length === before) schema[name] = field;
+  }
+  return { schema, problems };
+}
 
 /** Fills in the default of each field that is missing. */
 export function withDefaults(properties: Properties, schema: Schema): Properties {

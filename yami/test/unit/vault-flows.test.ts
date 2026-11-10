@@ -290,8 +290,8 @@ describe("the wiki's flows", () => {
       ["verify", true, "read-only"],
     ]);
     expect(wiki.flowOf("verify")!.promises.map((p) => p.name)).toEqual(["change-applied", "claims-verified"]);
-    expect(wiki.flowOf("import")!.promises.map((p) => p.name)).toEqual(["change-applied", "bundle-imported", "clean-topics"]);
-    expect(wiki.flowOf("ingest")!.promises.map((p) => p.name)).toEqual(["change-applied", "sources-absorbed", "clean-topics"]);
+    expect(wiki.flowOf("import")!.promises.map((p) => p.name)).toEqual(["change-applied", "bundle-imported", "clean-pages"]);
+    expect(wiki.flowOf("ingest")!.promises.map((p) => p.name)).toEqual(["change-applied", "sources-absorbed", "clean-pages"]);
     expect(wiki.acts().map((a) => a.label)).toEqual(["New checkout", "New figures", "New verify"]);
     expect(await t.vault.read("internal/wiki/sessions.base")).toContain("name: Checkouts");
   });

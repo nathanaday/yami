@@ -7,7 +7,7 @@ import { FsVault } from "../../src/testing/index.js";
 import { captureSource, citations, claimBefore, parseLocator, passage, resolveCitations, sourceExtent, visibleRanges, Wiki } from "../../src/wiki/index.js";
 import { DEFAULT_FOLDERS } from "../../src/document/index.js";
 
-const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
+const { sources: SOURCES, pages: TOPICS } = DEFAULT_FOLDERS;
 
 let root = "";
 let vault: FsVault;

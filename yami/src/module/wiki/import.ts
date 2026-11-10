@@ -11,7 +11,8 @@ export interface StagedNote {
   staged: string;
   /** Where the note goes in the knowledge base. */
   target: string;
-  type: "topic" | "source";
+  /** `source`, or the template of a page. */
+  type: string;
   status: StagedStatus;
   /** The notes of the wiki that stand in the way, or near: a note at the target, one that holds the name, or the neighbors. */
   with: string[];
@@ -83,19 +84,19 @@ export const imported: Check = async (_promise, context) => {
 /** The skill of an import session, `/wiki:import`. */
 export const importSkill = `---
 name: import
-description: "Merge a bundle of topics and sources into the wiki: create the new notes as written, merge each one that collides with a note the wiki has, link the new topics from their neighbors, and propose one change plan. To import from a conversation, call wiki_import, which stages the bundle and starts an import session."
+description: "Merge a bundle of pages and sources into the wiki: create the new notes as written, merge each one that collides with a note the wiki has, link the new pages from their neighbors, and propose one change plan. To import from a conversation, call wiki_import, which stages the bundle and starts an import session."
 ---
 # Import
 
 **In a conversation**, with no import session, do not merge the notes yourself. Call \`wiki_import\` with the bundle: a folder of the vault, an absolute path, or a GitHub repository URL. It stages the notes, creates an import session, and starts its run, which runs this skill; when every note is new and nothing in the wiki is near one, it proposes the change at once and no run is needed. Tell the user the session's name, and that they approve its change in Obsidian. Then end.
 
-**In an import session**, the session's \`staged\` property links the staged notes, in the folder of the session's name, and the session's Import section says where each one stands: \`new\` (nothing in the wiki holds its name), \`near\` (a topic is near it; the section names the neighbors), or \`conflict\` (a note holds its path or its name). The session is read-only: every change to the wiki goes through \`wiki_change\` as one plan. The staged notes are in the wiki's own form already, so \`page-forms.md\` is not needed.
+**In an import session**, the session's \`staged\` property links the staged notes, in the folder of the session's name, and the session's Import section says where each one stands: \`new\` (nothing in the wiki holds its name), \`near\` (a page is near it; the section names the neighbors), or \`conflict\` (a note holds its path or its name). The session is read-only: every change to the wiki goes through \`wiki_change\` as one plan. The staged notes are in the wiki's own form already. A staged page's \`type\` names its template: when this wiki has no template of that name (\`wiki_templates\` lists them), create the page with the template here that fits it, give it that template's properties, and say so in the plan's \`notes\`.
 
 1. **Read the Import section**, then each staged note and each note it stands with.
-2. **New notes.** A \`create\` at the target path, with the staged note's properties and body as written. Do not rewrite them: they are a wiki's own topics, in its voice already. Fix a link that points at a note the bundle did not bring and this wiki does not have: point it at the nearest topic here, or unlink it.
+2. **New notes.** A \`create\` at the target path, with the staged note's properties and body as written. Do not rewrite them: they are a wiki's own pages, in its voice already. Fix a link that points at a note the bundle did not bring and this wiki does not have: point it at the nearest page here, or unlink it.
 3. **Near and conflict.** Read the staged note and the notes it stands with. The same subject: a \`modify\` of the wiki's note that merges the staged note's claims with their citations, keeps the clearer description, and adds the staged note's name as an alias when the names differ; the staged note itself is not created. Another subject with a shared name: create the staged note under a name that tells them apart, and link each from the other's Related section. A note that adds nothing to what the wiki has: leave it out, and name it in the plan's \`notes\` with the reason. With more than four to merge, run the agent \`drafter\` with \`yami_agent\`, one per slice of at most eight: give each the staged notes' paths and the paths of the notes they stand with, and say that the items of a subject are the claims of its staged note, cited as that note cites them.
-4. **Sources.** A staged source is created as written; its original is in the vault already. A source the wiki has already was dropped at the staging, and the topics that cite it still resolve.
-5. **Link the newcomers.** For each new topic, find two or three topics of this wiki that should link it (\`wiki_search\` with its description, \`types: ["topic"]\`), and add a line under their \`## Related\` with a \`modify\`. A topic nobody links is an orphan.
+4. **Sources.** A staged source is created as written; its original is in the vault already. A source the wiki has already was dropped at the staging, and the pages that cite it still resolve.
+5. **Link the newcomers.** For each new page, find two or three pages of this wiki that should link it (\`wiki_search\` with its description, \`types: ["page"]\`), and add a line under their \`## Related\` with a \`modify\`. A page nobody links is an orphan.
 6. **Propose.** One plan for \`wiki_change\`: every write, a \`title\` ("Import <bundle>"), \`notes\` (what came in, what merged into what, each note left out with its reason), and \`session\` (this session document's path). When the tool refuses, fix the writes it names and call it again.
 7. **End.** Your work ends when the plan is proposed and covers every staged note. Do not wait for the approval. Never edit the staged notes or the session document.
 `;

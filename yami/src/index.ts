@@ -17,6 +17,7 @@ export {
   type Choice,
   type ChoiceAction,
   type DocumentKind,
+  type LinkedDocumentKind,
   type DocumentRef,
   type FlowOptions,
   type FormParts,

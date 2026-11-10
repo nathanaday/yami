@@ -438,7 +438,7 @@ describe("the wiki, built in", () => {
           writes: [
             {
               op: "create",
-              path: "wiki/topics/Dart.md",
+              path: "wiki/pages/Dart.md",
               properties: { description: "A fold sewn into fabric to shape it.", sources: [link(sourcePath)] },
               body: `## Definition\n\nA dart takes in fullness ([[${sourcePath.slice(0, -3)}|Darts]]). Drafted in [[${session.path.slice(0, -3)}|its session]].`,
             },
@@ -452,14 +452,14 @@ describe("the wiki, built in", () => {
     const result = await session.start({ maxIterations: 2 });
     const doc = await vault.read(session.path);
     expect(result, doc).toMatchObject({ state: "done", iterations: 1 });
-    // The two code checks judge the proposal; clean-topics has no check, so the review judges it.
+    // The two code checks judge the proposal; clean-pages has no check, so the review judges it.
     expect(doc).toContain("iteration 1: 2 met, 0 unmet");
     expect(doc).toContain("iteration 1: review: 5 followed, 0 broken, 1 met, 0 unmet");
     expect(doc).toContain("change-applied]] — 1 change(s) of the session stand: proposed");
     expect(agent.started[0]!.options.access).toBe("read-only");
 
     // The wiki holds nothing until a person approves the change.
-    expect(await vault.exists("wiki/topics/Dart.md")).toBe(false);
+    expect(await vault.exists("wiki/pages/Dart.md")).toBe(false);
     const [change] = await yami.wiki.changes();
     expect(change).toMatchObject({ title: "Ingest darts", status: "proposed", session: session.path, module: "wiki", creates: 1, modifies: 1 });
     await yami.wiki.reject(change!.path, "Cite the page.");

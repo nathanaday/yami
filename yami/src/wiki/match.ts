@@ -8,7 +8,7 @@ export const NEAR_NEIGHBORS = 5;
 export const NEW_NEIGHBORS = 3;
 
 export interface MatchOptions {
-  /** The note types to match against. Default: topic and source. */
+  /** The note types to match against, where `page` is every page. Default: the pages and the sources. */
   types?: string[];
 }
 
@@ -25,10 +25,10 @@ export interface Match {
   neighbors: Neighbor[];
 }
 
-/** Matches each name against the names, aliases, and descriptions of the typed notes. */
+/** Matches each name against the names, aliases, and descriptions of the pages and the sources, or of the notes of the types given. */
 export function match(wiki: Wiki, names: string[], options: MatchOptions = {}): Match[] {
-  const types = options.types ?? ["topic", "source"];
-  const notes = wiki.notes.filter((note) => note.type !== undefined && types.includes(note.type));
+  const keep = wiki.filter({ types: options.types ?? ["page", "source"] });
+  const notes = wiki.notes.filter(keep);
   const all = new Set([...notes.flatMap((note) => [note.name, ...note.aliases]), ...names].map(normalizeName));
   const fold = singular(all);
   const byName = new Map<string, Note>();

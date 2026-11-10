@@ -136,12 +136,12 @@ export async function writeArchive(vault: Vault, version: Version): Promise<{ wr
   return { written, removed };
 }
 
-/** Reads a version's archive, with its notes at the paths of the vault's folders now. */
+/** Reads a version's archive, with its notes at the paths of the vault's folders now. A version before yami 0.24 holds its pages in the topics folder. */
 export async function readArchive(vault: Vault, version: Version): Promise<Archive> {
   const archive = JSON.parse(await gunzip(await vault.readBinary(version.archive))) as Archive;
   const from = new Folders(archive.folders ?? DEFAULT_FOLDER_SETTINGS);
   const to = vault.folders;
-  if (from.wiki === to.wiki && from.internal === to.internal) return archive;
+  if (from.wiki === to.wiki && from.internal === to.internal && !Object.keys(archive.notes).some((path) => path.startsWith(`${from.legacyTopics}/`))) return archive;
   const notes = Object.fromEntries(Object.entries(archive.notes).map(([path, text]) => [mapFolders(path, from, to), mapFolders(text, from, to)]));
   return { ...archive, notes, folders: to.settings };
 }

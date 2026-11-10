@@ -9,7 +9,7 @@ export interface Query {
   text?: string;
   /** Notes to start from, as paths or link targets. For "related notes", give seeds and no text. */
   seeds?: string[];
-  /** Keep only notes of these types. */
+  /** Keep only notes of these types. `page` keeps every page, whatever its template. */
   types?: string[];
   /** Keep only notes that hold every one of these tags, or a tag below it. */
   tags?: string[];

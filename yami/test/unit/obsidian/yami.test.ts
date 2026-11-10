@@ -291,8 +291,8 @@ describe("setAgents", () => {
 
     // A refusal rejects with its reasons, and shows no notice: the view shows it where the act was. The run had started.
     ran.length = 0;
-    const refused: ChangeAct = { kind: "approve", label: "Approve", run: () => Promise.reject(new InvalidPlan(["write 1 (create wiki/topics/A.md): the note exists; use modify"])) };
-    await expect(yami.runChangeAct(refused, { started })).rejects.toThrow("The change plan is not valid:\n- write 1 (create wiki/topics/A.md): the note exists; use modify");
+    const refused: ChangeAct = { kind: "approve", label: "Approve", run: () => Promise.reject(new InvalidPlan(["write 1 (create wiki/pages/A.md): the note exists; use modify"])) };
+    await expect(yami.runChangeAct(refused, { started })).rejects.toThrow("The change plan is not valid:\n- write 1 (create wiki/pages/A.md): the note exists; use modify");
     expect(ran).toEqual([["started"]]);
     expect(notices()).toHaveLength(3);
   });

@@ -1,4 +1,4 @@
-import { FORMS } from "./schema.js";
+import { FORMS, TEMPLATE_FORM } from "./schema.js";
 import type { Properties, Vault } from "./vault.js";
 
 export interface Document {
@@ -80,7 +80,7 @@ export function basename(path: string): string {
   return path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
 }
 
-const FORM_FILES: ReadonlySet<string> = new Set(Object.values(FORMS).map((form) => form.file));
+const FORM_FILES: ReadonlySet<string> = new Set([...Object.values(FORMS).map((form) => form.file), TEMPLATE_FORM.file]);
 
 /** The display name of a document: the file name, or the folder name of a form, such as a `SKILL.md` or a `POLICY.md`. */
 export function documentName(path: string): string {

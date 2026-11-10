@@ -1,7 +1,7 @@
 import type { AgentTool } from "../agent/types.js";
 import { type LedgerView, moduleLedger } from "../document/bases.js";
 import { link, parseDocument, serializeDocument, writeDocument } from "../document/document.js";
-import { FORMS, timestamp, type FormKind, type Schema } from "../document/schema.js";
+import { FORMS, TEMPLATE_FORM, timestamp, type FormKind, type Schema } from "../document/schema.js";
 import { DEFAULT_FOLDERS, WIKI_ID, type Folders } from "../document/folders.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { VERSION } from "../version.js";
@@ -18,13 +18,15 @@ export const MODULE_ICON = "box";
 
 /** The session fields that link documents. */
 export type LinkedKind = "agents" | "articles" | "policies" | "promises" | "skills";
-/** The kinds of document that a module installs and a session links: the forms but the flow, and the article. */
-export type DocumentKind = "agent" | "policy" | "promise" | "skill" | "article";
+/** The kinds of document that a session links: the forms but the flow, and the article. */
+export type LinkedDocumentKind = "agent" | "policy" | "promise" | "skill" | "article";
+/** The kinds of document that a module installs: the ones a session links, and the wiki's templates, which no session links. */
+export type DocumentKind = LinkedDocumentKind | "template";
 
 /** The session field that links each kind of document. */
-export const FIELD_OF: Record<DocumentKind, LinkedKind> = { agent: "agents", article: "articles", policy: "policies", promise: "promises", skill: "skills" };
+export const FIELD_OF: Record<LinkedDocumentKind, LinkedKind> = { agent: "agents", article: "articles", policy: "policies", promise: "promises", skill: "skills" };
 /** The kind of document that each session field links. */
-export const KIND_OF: Record<LinkedKind, DocumentKind> = { agents: "agent", articles: "article", policies: "policy", promises: "promise", skills: "skill" };
+export const KIND_OF: Record<LinkedKind, LinkedDocumentKind> = { agents: "agent", articles: "article", policies: "policy", promises: "promise", skills: "skill" };
 
 /** Where a module keeps a kind of file: its own folder, which a person reads, or its internal folder. */
 export type Place = "folder" | "internal";
@@ -100,7 +102,9 @@ export class ModuleDocument<K extends DocumentKind = DocumentKind> implements Do
   /** The vault path of the document. */
   get path(): string {
     const lay = this.module.layout;
-    return this.kind === "article" ? `${lay.folders.articles}/${this.name}.md` : formPath(lay, this.kind as FormKind, this.name);
+    if (this.kind === "article") return `${lay.folders.articles}/${this.name}.md`;
+    if (this.kind === "template") return `${lay.internal}/${TEMPLATE_FORM.folder}/${this.name}/${TEMPLATE_FORM.file}`;
+    return formPath(lay, this.kind as FormKind, this.name);
   }
 
   /** The document as a link, the form a session's properties hold. */
@@ -489,6 +493,15 @@ export abstract class YamiModule {
    */
   protected agent(form: FormText | FormParts, files?: Record<string, FormText>): ModuleDocument<"agent"> {
     return this.form("agent", form, files);
+  }
+
+  /**
+   * A template of the wiki's pages, `TEMPLATE.md` in `<internal>/<id>/templates/<name>/`: markdown whose
+   * frontmatter holds its `name`, `description`, `properties`, `sections`, `cites`, and `checks`. Only the wiki
+   * reads templates.
+   */
+  protected template(form: FormText | FormParts): ModuleDocument<"template"> {
+    return this.form("template", form);
   }
 
   /** An article: a note whose content is context for the agent. */

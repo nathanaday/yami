@@ -8,6 +8,7 @@ import { timestamp } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { DEFAULT_FOLDERS, mapFolders } from "../document/folders.js";
 import { isAbsolute } from "./source.js";
+import { RESERVED_TEMPLATE_NAMES } from "./templates.js";
 import type { Note, Wiki } from "./wiki.js";
 
 /** How far a bundle reaches from its topic. Each size caps the topics; the sources they cite always come along. */
@@ -31,9 +32,9 @@ export interface BundleSelection {
   originals: string[];
 }
 
-/** The topics of the knowledge base that a note links or that link it. */
+/** The pages of the knowledge base that a note links or that link it. A bundle's `topics` are its pages, of every template. */
 function neighbors(wiki: Wiki, note: Note): string[] {
-  return [...new Set([...note.links, ...note.backlinks])].filter((path) => wiki.note(path)?.type === "topic");
+  return [...new Set([...note.links, ...note.backlinks])].filter((path) => wiki.note(path) !== undefined && wiki.isPage(path));
 }
 
 /**
@@ -41,13 +42,13 @@ function neighbors(wiki: Wiki, note: Note): string[] {
  * backlinks among the topics, each time the one that connects to the most topics chosen so far (then the
  * first by name), up to the cap of the size. So a bundle that is cut holds the part that hangs together.
  * Every source that a chosen topic cites comes along, with the originals it embeds, so the citations resolve
- * in the bundle. The topic is a path or a link name; it throws for a note that is not a topic of the wiki.
+ * in the bundle. The topic is a page, as a path or a link name; it throws for a note that is not a page of the wiki.
  */
 export async function selectBundle(wiki: Wiki, topic: string, size: BundleSize = "medium"): Promise<BundleSelection> {
   await wiki.ensure();
   const start = wiki.resolve(topic);
   const note = start ? wiki.note(start) : undefined;
-  if (!note || note.type !== "topic") throw new Error(`${topic} is not a topic of the wiki.`);
+  if (!note || !wiki.isPage(note)) throw new Error(`${topic} is not a page of the wiki.`);
   const cap = TOPIC_CAPS[size];
   if (!cap) throw new Error(`"${size}" is not a size. The sizes are ${BUNDLE_SIZES.join(", ")}.`);
   const chosen = new Set<string>([start!]);
@@ -103,8 +104,9 @@ export async function selectDocuments(wiki: Wiki, documents: string[]): Promise<
   for (const document of documents) {
     const path = wiki.resolve(document);
     const note = path ? wiki.note(path) : undefined;
-    if (!note || (note.type !== "topic" && note.type !== "source")) throw new Error(`${document} is not a topic or a source of the wiki.`);
-    (note.type === "topic" ? topics : sources).push(path!);
+    const page = note !== undefined && wiki.isPage(note);
+    if (!note || (!page && note.type !== "source")) throw new Error(`${document} is not a page or a source of the wiki.`);
+    (page ? topics : sources).push(path!);
   }
   return { topics: [...new Set(topics)], ...(await withSources(wiki, [...new Set(topics)], sources)) };
 }
@@ -159,7 +161,7 @@ export interface WrittenBundle {
 export const BUNDLE_README = "README.md";
 
 /**
- * Writes a selection as a bundle: the notes in the vault's own layout (`wiki/topics/`, `wiki/sources/`,
+ * Writes a selection as a bundle: the notes in the vault's own layout (`wiki/pages/`, `wiki/sources/`,
  * `internal/wiki/originals/`) and a README that lists them. Each note gets the property `bundle`, the
  * bundle's name, so the index of this vault skips a bundle written inside it; an import removes it. The
  * folder is a vault path, or an absolute path outside the vault. It refuses a folder under `wiki/`.
@@ -199,7 +201,7 @@ export async function writeBundle(wiki: Wiki, selection: BundleSelection, folder
     body: [
       `# ${name}`,
       "",
-      `A bundle of ${selection.topics.length} topic${selection.topics.length === 1 ? "" : "s"} and ${selection.sources.length} source${selection.sources.length === 1 ? "" : "s"} of a Yami wiki${selection.topic ? `, around ${link(selection.topic)}` : ""}. Import it into another vault with Wiki: import a bundle, or the tool \`wiki_import\`, which merges the notes into that wiki through a change plan that a person approves.`,
+      `A bundle of ${selection.topics.length} page${selection.topics.length === 1 ? "" : "s"} and ${selection.sources.length} source${selection.sources.length === 1 ? "" : "s"} of a Yami wiki${selection.topic ? `, around ${link(selection.topic)}` : ""}. Import it into another vault with Wiki: import a bundle, or the tool \`wiki_import\`, which merges the notes into that wiki through a change plan that a person approves.`,
       "",
       "## Topics",
       "",
@@ -218,9 +220,10 @@ export async function writeBundle(wiki: Wiki, selection: BundleSelection, folder
 
 /** One note of a bundle, read: where it goes in the knowledge base, and its content with the `bundle` property removed. */
 export interface BundleNote {
-  /** The note's path in this vault's knowledge base: `<topics>/<name>.md` or `<sources>/<name>.md`. */
+  /** The note's path in this vault's knowledge base: `<pages>/<name>.md` or `<sources>/<name>.md`. */
   path: string;
-  type: "topic" | "source";
+  /** `source`, or the template of a page. */
+  type: string;
   properties: Properties;
   body: string;
 }
@@ -234,7 +237,7 @@ export interface Bundle {
   notes: BundleNote[];
   /** The originals, each at its path in this vault's originals folder. */
   originals: { path: string; data: Uint8Array }[];
-  /** The markdown files that are neither topics nor sources, by their path in the bundle, with the reason. */
+  /** The markdown files that are neither pages nor sources, by their path in the bundle, with the reason. */
   skipped: { path: string; reason: string }[];
 }
 
@@ -290,8 +293,8 @@ async function diskFiles(folder: string): Promise<string[]> {
 
 /**
  * Reads a bundle: a folder of the vault, an absolute path, or a git repository to clone (a GitHub URL, which
- * may name a branch and a folder as `/tree/<branch>/<folder>`). Every markdown file with `type: topic` or
- * `type: source` is a note of the bundle, wherever it sits in the folder, so a folder of notes made by hand
+ * may name a branch and a folder as `/tree/<branch>/<folder>`). Every markdown file with `type: source`, or with
+ * the type of a page's template, such as `type: topic`, is a note of the bundle, wherever it sits in the folder, so a folder of notes made by hand
  * imports as a bundle does; the `bundle` property is removed. Files under `internal/wiki/originals/` are the
  * originals. The paths of the default layout are mapped to this vault's folders, in the notes too. Anything
  * else is skipped with its reason. It throws for a folder it cannot read, and for one
@@ -325,14 +328,14 @@ export async function readBundle(vault: Vault, from: string): Promise<Bundle> {
       const { [BUNDLE_PROPERTY]: bundleName, ...properties } = doc.properties;
       if (typeof bundleName === "string" && bundleName) bundle.name ??= bundleName;
       const type = properties.type;
-      if (type !== "topic" && type !== "source") {
-        if (file !== BUNDLE_README) bundle.skipped.push({ path: file, reason: type ? `its type is ${String(type)}, not topic or source` : "it has no type" });
+      if (typeof type !== "string" || !type || RESERVED_TEMPLATE_NAMES.includes(type)) {
+        if (file !== BUNDLE_README) bundle.skipped.push({ path: file, reason: type ? `its type is ${String(type)}, not a page's or a source's` : "it has no type" });
         continue;
       }
       const name = file.slice(file.lastIndexOf("/") + 1);
-      bundle.notes.push({ path: `${type === "topic" ? vault.folders.topics : vault.folders.sources}/${name}`, type, properties, body: doc.body });
+      bundle.notes.push({ path: `${type === "source" ? vault.folders.sources : vault.folders.pages}/${name}`, type, properties, body: doc.body });
     }
-    if (!bundle.notes.length) throw new Error(`No topic or source under ${from}: a bundle is a folder of notes with type: topic or type: source.`);
+    if (!bundle.notes.length) throw new Error(`No page or source under ${from}: a bundle is a folder of notes whose type is a page's template, such as topic, or source.`);
     return bundle;
   } finally {
     await clone?.done();

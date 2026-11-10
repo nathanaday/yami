@@ -61,7 +61,10 @@ export class Folders {
   readonly internal: string;
   /** The knowledge base, for a person to read. */
   readonly wiki: string;
-  readonly topics: string;
+  /** The pages of the wiki, of every template. */
+  readonly pages: string;
+  /** Where the pages were before yami 0.24, which kept them as topics. */
+  readonly legacyTopics: string;
   readonly sources: string;
   /** The folders a snapshot holds and a change may write. */
   readonly knowledge: readonly string[];
@@ -74,6 +77,8 @@ export class Folders {
   readonly originals: string;
   /** The figures that a figures session makes: `<figures>/<topic>/<name>.svg`. */
   readonly figures: string;
+  /** The templates of the pages: `<templates>/<name>/TEMPLATE.md`. */
+  readonly templates: string;
   /** The text that a person protected, in Yami's own folder. */
   readonly protected: string;
 
@@ -83,15 +88,17 @@ export class Folders {
     if (problem) throw new Error(problem);
     this.internal = normalizeFolder(all.internal);
     this.wiki = normalizeFolder(all.wiki);
-    this.topics = `${this.wiki}/topics`;
+    this.pages = `${this.wiki}/pages`;
+    this.legacyTopics = `${this.wiki}/topics`;
     this.sources = `${this.wiki}/sources`;
-    this.knowledge = [this.topics, this.sources];
+    this.knowledge = [this.pages, this.sources];
     this.wikiInternal = this.internalOf(WIKI_ID);
     this.snapshots = `${this.wikiInternal}/snapshots`;
     this.changes = `${this.wikiInternal}/changes`;
     this.cache = `${this.wikiInternal}/cache/embeddings.json`;
     this.originals = `${this.wikiInternal}/originals`;
     this.figures = `${this.wikiInternal}/figures`;
+    this.templates = `${this.wikiInternal}/templates`;
     this.protected = `${this.internalOf("yami")}/protected.json`;
   }
 
@@ -108,6 +115,11 @@ export class Folders {
   /** Whether a path is a note of the knowledge base. */
   inKnowledge(path: string): boolean {
     return path.endsWith(".md") && this.knowledge.some((folder) => path.startsWith(`${folder}/`));
+  }
+
+  /** Whether a path is a page of the wiki: a note in the pages folder. */
+  inPages(path: string): boolean {
+    return path.endsWith(".md") && path.startsWith(`${this.pages}/`);
   }
 
   /** Whether a path is the wiki's own: in the knowledge base, or in what the wiki keeps for itself. */
@@ -165,11 +177,14 @@ export function escapeRegExp(text: string): string {
 }
 
 /**
- * A path or a text with the wiki's folders of one layout as another has them: the topics, the sources, the
- * originals, and the figures. A path is mapped only where it starts, so a word that holds one is left alone.
+ * A path or a text with the wiki's folders of one layout as another has them: the pages, the sources, the
+ * originals, and the figures. The topics folder of a layout before yami 0.24 maps to the pages. A path is
+ * mapped only where it starts, so a word that holds one is left alone.
  */
 export function mapFolders(text: string, from: Folders, to: Folders): string {
-  const pairs = (["topics", "sources", "originals", "figures"] as const).map((key) => [from[key], to[key]] as const).filter(([a, b]) => a !== b);
+  const pairs = ([["pages", "pages"], ["legacyTopics", "pages"], ["sources", "sources"], ["originals", "originals"], ["figures", "figures"]] as const)
+    .map(([a, b]) => [from[a], to[b]] as const)
+    .filter(([a, b]) => a !== b);
   if (!pairs.length) return text;
   const target = new Map(pairs);
   const pattern = new RegExp(`(?<![\\p{L}\\p{N}_./-])(${pairs.map(([a]) => escapeRegExp(a)).join("|")})(?=/)`, "gu");
