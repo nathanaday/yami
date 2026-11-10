@@ -1,23 +1,27 @@
+import type { Folders } from "../document/folders.js";
 import type { Vault } from "../document/vault.js";
 import { VERSION } from "../version.js";
 import { hashBytes } from "../wiki/source.js";
-import { INTERNAL } from "./module.js";
 import type { ModuleProblem } from "./vault-module.js";
 
 /** The reserved id of Yami's own skill set. No module can take it. */
 export const YAMI_ID = "yami";
 
 /** The folder of Yami's own skill set, which every agent of a Yami gets. */
-export const YAMI_SKILLS = `${INTERNAL}/${YAMI_ID}`;
+export function yamiSkills(folders: Folders): string {
+  return folders.internalOf(YAMI_ID);
+}
 
 /** The base Yami skill, which every run of every module invokes as `/yami:run`. */
-export const BASE_SKILL = `${YAMI_SKILLS}/skills/run/SKILL.md`;
+export function baseSkill(folders: Folders): string {
+  return `${yamiSkills(folders)}/skills/run/SKILL.md`;
+}
 
 /** The command that invokes the base skill. */
 export const BASE_SKILL_COMMAND = `${YAMI_ID}:run`;
 
 /**
- * The text that Yami installs at `BASE_SKILL` when no file is there, or when the file holds a text that an
+ * The text that Yami installs at `baseSkill` when no file is there, or when the file holds a text that an
  * earlier version shipped. A person can edit the file in the vault, and Yami keeps the edits.
  */
 export const BASE_SKILL_TEXT = `---
@@ -58,16 +62,17 @@ export function hashText(text: string): Promise<string> {
  * A file with any other text holds a person's edits: Yami keeps it, and returns the problem that says so.
  */
 export async function installBaseSkill(vault: Vault): Promise<ModuleProblem | undefined> {
-  const text = (await vault.exists(BASE_SKILL)) ? await vault.read(BASE_SKILL) : undefined;
+  const path = baseSkill(vault.folders);
+  const text = (await vault.exists(path)) ? await vault.read(path) : undefined;
   if (text === BASE_SKILL_TEXT) return undefined;
   if (text === undefined || SHIPPED.includes(await hashText(text))) {
-    await vault.write(BASE_SKILL, BASE_SKILL_TEXT);
+    await vault.write(path, BASE_SKILL_TEXT);
     return undefined;
   }
   return {
     module: YAMI_ID,
-    path: BASE_SKILL,
-    document: BASE_SKILL,
+    path,
+    document: path,
     message: `The base skill differs from the text of Yami ${VERSION}, so Yami keeps your edits. To get the new text, delete the file: Yami writes it again. Then copy back the edits you want.`,
   };
 }

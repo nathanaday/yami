@@ -19,10 +19,13 @@ import type { Command } from "obsidian";
 import { readDocument } from "../../../src/document/index.js";
 import type { Properties } from "../../../src/index.js";
 import { addModuleCommands, addNewModuleCommand, addWikiCommands, age } from "../../../src/obsidian/commands.js";
-import { TOPICS, type ChangeAct } from "../../../src/wiki/index.js";
+import { type ChangeAct } from "../../../src/wiki/index.js";
 import type { ObsidianYami } from "../../../src/obsidian/yami.js";
 import { testYami, type TestYami } from "../../../src/testing/index.js";
 import { Hello } from "../../fixtures/hello.js";
+import { DEFAULT_FOLDERS } from "../../../src/document/index.js";
+
+const { topics: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami | undefined;
 afterEach(async () => {
@@ -232,6 +235,7 @@ describe("the change commands of the wiki", () => {
       app: { workspace: { getActiveFile: () => active } },
       plugin: { addCommand: (command: Command) => commands.set(command.id, command) },
       wiki: yami.wiki,
+      vault,
       conversationFolder: "conversations",
       properties: async (path: string) => (await readDocument(vault, path)).properties,
       pick: async <T,>(items: T[], label: (item: T) => string, placeholder: string) => (picked.push([placeholder, ...items.map(label)]), items[0]),

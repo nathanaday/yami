@@ -4,7 +4,7 @@ import { basename, link, parseDocument, PropertiesError, updateDocument } from "
 import { AGENT, FORMS, validate, withDefaults } from "../document/schema.js";
 import { freshRun } from "./fresh-run.js";
 import { nameOf, parseName } from "./links.js";
-import { formPath, INTERNAL } from "./module.js";
+import { formPath } from "./module.js";
 import { addProgress } from "./progress.js";
 import type { Yami } from "./yami.js";
 
@@ -70,11 +70,12 @@ export class AgentError extends Error {
 /** The agents that a caller can name, as it names them: bare names of its module first, then `<module>:<name>`. */
 export async function callableAgents(yami: Yami, module: string | undefined): Promise<string[]> {
   const file = FORMS.agent.file;
-  const paths = (await yami.vault.list(INTERNAL)).filter((path) => {
-    const parts = path.split("/");
-    return parts.length === 5 && parts[2] === FORMS.agent.folder && parts[4] === file && yami.module(parts[1]!) !== undefined;
+  const { folders } = yami.vault;
+  const paths = (await yami.vault.list(folders.internal)).filter((path) => {
+    const parts = path.slice(folders.internal.length + 1).split("/");
+    return parts.length === 4 && parts[1] === FORMS.agent.folder && parts[3] === file && yami.module(parts[0]!) !== undefined;
   });
-  const names = paths.map((path) => nameOf(path, module));
+  const names = paths.map((path) => nameOf(path, module, folders));
   return [...names.filter((n) => !n.includes(":")).sort(), ...names.filter((n) => n.includes(":")).sort()];
 }
 
@@ -130,7 +131,7 @@ export async function runAgent(yami: Yami, caller: AgentCaller, name: string, ta
   try {
     const { note, result } = await freshRun(yami, {
       agent,
-      name: session ? `${caller.module ?? named!.module} ${basename(session)} ${nameOf(path, caller.module)}` : `${named!.module} ${named!.name}`,
+      name: session ? `${caller.module ?? named!.module} ${basename(session)} ${nameOf(path, caller.module, yami.vault.folders)}` : `${named!.module} ${named!.name}`,
       session,
       approval: caller.approval ?? agent.preferences.approval,
       access,

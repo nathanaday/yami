@@ -8,6 +8,7 @@ parts:
   - {path: yami/yami/test/live/, description: "Live tests against real harnesses; not run."}
   - {path: yami/yami/bench/, description: "Wiki search benchmark; needs a vault and a Voyage key; not run."}
   - {path: yami/yami/package.json, description: "Package manifest: entries, peerDependencies, files, build script."}
+  - {path: yami/yami/README.md, description: "Public names of the API."}
   - {path: yami/yami/CHANGELOG.md, description: "Changelog; ships in the package."}
   - {path: yami/yami/package-lock.json, description: "Lockfile of the library build."}
   - {path: yami/yami/.gitignore, description: "Ignores node_modules, dist, test output, and packed tarballs."}
@@ -35,7 +36,7 @@ features:
   wiki-changes:
     code: [yami/yami/src/wiki/change.ts, yami/yami/src/wiki/versions.ts]
   wiki-ingest:
-    code: [yami/yami/src/module/wiki, yami/yami/src/wiki/source.ts, yami/yami/src/wiki/office.ts]
+    code: [yami/yami/src/module/wiki, yami/yami/src/wiki/source.ts, yami/yami/src/wiki/office.ts, yami/yami/src/wiki/bundle.ts, yami/yami/src/wiki/citations.ts, yami/yami/src/wiki/delta.ts, yami/yami/src/wiki/figures.ts]
   threads-module:
     code: [yami/yami/src/threads, yami/yami/src/module/threads]
   create-yami:
@@ -47,8 +48,10 @@ features:
   shared-documents:
     code: [yami/yami/src/obsidian/collab]
   wiki-in-obsidian:
-    code: [yami/yami/src/obsidian/wiki]
+    code: [yami/yami/src/obsidian/wiki, yami/yami/src/obsidian/views]
   test-modules-in-node:
     code: [yami/yami/src/testing]
   plugin-build:
     code: [yami/yami/src/build]
+  protected-text:
+    code: [yami/yami/src/document/protected.ts, yami/yami/src/obsidian/protected]

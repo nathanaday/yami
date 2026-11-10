@@ -20,7 +20,7 @@ A plugin takes the library from a GitHub release, by the URL of its tarball. Pic
 
 ```json
 "dependencies": {
-  "yami": "https://github.com/nathanaday/yami/releases/download/yami-0.22.0/yami-0.22.0.tgz"
+  "yami": "https://github.com/nathanaday/yami/releases/download/yami-0.23.0/yami-0.23.0.tgz"
 }
 ```
 
@@ -79,7 +79,7 @@ export class Notes extends YamiModule {
 
 From this, the plugin gets a command that starts a weekly review, the conversation notes, the commands to run, resume, and stop a session, and the cleanup when it unloads. Every vault also gets a wiki that its agents can search, and a threads module for validated work on repositories; a plugin can turn either off. Only `yami/obsidian` uses the Obsidian API, so a module and its tests run in Node with `yami/testing`.
 
-Users can also add modules without code: a folder of markdown under the vault's `internal/` folder, with one note for the module and a folder for each flow, skill, agent, policy, and promise. Yami picks it up as the files appear and adds a command for each flow.
+Users can also add modules without code: a folder of markdown under the vault's internal folder (`internal/` unless the vault chose another), with one note for the module and a folder for each flow, skill, agent, policy, and promise. Yami picks it up as the files appear and adds a command for each flow.
 
 ## Built on Yami
 

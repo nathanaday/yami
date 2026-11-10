@@ -5,16 +5,17 @@ import type { Harness, ToolSet } from "../agent/types.js";
 import { CONVERSATION_FOLDER, FileConversations, type Conversation, type Conversations, type OpenConversation } from "../conversation/conversations.js";
 import { basename, checkSection, link, readDocument, writeDocument, type Document } from "../document/document.js";
 import { SESSION, timestamp, validate, withDefaults, type FormKind } from "../document/schema.js";
+import { WIKI_ID, type FolderSettings } from "../document/folders.js";
 import type { Vault } from "../document/vault.js";
-import { WIKI } from "../wiki/folders.js";
 import { captureSource, captureSources, isAbsolute, readSources, type OutsideFile } from "../wiki/source.js";
 import { Wiki, type WikiOptions } from "../wiki/wiki.js";
-import { installBaseSkill, YAMI_ID, YAMI_SKILLS } from "./base-skill.js";
+import { installBaseSkill, YAMI_ID, yamiSkills } from "./base-skill.js";
 import { assignColors } from "./colors.js";
 import type { AgentCaller } from "./agent-run.js";
-import { checkName, FIELD_OF, Flow, formPath, ID, idFromName, INTERNAL, moduleSkills, safeName, setFromVault, type DocumentRef, type YamiModule } from "./module.js";
+import { checkName, FIELD_OF, Flow, formPath, ID, idFromName, moduleSkills, safeName, setFromVault, type DocumentRef, type YamiModule } from "./module.js";
 import { Session, type NewSession, type SessionStatus, type SessionSummary } from "./session.js";
 import { starterForm, writeStarter } from "./starter.js";
+import { moveFolders, type MovedFolders } from "./move.js";
 import { ThreadsModule } from "./threads/index.js";
 import { moduleTools, TOOL_SET } from "./tools.js";
 import { readVaultModules, VaultModule, type ModuleProblem } from "./vault-module.js";
@@ -29,7 +30,7 @@ export interface YamiOptions {
   modules?: YamiModule[];
   /**
    * Whether the Yami holds the built-in wiki module: ingest and checkout sessions, change plans, the wiki
-   * tools, and the files under `internal/wiki/`. Default true. With false, the vault still has its wiki
+   * tools, and the files under `<internal>/wiki/`. Default true. With false, the vault still has its wiki
    * index, `yami.wiki`, which the checks and the links use, and a module of the host can take the id `wiki`.
    */
   wikiModule?: boolean;
@@ -123,7 +124,7 @@ export class Yami {
     const wikiModule = options.wikiModule ?? true;
     const threads = options.threads ?? true;
     const own = options.modules ?? [];
-    if (wikiModule && own.some((module) => module.id === WIKI)) throw builtInLeftOut(WIKI, "wikiModule");
+    if (wikiModule && own.some((module) => module.id === WIKI_ID)) throw builtInLeftOut(WIKI_ID, "wikiModule");
     if (threads && own.some((module) => module.id === THREADS)) throw builtInLeftOut(THREADS, "threads");
     this.#wikiModule = wikiModule ? new WikiModule() : undefined;
     this.#code = [...(this.#wikiModule ? [this.#wikiModule] : []), ...(threads ? [new ThreadsModule()] : []), ...own];
@@ -225,7 +226,7 @@ export class Yami {
    */
   skills(): string[] {
     const host = typeof this.#hostSkills === "function" ? this.#hostSkills() : this.#hostSkills;
-    return [`${this.vault.root.replace(/\/$/, "")}/${YAMI_SKILLS}`, ...moduleSkills(this.vault, this.modules), ...host];
+    return [`${this.vault.root.replace(/\/$/, "")}/${yamiSkills(this.vault.folders)}`, ...moduleSkills(this.vault, this.modules), ...host];
   }
 
   /** Gives every agent the skill sets as they are now. A host calls it when its `skills` option gives something new. Sessions that start after it have the new sets. */
@@ -307,16 +308,28 @@ export class Yami {
   }
 
   /**
+   * Moves the vault's internal folder and wiki folder, and writes the folder settings, `.yami.json`. This Yami
+   * and every other one of the vault keep the folders they started with, so the host builds them again
+   * before anything else runs: in Obsidian, by a reload. See `moveFolders` for what it refuses.
+   * @example
+   * await yami.moveFolders({ wiki: "library/wiki" });
+   */
+  moveFolders(settings: Partial<FolderSettings>): Promise<MovedFolders> {
+    return moveFolders(this, settings);
+  }
+
+  /**
    * Creates a vault module from a starter: the module document, one flow, one skill, one agent, one policy, and
-   * one promise with a core check, in `internal/<id>/`, where the id comes from the name by `idFromName`.
+   * one promise with a core check, in `<internal>/<id>/`, where the id comes from the name by `idFromName`.
    * Then it discovers the modules, and returns the new one. It refuses a name that gives no id, Yami's own
-   * id, or an id that a module or a folder of `internal/` has.
+   * id, or an id that a module or a folder of the internal folder has.
    */
   async createModule(name: string): Promise<VaultModule> {
     const id = idFromName(name);
     if (!ID.test(id)) throw new Error(`"${name}" gives no module id. Give a name with letters or digits.`);
     if (id === YAMI_ID || this.module(id)) throw new Error(`A module has the id ${id}. Give the module another name.`);
-    if ((await this.vault.files(`${INTERNAL}/${id}`)).length) throw new Error(`The folder ${INTERNAL}/${id}/ exists. Give the module another name, or move the folder.`);
+    const folder = this.vault.folders.internalOf(id);
+    if ((await this.vault.files(folder)).length) throw new Error(`The folder ${folder}/ exists. Give the module another name, or move the folder.`);
     await writeStarter(this.vault, id, name.trim());
     await this.discover();
     const module = this.module(id);
@@ -329,7 +342,7 @@ export class Yami {
 
   /**
    * Writes a starter form of a kind into a code module that takes `vaultFlows`, at
-   * `internal/<module>/<folder>/<id>/<FILE>.md`, where the id comes from the name by `idFromName`. The starter
+   * `<internal>/<module>/<folder>/<id>/<FILE>.md`, where the id comes from the name by `idFromName`. The starter
    * is valid as written, and its text says how to fill it; a starter flow has no body, and its comments say
    * it. Then it discovers the modules, so a new flow is a flow of the module, and returns the form's path.
    * It refuses a module that takes no vault flows, a name that gives no id, and a form of that kind and id

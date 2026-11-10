@@ -1,7 +1,6 @@
 import { link, linkTarget, readDocument, writeDocument } from "../document/document.js";
 import { timestamp } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
-import { ORIGINALS, SOURCES, WIKI, WIKI_INTERNAL } from "./folders.js";
 import { OFFICE_EXTENSIONS, officeText } from "./office.js";
 import type { Wiki } from "./wiki.js";
 
@@ -18,7 +17,7 @@ export interface Sources {
 }
 
 /** Reads the sources of a folder once, for any number of captures. */
-export async function readSources(vault: Vault, folder = SOURCES): Promise<Sources> {
+export async function readSources(vault: Vault, folder = vault.folders.sources): Promise<Sources> {
   const out: Sources = { folder: folder.replace(/\/$/, ""), latest: new Map(), byHash: new Map() };
   const order = (path: string) => Number(path.match(/\(source (\d+)\)\.md$/)?.[1] ?? 1);
   const all: { path: string; from: string; sha256: string; created: string }[] = [];
@@ -68,7 +67,7 @@ export async function captureSource(vault: Vault, file: string | OutsideFile, so
   const outside = typeof file !== "string";
   const path = outside ? file.path : file;
   if (!outside && !(await vault.exists(path))) throw new Error(`No file at ${path}.`);
-  if (!outside && isWikiFile(path)) throw new Error(`${path} is part of the wiki itself; capture a file from elsewhere in the vault.`);
+  if (!outside && vault.folders.inWiki(path)) throw new Error(`${path} is part of the wiki itself; capture a file from elsewhere in the vault.`);
   sources ??= await readSources(vault);
   const data = outside ? file.data : await vault.readBinary(path);
   const sha256 = await hashBytes(data);
@@ -80,7 +79,7 @@ export async function captureSource(vault: Vault, file: string | OutsideFile, so
   const dot = name.lastIndexOf(".");
   const extension = dot > 0 ? name.slice(dot).toLowerCase() : "";
   const stem = dot > 0 ? name.slice(0, dot) : name;
-  const base = `${ORIGINALS}/${sha256.slice(0, HASH_NAME)}`;
+  const base = `${vault.folders.originals}/${sha256.slice(0, HASH_NAME)}`;
   const copy = `${base}${extension}`;
   if (!(await vault.exists(copy))) await vault.writeBinary(copy, data);
   const text = OFFICE_EXTENSIONS.includes(extension.slice(1)) ? await writeOfficeText(vault, data, extension.slice(1), stem, base) : undefined;
@@ -124,7 +123,7 @@ async function writeOfficeText(vault: Vault, data: Uint8Array, extension: string
 
 /** Captures every file of a folder and its subfolders. Files of the wiki itself are skipped. Returns each source once. */
 export async function captureSources(vault: Vault, folder: string): Promise<string[]> {
-  const files = (await vault.files(folder.replace(/\/$/, ""))).filter((file) => !isWikiFile(file));
+  const files = (await vault.files(folder.replace(/\/$/, ""))).filter((file) => !vault.folders.inWiki(file));
   if (!files.length) throw new Error(`No files under ${folder}.`);
   const sources = await readSources(vault);
   const out: string[] = [];
@@ -148,11 +147,6 @@ function fromKey(file: string): string {
 /** Whether a path is absolute, on macOS, Linux, or Windows, and so names a file outside the vault. */
 export function isAbsolute(path: string): boolean {
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
-}
-
-/** The knowledge base and what the wiki keeps for itself: nothing there is a source to capture. */
-function isWikiFile(path: string): boolean {
-  return path.startsWith(`${WIKI}/`) || path.startsWith(`${WIKI_INTERNAL}/`);
 }
 
 export async function hashBytes(data: Uint8Array): Promise<string> {
@@ -287,7 +281,7 @@ async function sourceFrom(vault: Vault, file: string): Promise<string | undefine
   const wanted = linkTarget(file).replace(/\.md$/, "");
   const name = wanted.slice(wanted.lastIndexOf("/") + 1);
   let byName: string | undefined;
-  for (const path of await vault.list(SOURCES)) {
+  for (const path of await vault.list(vault.folders.sources)) {
     const from = linkTarget(String((await readDocument(vault, path)).properties.from ?? "")).replace(/\.md$/, "");
     if (!from) continue;
     if (from === wanted) return path;

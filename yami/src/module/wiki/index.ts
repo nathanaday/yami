@@ -1,12 +1,12 @@
 import { defineTool, z } from "../../agent/index.js";
 import type { AgentTool } from "../../agent/types.js";
 import type { LedgerView } from "../../document/bases.js";
+import { WIKI_ID, type Folders } from "../../document/folders.js";
 import { basename, checkSection, link, LINK, linkTarget, readDocument, replaceSection, sectionText, updateDocument, writeDocument } from "../../document/document.js";
 import { timestamp, type Schema } from "../../document/schema.js";
 import { algorithms } from "../../wiki/algorithms/index.js";
 import { BUNDLE_SIZES, isRepository, readBundle, selectBundle, selectDocuments, writeBundle, type BundleSelection, type BundleSize, type WrittenBundle } from "../../wiki/bundle.js";
 import { bodyHash, InvalidPlan, validatePlan, type ChangePlan, type Write } from "../../wiki/change.js";
-import { CHANGES, inKnowledge, SNAPSHOTS, SOURCES, TOPICS, WIKI } from "../../wiki/folders.js";
 import { resolveCitations } from "../../wiki/citations.js";
 import { deltaChunks } from "../../wiki/delta.js";
 import { isAbsolute } from "../../wiki/source.js";
@@ -14,7 +14,7 @@ import { normalizeTag } from "../../wiki/wiki.js";
 import { WIKI_COLOR } from "../colors.js";
 import { YamiModule } from "../module.js";
 import { checkedOut, checkoutSkill, COPY, MAX_DOCUMENTS, orderShape, readingListMade, type Checkout, type CheckoutOrder, type ReturnedCheckout } from "./checkout.js";
-import { absorbed, drafterAgent, extractorAgent, INGEST, pageForms, proposed } from "./ingest.js";
+import { absorbed, drafterAgent, extractorAgent, pageForms, proposed } from "./ingest.js";
 import { figures, figuresMade, figuresSkill, illustratorAgent, saveFigure } from "./figures.js";
 import { bundleImported, imported, importSkill, stagingFolder, type ImportedBundle, type StagedNote } from "./import.js";
 import { claimsVerified, verified, verifierAgent, verifySkill } from "./verify.js";
@@ -50,10 +50,10 @@ export interface ImportOptions {
  * The wiki module, built into every Yami: ingest sessions that turn sources into cited topics through
  * change plans that a person approves, checkouts that give a person copies of the wiki's material to mark
  * up and return, and the wiki tools that every agent in the vault gets. Its folder, `wiki/`, holds the knowledge base for a person
- * to read; its sessions and ledger are under `internal/wiki/`.
+ * to read; its sessions and ledger are under `<internal>/wiki/`. The vault's folder settings say where both are.
  */
 export class WikiModule extends YamiModule {
-  readonly id = WIKI;
+  readonly id = WIKI_ID;
   readonly name = "Wiki";
   readonly description = "The knowledge base of the vault: topics cited to sources, changed through plans that a person approves, with a version for each change.";
   readonly sessionsIn = "internal";
@@ -87,7 +87,8 @@ export class WikiModule extends YamiModule {
     },
   ];
   readonly checks = { "checked-out": checkedOut, proposed, absorbed, imported, figures, verified };
-  readonly instructions = `This vault has a wiki: topics in ${TOPICS}/ cited to sources in ${SOURCES}/, changed only through wiki_change, which proposes a change document in ${CHANGES}/ that a person approves in Obsidian, with a version in ${SNAPSHOTS}/ for each applied change. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
+  readonly instructions = (f: Folders): string =>
+    `This vault has a wiki: topics in ${f.topics}/ cited to sources in ${f.sources}/, changed only through wiki_change, which proposes a change document in ${f.changes}/ that a person approves in Obsidian, with a version in ${f.snapshots}/ for each applied change. The wiki tools search every note of the vault. Answer from the wiki with a citation for each claim, as [[links]], and say what the wiki does not cover instead of filling the gap from general knowledge without saying so.`;
 
   readonly cite = this.policy({
     name: "cite-every-claim",
@@ -97,7 +98,7 @@ export class WikiModule extends YamiModule {
   readonly onePlan = this.policy({
     name: "one-plan",
     description: "Change the wiki only through one change plan.",
-    body: `Every change to \`${TOPICS}/\` and \`${SOURCES}/\` goes through \`wiki_change\`, as one plan of creates, modifies, and removes. The tool proposes the plan as a change document; a person approves it in Obsidian, and only then does the wiki change. Your work ends when the plan is proposed: do not wait for the approval, and never ask for it. Never write those notes yourself, never change the original that a source embeds or links, never change a \`## Notes\` section, and never edit the session document.`,
+    body: (f: Folders) => `Every change to \`${f.topics}/\` and \`${f.sources}/\` goes through \`wiki_change\`, as one plan of creates, modifies, and removes. The tool proposes the plan as a change document; a person approves it in Obsidian, and only then does the wiki change. Your work ends when the plan is proposed: do not wait for the approval, and never ask for it. Never write those notes yourself, never change the original that a source embeds or links, never change a \`## Notes\` section, and never edit the session document.`,
   });
   readonly oneTopic = this.policy({
     name: "one-topic",
@@ -137,19 +138,19 @@ export class WikiModule extends YamiModule {
     name: "ingest",
     description:
       "Absorb the sources of an ingest session into cited topics through one change plan that a person approves: chunk, extract, match, draft, propose. To ingest files from a conversation, call wiki_ingest, which starts an ingest session.",
-    body: `# Ingest
+    body: (f: Folders) => `# Ingest
 
 **In a conversation**, with no ingest session, do not ingest the files yourself. Call \`wiki_ingest\` with the files or the folder that the user names, as vault paths or absolute paths: it captures them as sources and starts an ingest session, which runs this skill. Tell the user the session's name, and that they approve its change in Obsidian when it is proposed. Then end.
 
-**In an ingest session**, the session's \`sources\` property links the source notes to absorb. You cannot write under \`${TOPICS}/\` or \`${SOURCES}/\` yourself: the session is read-only, and every change to the wiki goes through \`wiki_change\` as one plan. Work map-reduce, so a long document or many documents cost the same care as one.
+**In an ingest session**, the session's \`sources\` property links the source notes to absorb. You cannot write under \`${f.topics}/\` or \`${f.sources}/\` yourself: the session is read-only, and every change to the wiki goes through \`wiki_change\` as one plan. Work map-reduce, so a long document or many documents cost the same care as one.
 
-Two agents of the session do the reading and the drafting, each in a fresh context: \`extractor\` reads one chunk, and \`drafter\` drafts the writes of one slice. Run each with \`yami_agent\`; calls in one turn run at the same time. An agent knows only its brief and your task, so give it everything in the task. \`page-forms.md\`, in this skill's folder \`${INGEST}/\`, gives the properties and the sections of a topic and a source: read it before you assemble the plan.
+Two agents of the session do the reading and the drafting, each in a fresh context: \`extractor\` reads one chunk, and \`drafter\` drafts the writes of one slice. Run each with \`yami_agent\`; calls in one turn run at the same time. An agent knows only its brief and your task, so give it everything in the task. \`page-forms.md\`, in this skill's folder \`${f.wikiInternal}/skills/ingest/\`, gives the properties and the sections of a topic and a source: read it before you assemble the plan.
 
 1. **Chunks.** Call \`wiki_chunks\` for each source. It names the file to read and its chunks: line ranges, page ranges, or the whole file. Call \`wiki_tags\` once for the tag list. A source that **supersedes** an earlier capture of its file says so: with \`delta: true\` its chunks are the changed passages alone, with the lines around them, and \`citations\` lists each citation of the old source in the topics with where it stands (\`kept\` with its locator in the new text as \`moved\`, \`changed\`, or \`unknown\`); with \`delta: false\` (the copies are not texts) the chunks are the whole file and every cited passage is unknown. Extract the chunks it gives and no more; a source with no chunk changed in nothing but form, and its citations move.
-2. **Extract.** For each chunk, call \`yami_agent\` with the agent \`extractor\`, in waves of at most eight, also when you could read the chunk yourself: each worker reads with a fresh context, so the last chunk gets the care of the first. Only when the sources hold one chunk in all, extract it yourself from the extractor's brief, \`${this.layout.folders.agents}/extractor/AGENT.md\`. The task gives the source note's path, the file and the range from \`wiki_chunks\`, the source's tags, and the tag list. Each returns an Item Map. A \`partial\` chunk goes again, narrower.
+2. **Extract.** For each chunk, call \`yami_agent\` with the agent \`extractor\`, in waves of at most eight, also when you could read the chunk yourself: each worker reads with a fresh context, so the last chunk gets the care of the first. Only when the sources hold one chunk in all, extract it yourself from the extractor's brief, \`${f.wikiInternal}/agents/extractor/AGENT.md\`. The task gives the source note's path, the file and the range from \`wiki_chunks\`, the source's tags, and the tag list. Each returns an Item Map. A \`partial\` chunk goes again, narrower.
 3. **Match.** Call \`wiki_match\` with every subject's name at once, aliases included, so a subject named in three chunks is one subject.
 4. **Slice.** Put every subject that hits or nears one topic into the same slice, so two drafters never write one topic. At most eight subjects per slice.
-5. **Draft.** For each slice, call \`yami_agent\` with the agent \`drafter\`. The task gives the slice (each subject with its items and its match), the source notes, their tags, and the tag list. Each returns writes. With one or two slices, draft them yourself from the drafter's brief, \`${this.layout.folders.agents}/drafter/AGENT.md\`.
+5. **Draft.** For each slice, call \`yami_agent\` with the agent \`drafter\`. The task gives the slice (each subject with its items and its match), the source notes, their tags, and the tag list. Each returns writes. With one or two slices, draft them yourself from the drafter's brief, \`${f.wikiInternal}/agents/drafter/AGENT.md\`.
 6. **Assemble.** One plan for \`wiki_change\`: every drafted write, plus a modify of each source with its \`description\`, \`tags\`, \`authority\`, \`## Summary\`, \`## Structure\` (one line per part, linking the topics that grew from it), and \`status: absorbed\`. For a source that supersedes another, also a modify of the old source with \`status: superseded\`, and the citations of the old source move: give each drafter the \`citations\` of its topics, so its modifies point every \`kept\` citation at the new source with its \`moved\` locator, and read each \`changed\` or \`unknown\` claim against the changed passages. A topic that cites the old source and gets no other write still gets a modify that moves its citations. Give the plan a short \`title\` ("Ingest the DINOv2 paper"), \`notes\` (what it does, the coverage, each skipped subject with its reason, and the figure markers the drafters left, which a figures session makes later), and \`session\` (this session document's path). Past 25 new topics, keep the ones with the most claims and list the rest in the notes.
 7. **Propose.** Call \`wiki_change\`. It validates the plan, writes it as a change document that waits for a person's approval, and links the change from this session. Nothing in the wiki changes until a person approves it in Obsidian. When the tool refuses, fix the writes it names and call it again. When it returns warnings, links to no note, fix those writes and propose the plan again; the person approves the last proposal and rejects the rest.
 8. **End.** Your work ends when the plan is proposed and covers every source. Do not wait for the approval, and do not lint the wiki for the plan's effect: the wiki holds it only after the approval. When a change of this session was rejected, the session's feedback holds the reason: read it, and propose a new plan that answers it.
@@ -229,7 +230,7 @@ One plan holds at most 100 writes, about ten sources, or forty chunks. More is s
    */
   readonly figures = this.flow({
     name: "figures",
-    description: "Draw the figures that topics mark as missing, save them under internal/wiki/figures/, and propose one change plan that puts each in its marker's place.",
+    description: "Draw the figures that topics mark as missing, save them in the wiki's figures folder, and propose one change plan that puts each in its marker's place.",
     access: "read-only",
     schema: {
       /** The topics to make figures for. Empty: every topic with a figure marker. */
@@ -298,8 +299,8 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
    * folder of its name a copy of each document. A copy keeps the original's body, with `copy_of` and
    * `sha256`, the hash of that body, so the return can tell the user's edits from the original's. With
    * `session`, that checkout session becomes the reading list; with `name`, it creates the session
-   * `internal/wiki/sessions/<date> <name>.md`, done at once. Only notes of `wiki/topics/` and
-   * `wiki/sources/` are checked out. It throws, and writes nothing, for an empty request or a request or
+   * `<internal>/wiki/sessions/<date> <name>.md`, done at once. Only notes of the topics and the sources are
+   * checked out. It throws, and writes nothing, for an empty request or a request or
    * notes with a line that would start a section, no document or more than 60, a note that is not knowledge,
    * a document twice, a why that is empty or more than one line, no session and no name, and a session that is
    * no checkout session of the wiki or holds a checkout already. `wiki_checkout` calls it, and returns the
@@ -319,7 +320,7 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
     const originals: string[] = [];
     for (const { path, why } of order.documents) {
       const found = wiki.resolve(path);
-      if (!found || !inKnowledge(found)) throw new Error(`${path} is not a note of ${TOPICS}/ or ${SOURCES}/; only knowledge is checked out.`);
+      if (!found || !vault.folders.inKnowledge(found)) throw new Error(`${path} is not a note of ${vault.folders.topics}/ or ${vault.folders.sources}/; only knowledge is checked out.`);
       if (originals.includes(found)) throw new Error(`The documents hold ${found} twice.`);
       if (!why?.trim() || why.includes("\n")) throw new Error(`Give ${found} a why of one line.`);
       originals.push(found);
@@ -442,7 +443,7 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
 
   /**
    * Imports a bundle: reads it from `from` (a folder of the vault, an absolute path, or a git repository URL,
-   * cloned with the person's own git), copies its originals into `internal/wiki/originals/`, creates an
+   * cloned with the person's own git), copies its originals into the originals folder, creates an
    * `import` session, and stages each note in the session's folder with a line in the session's Import
    * section that says where it stands: `new`, `near` a topic, or in `conflict` with a note that holds its path
    * or its name. A note the wiki holds already, as it is, is dropped. When every staged note is new and
@@ -547,6 +548,7 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
 
   tools(): AgentTool[] {
     const wiki = this.wiki;
+    const { topics: TOPICS, sources: SOURCES, changes: CHANGES, figures: FIGURES, wiki: WIKI } = this.vault.folders;
     return [
       defineTool({
         name: "search",
@@ -709,7 +711,7 @@ End with one line: the folder, and the counts of topics and sources. A bundle in
       }),
       defineTool({
         name: "figure",
-        description: `Saves a figure for a topic under internal/wiki/figures/<topic>/<name>.svg or .png, and returns its path and the line that embeds it. Give the figure as svg text (one <svg> with a viewBox, no script, no event handler, no reference outside itself) or as png bytes in base64. Refuses a topic that is not one, a bad SVG or PNG, a file over 1 MB (SVG) or 4 MB (PNG), and a name in use unless replace is set. The topic embeds the figure through wiki_change, as any write.`,
+        description: `Saves a figure for a topic under ${FIGURES}/<topic>/<name>.svg or .png, and returns its path and the line that embeds it. Give the figure as svg text (one <svg> with a viewBox, no script, no event handler, no reference outside itself) or as png bytes in base64. Refuses a topic that is not one, a bad SVG or PNG, a file over 1 MB (SVG) or 4 MB (PNG), and a name in use unless replace is set. The topic embeds the figure through wiki_change, as any write.`,
         input: {
           topic: z.string().describe("The topic the figure is for, as a path or a [[link]] name."),
           name: z.string().describe("The file name without its extension, such as encoder-decoder."),

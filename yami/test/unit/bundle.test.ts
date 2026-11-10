@@ -6,7 +6,10 @@ import { runTool } from "../../src/agent/index.js";
 import { link, readDocument, sectionText } from "../../src/document/index.js";
 import { runCheck, type WikiModule } from "../../src/index.js";
 import { testYami, type FsVault, type TestYami } from "../../src/testing/index.js";
-import { BUNDLE_README, isRepository, ORIGINALS, readBundle, repositoryParts, selectBundle, SOURCES, TOPICS, writeBundle, type Wiki } from "../../src/wiki/index.js";
+import { BUNDLE_README, isRepository, readBundle, repositoryParts, selectBundle, writeBundle, type Wiki } from "../../src/wiki/index.js";
+import { DEFAULT_FOLDERS } from "../../src/document/index.js";
+
+const { originals: ORIGINALS, sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami;
 let vault: FsVault;

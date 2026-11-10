@@ -1,6 +1,5 @@
 import { linkTarget } from "../document/document.js";
 import type { Vault } from "../document/vault.js";
-import { ORIGINALS } from "./folders.js";
 import { selectNotes, type Finding, type LintOptions } from "./lint.js";
 import { countPages, sourceFile, type SourceFile } from "./source.js";
 import type { Note, Wiki } from "./wiki.js";
@@ -164,7 +163,7 @@ export async function sourceExtent(vault: Vault, wiki: Wiki, source: string): Pr
   let cache = extents.get(wiki);
   if (!cache) extents.set(wiki, (cache = new Map()));
   const file = await sourceFile(vault, wiki, source);
-  const frozen = file.file.startsWith(`${ORIGINALS}/`);
+  const frozen = file.file.startsWith(`${vault.folders.originals}/`);
   const cached = frozen ? cache.get(file.file) : undefined;
   if (cached) return cached;
   const read = (async (): Promise<SourceExtent> => {

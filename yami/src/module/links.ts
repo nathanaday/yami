@@ -1,5 +1,6 @@
 import { documentName, linksOf, linkTarget, resolveLink } from "../document/document.js";
 import { FORMS, type FormKind } from "../document/schema.js";
+import type { Folders } from "../document/folders.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { formPath, KIND_OF, moduleLayout, type LinkedKind } from "./module.js";
 
@@ -29,8 +30,8 @@ export function parseName(value: string, module: string | undefined): { module: 
 }
 
 /** How a module names a form at a path: its bare name in the module, and `<module>:<name>` in another. */
-export function nameOf(path: string, module: string | undefined): string {
-  const owner = path.split("/")[1];
+export function nameOf(path: string, module: string | undefined, folders: Folders): string {
+  const owner = path.slice(folders.internal.length + 1).split("/")[0];
   return owner === module ? documentName(path) : `${owner}:${documentName(path)}`;
 }
 
@@ -41,7 +42,7 @@ export function nameOf(path: string, module: string | undefined): string {
 export async function resolveForm(vault: Vault, kind: FormKind, value: string, module: string | undefined): Promise<string | undefined> {
   const target = linkTarget(value);
   const named = parseName(target, module);
-  const path = named ? formPath(moduleLayout(named.module), kind, named.name) : target.endsWith(FORMS[kind].file) ? target : `${target}.md`;
+  const path = named ? formPath(moduleLayout(named.module, undefined, undefined, vault.folders), kind, named.name) : target.endsWith(FORMS[kind].file) ? target : `${target}.md`;
   return (await vault.exists(path)) ? path : undefined;
 }
 
@@ -50,7 +51,7 @@ export async function resolveForm(vault: Vault, kind: FormKind, value: string, m
  * its link, by path or by name in the module's articles, its internal folder, and then the whole vault.
  */
 export async function linkedDocuments(vault: Vault, module: string, properties: Properties): Promise<LinkedDocument[]> {
-  const layout = moduleLayout(module);
+  const layout = moduleLayout(module, undefined, undefined, vault.folders);
   const found: LinkedDocument[] = [];
   for (const kind of LINKED_KINDS) {
     for (const target of linksOf(properties[kind])) {

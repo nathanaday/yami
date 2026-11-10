@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { link } from "../../src/document/index.js";
 import { FsVault } from "../../src/testing/index.js";
-import { captureSource, citations, claimBefore, parseLocator, passage, resolveCitations, SOURCES, sourceExtent, TOPICS, visibleRanges, Wiki } from "../../src/wiki/index.js";
+import { captureSource, citations, claimBefore, parseLocator, passage, resolveCitations, sourceExtent, visibleRanges, Wiki } from "../../src/wiki/index.js";
+import { DEFAULT_FOLDERS } from "../../src/document/index.js";
+
+const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
 
 let root = "";
 let vault: FsVault;

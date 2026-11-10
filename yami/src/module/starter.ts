@@ -9,7 +9,7 @@ import { formPath, MODULE_ICON, moduleLayout } from "./module.js";
  * review finds the policy followed. The caller checks that the id is free.
  */
 export async function writeStarter(vault: Vault, id: string, name: string): Promise<void> {
-  const lay = moduleLayout(id);
+  const lay = moduleLayout(id, undefined, undefined, vault.folders);
   await writeDocument(vault, {
     path: lay.moduleDoc,
     properties: {

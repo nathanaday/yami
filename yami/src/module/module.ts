@@ -1,7 +1,8 @@
 import type { AgentTool } from "../agent/types.js";
-import { type LedgerView, moduleLedger, vaultLedger } from "../document/bases.js";
+import { type LedgerView, moduleLedger } from "../document/bases.js";
 import { link, parseDocument, serializeDocument, writeDocument } from "../document/document.js";
 import { FORMS, timestamp, type FormKind, type Schema } from "../document/schema.js";
+import { DEFAULT_FOLDERS, WIKI_ID, type Folders } from "../document/folders.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { VERSION } from "../version.js";
 import { hashBytes } from "../wiki/source.js";
@@ -12,8 +13,6 @@ import type { NewSession, Session } from "./session.js";
 import type { ModuleProblem } from "./vault-module.js";
 import type { Yami } from "./yami.js";
 
-export const VAULT_LEDGER = "Yami.base";
-export const INTERNAL = "internal";
 /** The icon of a module that names none. */
 export const MODULE_ICON = "box";
 
@@ -32,9 +31,9 @@ export type Place = "folder" | "internal";
 
 /** The vault paths of a module. */
 export interface Layout {
-  /** The module's own folder, for a person to read: `<id>`. */
+  /** The module's own folder, for a person to read: `<id>`, or the wiki folder of the vault's settings for the wiki. */
   folder: string;
-  /** What the module needs, out of the way of the person: `internal/<id>`. */
+  /** What the module needs, out of the way of the person: `<internal>/<id>`. */
   internal: string;
   /** The folder of the session documents. */
   sessions: string;
@@ -70,11 +69,15 @@ export interface DocumentRef<K extends DocumentKind = DocumentKind> {
 export interface FormParts {
   name: string;
   description: string;
-  body: string;
+  /** The body, or a function that writes it for the vault's folders. */
+  body: FormText;
   /** Files beside the form's file, by name, which the document names by path. */
-  files?: Record<string, string>;
+  files?: Record<string, FormText>;
   [property: string]: unknown;
 }
+
+/** A document's text, or a function that writes it for the vault's folders, so it can name where the wiki is. */
+export type FormText = string | ((folders: Folders) => string);
 
 /**
  * A document that a module installs into its internal folder: an agent, a policy, a promise, a skill, or an
@@ -87,11 +90,11 @@ export class ModuleDocument<K extends DocumentKind = DocumentKind> implements Do
     readonly kind: K,
     readonly name: string,
     /** Markdown, with its properties as frontmatter. */
-    readonly text: string,
+    readonly text: FormText,
     /** Properties on top of the frontmatter. */
     readonly properties: Properties = {},
     /** Other files, by name, which the document or its workers read when needed. They go beside the document. */
-    readonly files: Record<string, string> = {},
+    readonly files: Record<string, FormText> = {},
   ) {}
 
   /** The vault path of the document. */
@@ -110,13 +113,13 @@ export class ModuleDocument<K extends DocumentKind = DocumentKind> implements Do
     const path = this.path;
     // A form's folder and file give its kind and its module, so it has no Yami properties.
     const own = this.kind === "article" ? { type: this.kind, module: this.module.id } : {};
-    let text = this.text;
+    let text = typeof this.text === "function" ? this.text(vault.folders) : this.text;
     if (Object.keys({ ...own, ...this.properties }).length) {
-      const doc = parseDocument(vault, path, this.text);
+      const doc = parseDocument(vault, path, text);
       text = serializeDocument(vault, { path, properties: { ...own, ...doc.properties, ...this.properties, ...own }, body: doc.body });
     }
     const folder = path.slice(0, path.lastIndexOf("/"));
-    return new Map([[path, text], ...Object.entries(this.files).map(([name, file]): [string, string] => [`${folder}/${name}`, file])]);
+    return new Map([[path, text], ...Object.entries(this.files).map(([name, file]): [string, string] => [`${folder}/${name}`, typeof file === "function" ? file(vault.folders) : file])]);
   }
 }
 
@@ -308,8 +311,8 @@ export abstract class YamiModule {
   readonly ledgerIn: Place = "internal";
   /** Tables that the module adds to its ledger, beyond the session tables. */
   readonly ledgerViews?: LedgerView[];
-  /** Text added to the first prompt of each run of a session of the module. */
-  readonly instructions?: string;
+  /** Text added to the first prompt of each run of a session of the module, or a function that writes it for the vault's folders. */
+  readonly instructions?: FormText;
   /** Checks that the module's promises can name. They come before the core checks of the same name. */
   readonly checks?: Record<string, Check>;
   /**
@@ -324,9 +327,9 @@ export abstract class YamiModule {
    */
   readonly icon: string = MODULE_ICON;
   /**
-   * Whether the module also takes flows and forms from the vault: each valid `internal/<id>/flows/<name>/FLOW.md`
+   * Whether the module also takes flows and forms from the vault: each valid `<internal>/<id>/flows/<name>/FLOW.md`
    * is a flow of the module, after the flows of its code, and each skill a person adds under
-   * `internal/<id>/skills/` reaches the agents as `/<id>:<skill>`. Yami reads them at each `discover`.
+   * `<internal>/<id>/skills/` reaches the agents as `/<id>:<skill>`. Yami reads them at each `discover`.
    * Default false: a `FLOW.md` in the module's folder is then a problem.
    */
   readonly vaultFlows: boolean = false;
@@ -359,8 +362,9 @@ export abstract class YamiModule {
     return { folder: this.#color, internal: mute(this.#color) };
   }
 
+  /** The module's paths, in the folders of its Yami's vault, or the default folders before it is added to one. */
   get layout(): Layout {
-    return moduleLayout(this.id, this.sessionsIn, this.ledgerIn);
+    return moduleLayout(this.id, this.sessionsIn, this.ledgerIn, this.#yami?.vault.folders);
   }
 
   /** The module's flows: those of its code, then, for a module that takes `vaultFlows`, those of the vault that the last `discover` found. */
@@ -407,19 +411,18 @@ export abstract class YamiModule {
   }
 
   /**
-   * Writes the vault ledger, the module ledger, the module document, and the module's documents, and returns
+   * Writes the module ledger, the module document, and the module's documents, and returns
    * the documents it kept for a person. A host calls it on every start. The ledgers and the module document
    * are written once, so a person's edits stay. A file of the module's documents is written when it is
    * missing, and replaced when it holds the text that Yami wrote last; a file with any other text holds a
    * person's edits, so it stays, and a problem says so. A file that Yami wrote and the module no longer has
-   * is removed, unless a person edited it. `internal/<id>/installed.json` records the hash of each text that
+   * is removed, unless a person edited it. `<internal>/<id>/installed.json` records the hash of each text that
    * Yami wrote, of its properties and its body, so two hosts that write YAML in their own ways agree.
    */
   async install(): Promise<ModuleProblem[]> {
     const vault = this.vault;
     const lay = this.layout;
     const sessions = this.sessionsIn !== "none";
-    if (!(await vault.exists(VAULT_LEDGER))) await vault.write(VAULT_LEDGER, vaultLedger(vault));
     if (sessions && !(await vault.exists(lay.ledger))) await vault.write(lay.ledger, moduleLedger(vault, this.id, this.ledgerViews));
     if (!(await vault.exists(lay.moduleDoc))) {
       const ledger = sessions ? `\n\nSessions: [[${lay.ledger}|${this.name} sessions]]` : "";
@@ -463,12 +466,12 @@ export abstract class YamiModule {
    * A skill in the standard `SKILL.md` form: markdown whose frontmatter holds its `name` and `description`,
    * or its parts. `files` go beside `SKILL.md`, for the skill or its workers to read when needed.
    */
-  protected skill(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"skill"> {
+  protected skill(form: FormText | FormParts, files?: Record<string, FormText>): ModuleDocument<"skill"> {
     return this.form("skill", form, files);
   }
 
   /** A policy, `POLICY.md`: rules that a session follows. The body is the rule text. */
-  protected policy(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"policy"> {
+  protected policy(form: FormText | FormParts, files?: Record<string, FormText>): ModuleDocument<"policy"> {
     return this.form("policy", form, files);
   }
 
@@ -476,7 +479,7 @@ export abstract class YamiModule {
    * A promise, `PROMISE.md`: a deliverable, and how Yami checks it. The `check` property names a check, with
    * the properties it reads. A promise with no check is for the review to judge.
    */
-  protected promise(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"promise"> {
+  protected promise(form: FormText | FormParts, files?: Record<string, FormText>): ModuleDocument<"promise"> {
     return this.form("promise", form, files);
   }
 
@@ -484,7 +487,7 @@ export abstract class YamiModule {
    * An agent, `AGENT.md`: the brief of a worker that a session or a conversation runs in a fresh context with
    * the tool `yami_agent`, on both harnesses. Its `access` is `read-only` (the default) or `edit`.
    */
-  protected agent(form: string | FormParts, files?: Record<string, string>): ModuleDocument<"agent"> {
+  protected agent(form: FormText | FormParts, files?: Record<string, FormText>): ModuleDocument<"agent"> {
     return this.form("agent", form, files);
   }
 
@@ -512,14 +515,16 @@ export abstract class YamiModule {
     return action;
   }
 
-  private form<K extends Exclude<DocumentKind, "article">>(kind: K, form: string | FormParts, files?: Record<string, string>): ModuleDocument<K> {
+  private form<K extends Exclude<DocumentKind, "article">>(kind: K, form: FormText | FormParts, files?: Record<string, FormText>): ModuleDocument<K> {
     // The id is set by now when the class declares it first, as a module does.
     const what = `${kind === "agent" ? "An" : "A"} ${kind} of the ${this.id ?? this.constructor.name} module`;
     let doc: ModuleDocument<K>;
-    if (typeof form === "string") {
-      const name = frontmatterValue(form, "name");
+    if (typeof form === "string" || typeof form === "function") {
+      // The name and the description do not change with the folders.
+      const text = typeof form === "function" ? form(DEFAULT_FOLDERS) : form;
+      const name = frontmatterValue(text, "name");
       if (!name) throw new Error(`${what} has no name in its frontmatter.`);
-      if (!frontmatterValue(form, "description")) throw new Error(`${what}, ${name}, has no description in its frontmatter.`);
+      if (!frontmatterValue(text, "description")) throw new Error(`${what}, ${name}, has no description in its frontmatter.`);
       doc = new ModuleDocument(this, kind, name, form, {}, files);
     } else {
       const { name, description, body, files: own, ...more } = form;
@@ -573,14 +578,18 @@ async function fingerprint(vault: Vault, path: string, text: string): Promise<st
   return hashBytes(new TextEncoder().encode(form));
 }
 
-/** The vault paths of a module with an id, from where it keeps its sessions and its ledger. */
-export function moduleLayout(id: string, sessionsIn: Place | "none" = "folder", ledgerIn: Place = "internal"): Layout {
-  const internal = `${INTERNAL}/${id}`;
+/**
+ * The vault paths of a module with an id, from where it keeps its sessions and its ledger, in a vault's
+ * folders. The module with the id `wiki` has the vault's wiki folder as its folder.
+ */
+export function moduleLayout(id: string, sessionsIn: Place | "none" = "folder", ledgerIn: Place = "internal", folders: Folders = DEFAULT_FOLDERS): Layout {
+  const internal = folders.internalOf(id);
+  const folder = id === WIKI_ID ? folders.wiki : id;
   return {
-    folder: id,
+    folder,
     internal,
-    sessions: sessionsIn === "internal" ? `${internal}/sessions` : id,
-    ledger: `${ledgerIn === "folder" ? id : internal}/sessions.base`,
+    sessions: sessionsIn === "internal" ? `${internal}/sessions` : folder,
+    ledger: `${ledgerIn === "folder" ? folder : internal}/sessions.base`,
     moduleDoc: `${internal}/${id}.md`,
     folders: {
       agents: `${internal}/${FORMS.agent.folder}`,
@@ -593,7 +602,7 @@ export function moduleLayout(id: string, sessionsIn: Place | "none" = "folder", 
   };
 }
 
-/** The vault path of a form: `internal/<module>/<folder>/<name>/<FILE>.md`, such as `internal/notes/policies/cite-sources/POLICY.md`. */
+/** The vault path of a form: `<internal>/<module>/<folder>/<name>/<FILE>.md`, such as `internal/notes/policies/cite-sources/POLICY.md`. */
 export function formPath(lay: Layout, kind: FormKind, name: string): string {
   return `${lay.internal}/${FORMS[kind].folder}/${name}/${FORMS[kind].file}`;
 }

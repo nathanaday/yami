@@ -2,9 +2,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => ({}));
 
-import { BASE_SKILL, BASE_SKILL_TEXT, type Properties } from "../../../src/index.js";
+import { BASE_SKILL_TEXT, baseSkill, type Properties } from "../../../src/index.js";
 import { watchModules } from "../../../src/obsidian/discovery.js";
 import { testYami, type TestYami } from "../../../src/testing/index.js";
+import { DEFAULT_FOLDERS } from "../../../src/document/index.js";
+
+const BASE_SKILL = baseSkill(DEFAULT_FOLDERS);
 
 beforeAll(() => {
   Object.assign(globalThis, { window: globalThis });

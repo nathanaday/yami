@@ -1,9 +1,24 @@
 # Changelog
 
-## Unreleased
+## 0.23.0 · folders a vault chooses
+
+A vault keeps its wiki and Yami's internal folder where the person wants them, moves them with every link into them, and holds nothing of Yami's at its root.
 
 ### Added
+- **Folders a vault chooses.** The internal folder (default `internal`) and the wiki folder (default `wiki`) can be any folder of the vault, as the hidden file `.yami.json` at its root says: `{ "internal": "system", "wiki": "library/wiki" }`. `vault.folders`, a `Folders`, gives every path that comes from them, and every part of Yami builds its paths there: the modules' layouts, the base skill, the protected map, the wiki's index, changes, versions, sources, originals, figures, and bundles, the tools' descriptions, the folder colors, and the wiki commands. `yami/document` has `Folders`, `readFolders`, `parseFolderSettings`, `folderSettingsText`, `folderProblem`, `normalizeFolder`, `mapFolders`, `DEFAULT_FOLDERS`, `DEFAULT_FOLDER_SETTINGS`, `FOLDER_SETTINGS`, and `WIKI_ID`. A hidden folder is refused, since Obsidian leaves it out of its index.
+- **Moving the folders.** `yami.moveFolders({ internal?, wiki? })`, and `moveFolders(yami, settings)` in `yami`, move either folder or both, write `.yami.json`, and carry along each link and embed into a moved folder, each module's `installed.json`, the protected map, and the Writes of each change document. It refuses folders that overlap, a path in use, another module's folder, and a move of the wiki while a change plan waits. The host builds its Yami again afterwards; in Obsidian, the person reloads.
+- A form, a file beside it, and a module's `instructions` can be a function of the vault's `Folders` (`FormText`), written when Yami installs the document or starts a run. The wiki's skills, agents, policies, and `page-forms.md` name the vault's own folders.
+- `Vault.rename(from, to)` moves a file or a folder; in Obsidian, through the file manager, so links follow.
 - `skills` on `Yami`, `createYami`, and `testYami`: skill-set folders of the host, as absolute paths or a function that gives them, which every agent gets beside Yami's and the modules'. `yami.refreshSkills()` applies a change of what the function gives, for sessions that start after it. A plugin that finds skills in the vault, as Duet does with `SKILL.md` folders, hands them to every conversation note this way, on both harnesses.
+
+### Changed
+- A snapshot's archive records the folders it was written with, and a restore puts each note at the vault's folders now. A snapshot's archive is read beside its document, wherever the folder moved.
+- A bundle is always written in the default layout (`wiki/topics/`, `wiki/sources/`, `internal/wiki/originals/`), with its links mapped to it, and an import maps it to the vault's own folders, so bundles pass between vaults whose folders differ.
+- `readProtected` and `writeProtected` take the map's path as an optional third argument.
+
+### Removed
+- **The vault ledger, `Yami.base`.** Yami no longer writes a base at the vault's root; each module's ledger lists its sessions. `vaultLedger` and `VAULT_LEDGER` are gone. A vault keeps the `Yami.base` an earlier version wrote until the person deletes it.
+- The folder constants: `TOPICS`, `SOURCES`, `KNOWLEDGE`, `WIKI`, `WIKI_INTERNAL`, `SNAPSHOTS`, `CHANGES`, `CACHE_PATH`, `ORIGINALS`, and `inKnowledge` in `yami/wiki`, `FIGURES` in `yami/wiki`, `INTERNAL` in `yami`, `PROTECTED_PATH` in `yami/document`, and `BASE_SKILL` in `yami`. Use `vault.folders` (`wiki.folders` on a `Wiki`), and `baseSkill(folders)` and `yamiSkills(folders)`. `definesModule(path, folders)` and `nameOf(path, module, folders)` take the folders.
 
 ## 0.22.0 · citations you can follow, and sources that stay current
 

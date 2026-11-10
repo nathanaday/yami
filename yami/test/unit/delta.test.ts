@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, readDocument } from "../../src/document/index.js";
 import { FsVault, testYami } from "../../src/testing/index.js";
-import { captureSource, changedRuns, CONTEXT_LINES, deltaChunks, lineDelta, mapRange, movedCitations, SOURCES, TOPICS, Wiki } from "../../src/wiki/index.js";
+import { captureSource, changedRuns, CONTEXT_LINES, deltaChunks, lineDelta, mapRange, movedCitations, Wiki } from "../../src/wiki/index.js";
+import { DEFAULT_FOLDERS } from "../../src/document/index.js";
+
+const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
 
 let root = "";
 let vault: FsVault;

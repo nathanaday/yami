@@ -2,7 +2,7 @@ import { basename, link, LINK, linkTarget, parseDocument, PropertiesError, readD
 import { SOURCE, timestamp, TOPIC, validate, withDefaults, type ChangeStatus } from "../document/schema.js";
 import { excerpt, protectedLost, readProtected, type ProtectedMap } from "../document/protected.js";
 import type { Properties, Vault } from "../document/vault.js";
-import { CHANGES, inKnowledge, SOURCES, TOPICS } from "./folders.js";
+import type { Folders } from "../document/folders.js";
 import { hashBytes } from "./source.js";
 import { readArchive, versions } from "./versions.js";
 import type { Wiki } from "./wiki.js";
@@ -146,7 +146,7 @@ export class InvalidPlan extends Error {
 }
 
 const SCHEMA_OF = { topic: TOPIC, source: SOURCE } as const;
-const typeOf = (path: string) => (path.startsWith(`${TOPICS}/`) ? "topic" : "source");
+const typeOf = (folders: Folders, path: string) => (path.startsWith(`${folders.topics}/`) ? "topic" : "source");
 
 /** How a plan is checked: `person` for a plan of the person's own edits, such as the return of a checkout, which may change the text they protected. */
 export interface ValidateOptions {
@@ -159,6 +159,7 @@ export interface ValidateOptions {
  * refused unless the plan is the person's own (`person`).
  */
 export async function validatePlan(wiki: Wiki, plan: ChangePlan, options: ValidateOptions = {}): Promise<string[]> {
+  const { folders } = wiki;
   const problems: string[] = [];
   const warnings: string[] = [];
   let guarded: ProtectedMap | undefined;
@@ -181,8 +182,8 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan, options: Valida
   for (const [i, write] of (plan.writes ?? []).entries()) {
     const label = `write ${i + 1} (${write.op} ${write.path})`;
     if (!["create", "modify", "remove"].includes(write.op)) problems.push(`${label}: op must be create, modify, or remove`);
-    if (typeof write.path !== "string" || !inKnowledge(write.path) || write.path.includes("..")) {
-      problems.push(`${label}: the path must be a note under ${TOPICS}/ or ${SOURCES}/`);
+    if (typeof write.path !== "string" || !folders.inKnowledge(write.path) || write.path.includes("..")) {
+      problems.push(`${label}: the path must be a note under ${folders.topics}/ or ${folders.sources}/`);
       continue;
     }
     if (seen.has(write.path)) problems.push(`${label}: the plan writes this note twice`);
@@ -191,7 +192,7 @@ export async function validatePlan(wiki: Wiki, plan: ChangePlan, options: Valida
     if (write.op === "create") {
       if (exists) problems.push(`${label}: the note exists; use modify`);
       created.add(write.path);
-      const type = typeOf(write.path);
+      const type = typeOf(folders, write.path);
       const properties = withDefaults({ ...write.properties, type }, SCHEMA_OF[type]);
       if (write.properties?.type && write.properties.type !== type) problems.push(`${label}: a note in this folder has type ${type}`);
       for (const error of validate(properties, SCHEMA_OF[type])) problems.push(`${label}: ${error}`);
@@ -256,7 +257,7 @@ export async function resolveWrites(wiki: Wiki, plan: ChangePlan): Promise<Propo
   for (const { op, path, why, properties, body } of plan.writes) {
     const resolved: ProposedWrite = { op, path, ...(why?.trim() && { why: why.trim() }) };
     if (op === "create") {
-      const type = typeOf(path);
+      const type = typeOf(wiki.folders, path);
       // The type first, so the note reads as the page forms show it.
       const { type: _given, ...rest } = properties ?? {};
       resolved.properties = withDefaults({ type, ...rest }, SCHEMA_OF[type]);
@@ -309,8 +310,8 @@ export async function applyWrites(vault: Vault, writes: ProposedWrite[], now: st
 export async function changePath(vault: Vault, title: string, now: string): Promise<string> {
   const safe = title.replace(/[\\/:*?"<>|#^[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80) || "Change";
   const stamp = `${now.slice(0, 10)} ${now.slice(11, 16).replace(":", "")}`;
-  let path = `${CHANGES}/${stamp} ${safe}.md`;
-  for (let n = 2; await vault.exists(path); n++) path = `${CHANGES}/${stamp} ${safe} (${n}).md`;
+  let path = `${vault.folders.changes}/${stamp} ${safe}.md`;
+  for (let n = 2; await vault.exists(path); n++) path = `${vault.folders.changes}/${stamp} ${safe} (${n}).md`;
   return path;
 }
 
@@ -393,6 +394,11 @@ function unreadable(path: string, reason: string): Error {
   return new Error(`The change document ${basename(path)} does not parse: ${reason}. Its Writes section is what an approval applies, so a hand edit must keep its form; restore it, or reject the change.`);
 }
 
+/** A change document's text with the note of each write moved, as `move` moves a path, for a move of the wiki's folder. */
+export function moveWritePaths(text: string, move: (path: string) => string): string {
+  return text.replace(new RegExp(WRITE_HEADING.source, "gm"), (_line, op: string, path: string) => `### ${op} · ${move(path.trim())}`);
+}
+
 /** The writes of a change document's Writes section, as `changeDocument` wrote them. */
 function parseWrites(vault: Vault, path: string, body: string): ProposedWrite[] {
   const lines = body.split("\n");
@@ -422,7 +428,7 @@ function parseWrites(vault: Vault, path: string, body: string): ProposedWrite[] 
     const heading = WRITE_HEADING.exec(line);
     if (heading) {
       const target = heading[2]!.trim();
-      if (!inKnowledge(target)) throw unreadable(path, `${heading[1]} ${target} is not a note under ${TOPICS}/ or ${SOURCES}/`);
+      if (!vault.folders.inKnowledge(target)) throw unreadable(path, `${heading[1]} ${target} is not a note under ${vault.folders.topics}/ or ${vault.folders.sources}/`);
       part = { op: heading[1] as Write["op"], path: target, prose: [] };
       parts.push(part);
       continue;
@@ -540,7 +546,7 @@ async function summarize(vault: Vault, doc: Document): Promise<ChangeSummary> {
 /** The changes with a status, newest first. A change document whose properties do not parse is left out until they do. */
 export async function listChanges(vault: Vault, status: ChangeStatus | "all"): Promise<ChangeSummary[]> {
   const out: ChangeSummary[] = [];
-  for (const path of await vault.list(CHANGES)) {
+  for (const path of await vault.list(vault.folders.changes)) {
     if (!path.endsWith(".md")) continue;
     let doc: Document;
     try {

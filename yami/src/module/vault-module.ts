@@ -1,10 +1,11 @@
 import { basename, documentName, link, linksOf, parseDocument, PropertiesError, resolveLink, type Document } from "../document/document.js";
 import { FORMS, MODULE, SESSION, validate, type FieldType, type FormKind, type Schema } from "../document/schema.js";
+import type { Folders } from "../document/folders.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { YAMI_ID } from "./base-skill.js";
 import { hexColor } from "./colors.js";
 import { parseName, resolveForm } from "./links.js";
-import { formPath, ID, idFromName, INTERNAL, isVaultFlow, KIND_OF, MODULE_ICON, moduleLayout, YamiModule, type DocumentRef, type FlowOptions, type Layout, type LinkedKind } from "./module.js";
+import { formPath, ID, idFromName, isVaultFlow, KIND_OF, MODULE_ICON, moduleLayout, YamiModule, type DocumentRef, type FlowOptions, type Layout, type LinkedKind } from "./module.js";
 
 /**
  * Something wrong with a vault module's documents, which keeps a module or a flow out until a person fixes
@@ -106,10 +107,12 @@ export async function readVaultModules(
   vault: Vault,
   code: readonly YamiModule[],
 ): Promise<{ definitions: VaultModuleDefinition[]; extended: VaultFlows[]; problems: ModuleProblem[] }> {
-  const files = await vault.list(INTERNAL);
+  const { internal } = vault.folders;
+  const files = await vault.list(internal);
   const folders = new Map<string, Folder>();
   for (const path of [...files].sort()) {
-    const parts = path.split("/");
+    // The path's parts as from a one-folder internal folder: the module id comes second.
+    const parts = ["", ...path.slice(internal.length + 1).split("/")];
     const kind = FORM_OF.get(parts[2] ?? "");
     if (!kind) continue;
     const folder = folders.get(parts[1]!) ?? folders.set(parts[1]!, { forms: [], flat: [] }).get(parts[1]!)!;
@@ -120,7 +123,7 @@ export async function readVaultModules(
   const modules: { id: string; folder: Folder; doc: Document; problem: Problem }[] = [];
   const open: { module: YamiModule; folder: Folder; problem: Problem }[] = [];
   for (const [id, folder] of [...folders].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    const root = `${INTERNAL}/${id}`;
+    const root = vault.folders.internalOf(id);
     const problem: Problem = (path, message) => problems.push({ module: id, path, ...(path !== root && { document: path }), message });
     const owner = code.find((module) => module.id === id);
     if (owner?.vaultFlows) {
@@ -141,7 +144,7 @@ export async function readVaultModules(
       problem(root, `"${id}" cannot be a module id. Rename the folder${better ? ` to ${better}` : ""}: lower-case letters, digits, and dashes.`);
       continue;
     }
-    const document = moduleLayout(id).moduleDoc;
+    const document = moduleLayout(id, undefined, undefined, vault.folders).moduleDoc;
     if (!files.includes(document)) {
       problem(root, `The folder has flows but no module document. Create ${document} with the property type: module.`);
       continue;
@@ -189,7 +192,7 @@ export async function readVaultModules(
     }
     const instructions = text("instructions");
 
-    const layout = moduleLayout(id);
+    const layout = moduleLayout(id, undefined, undefined, vault.folders);
     const schema: Schema = {};
     const flows: FlowOptions[] = [];
     for (const { kind, path } of folder.forms) {
@@ -221,7 +224,7 @@ export async function readVaultModules(
   }
   const extended: VaultFlows[] = [];
   for (const { module, folder, problem } of open) {
-    const layout = moduleLayout(module.id);
+    const layout = module.layout;
     const own = module.flows.filter((flow) => !isVaultFlow(flow)).map((flow) => flow.name);
     const flows: FlowOptions[] = [];
     for (const { kind, path } of folder.forms) {
@@ -254,9 +257,10 @@ export async function readVaultModules(
  * `internal/<id>/<id>.md`, or a file in the folder of a form, such as `internal/<id>/policies/<name>/POLICY.md`
  * or a flat `internal/<id>/policies/<name>.md`.
  */
-export function definesModule(path: string): boolean {
-  const parts = path.split("/");
-  return parts[0] === INTERNAL && path.endsWith(".md") && ((parts.length === 3 && parts[2] === `${parts[1]}.md`) || (parts.length >= 4 && FORM_OF.has(parts[2]!)));
+export function definesModule(path: string, folders: Folders): boolean {
+  if (!path.startsWith(`${folders.internal}/`)) return false;
+  const parts = ["", ...path.slice(folders.internal.length + 1).split("/")];
+  return path.endsWith(".md") && ((parts.length === 3 && parts[2] === `${parts[1]}.md`) || (parts.length >= 4 && FORM_OF.has(parts[2]!)));
 }
 
 /**
@@ -268,7 +272,7 @@ function flatForm({ kind, path }: { kind: FormKind; path: string }, files: reado
   const name = idFromName(basename(path)) || "name";
   const target = `${path.slice(0, path.lastIndexOf("/"))}/${name}/${file}`;
   if (files.includes(target)) return `${target} replaces this file, and Yami reads only that one. Copy any edits you want into it, then delete this file.`;
-  if (owner && installed) return `An earlier Yami wrote this file. The ${owner.name} module now installs its ${folder} as folders, in ${moduleLayout(owner.id).folders[folder]}/<name>/${file}, and does not read this file. Copy any edits you want into the matching ${kind}, then delete this file.`;
+  if (owner && installed) return `An earlier Yami wrote this file. The ${owner.name} module now installs its ${folder} as folders, in ${owner.layout.folders[folder]}/<name>/${file}, and does not read this file. Copy any edits you want into the matching ${kind}, then delete this file.`;
   const a = article(kind);
   return `${a[0]!.toUpperCase()}${a.slice(1)} ${kind} is a folder with ${article(file)} ${file} in it. Move this file to ${target}, and set name: ${name}.`;
 }
@@ -348,7 +352,7 @@ async function readFlow(vault: Vault, doc: Document, module: string, layout: Lay
       if (!path) {
         fail(
           named
-            ? `The flow names the ${kind} "${value}", which is not in the vault. Create ${formPath(moduleLayout(named.module), kind, named.name)}, or fix the name in ${field}.`
+            ? `The flow names the ${kind} "${value}", which is not in the vault. Create ${formPath(moduleLayout(named.module, undefined, undefined, vault.folders), kind, named.name)}, or fix the name in ${field}.`
             : `The flow names the ${kind} "${value}", which is no name. Name a ${kind} by its folder's name, or as <module>:<name>, in ${field}.`,
         );
       } else if (broken.has(path)) fail(`The flow names the ${kind} "${value}", whose document has a problem. Fix ${path} first.`);

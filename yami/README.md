@@ -2,7 +2,7 @@
 
 Yami is a TypeScript library for building AI agents into Obsidian plugins. Each piece of agent work is a markdown note in the vault: the note says what the work is, which skills and agents it may use, which policies it must follow, and what it must deliver. Yami runs Claude Code or Codex on that note in a loop, checks what code can check, has a fresh read-only agent review the rest, and records every step in the vault.
 
-This README is for authors of Obsidian plugins built on Yami. It covers installing the library, a minimal plugin, and the reference for each package entry. The library is at version 0.22.0. The plugins built on it, [Yami Wiki](https://github.com/nathanaday/yami-wiki), [Yami Threads](https://github.com/nathanaday/yami-threads), and [Duet](https://github.com/nathanaday/obsidian-duet), live in their own repositories. The design policy is in [`design.md`](../design.md).
+This README is for authors of Obsidian plugins built on Yami. It covers installing the library, a minimal plugin, and the reference for each package entry. The library is at version 0.23.0. The plugins built on it, [Yami Wiki](https://github.com/nathanaday/yami-wiki), [Yami Threads](https://github.com/nathanaday/yami-threads), and [Duet](https://github.com/nathanaday/obsidian-duet), live in their own repositories. The design policy is in [`design.md`](../design.md).
 
 ## Install
 
@@ -11,7 +11,7 @@ Yami is not on npm. A plugin takes it from a GitHub release by the URL of its ta
 ```json
 {
   "dependencies": {
-    "yami": "https://github.com/nathanaday/yami/releases/download/yami-0.22.0/yami-0.22.0.tgz"
+    "yami": "https://github.com/nathanaday/yami/releases/download/yami-0.23.0/yami-0.23.0.tgz"
   },
   "devDependencies": {
     "@codemirror/state": "^6.7.6",
@@ -206,7 +206,6 @@ A request can hold any Markdown except a level-2 heading line, which would start
 A module's documents are installed into the vault, so users can read and edit them. The layout of a module with the id `notes`:
 
 ```
-Yami.base                              vault ledger: every module, and every session grouped by module
 notes/                                 the sessions, one document each
   weekly.md
 internal/notes/                        what the module needs, out of the way of the sessions
@@ -229,6 +228,14 @@ conversations/
 
 A code module installs no `FLOW.md`: its flows are the code of `this.flow`, and a `FLOW.md` that Yami never reads would mislead a person who edits it.
 
+#### Where the Folders Go
+
+Two folders of the layout are the vault's to choose: the internal folder (default `internal`) and the wiki's folder (default `wiki`). The hidden file `.yami.json` at the vault's root holds the choice, as `{ "internal": "system", "wiki": "library/wiki" }`; a vault without the file has the defaults, and a setting at its default is left out of the file. `vault.folders`, a `Folders`, gives every path that comes from them: `internal`, `wiki`, `topics`, `sources`, `wikiInternal`, `changes`, `snapshots`, `originals`, `figures`, `cache`, `protected`, `internalOf(id)`, `inKnowledge(path)`, and `inWiki(path)`. A module's `layout` takes its paths from them, so the module `notes` keeps its documents in `system/notes/` when the internal folder is `system`, and the wiki module's folder is the wiki folder. Neither folder can be hidden: Obsidian leaves a folder whose name starts with a dot out of its index, so its notes, links, and embeds would stop working. The two must not overlap.
+
+A module's texts can name these folders: a form, a file beside it, or the module's `instructions` can be a function of the `Folders` (`FormText`), which Yami calls when it installs the document or starts a run. The wiki's skills and agents do this, so an agent reads `library/wiki/topics/` where the vault keeps its topics.
+
+`yami.moveFolders({ internal?, wiki? })` moves either folder, or both, and writes `.yami.json`. Each link and embed in the vault's notes that leads into a moved folder follows it, also when Obsidian's own link updates are off, and so do the paths in each `installed.json`, in the protected text map, and in the Writes of each change document. A version of the wiki that a snapshot took before the move comes back at the new paths. It refuses a hidden folder, folders that overlap, a path where something is already, the folder of another module, and a move of the wiki while a change plan waits for approval. Each Yami of the vault keeps the folders it started with, so the host builds it again after a move; in Obsidian, the person reloads the app.
+
 `module.install()`, which `yami.enable()` calls on every start, keeps a person's edits and keeps the documents current:
 
 - It writes each file of the module's documents (a form, an article, and the files beside a form) when no file is at its path.
@@ -236,7 +243,7 @@ A code module installs no `FLOW.md`: its flows are the code of `this.flow`, and 
 - It keeps a file with any other text, since it holds a person's edits, and adds a `ModuleProblem` with the module's id to `yami.problems`, which says to delete the file to get the new text at the next start.
 - It removes a file that Yami wrote and the module no longer has, unless a person edited it.
 
-`internal/<id>/installed.json` records the SHA-256 of each text that Yami wrote. A vault that an earlier Yami set up has no record, so each of its documents that differs from this version's text is kept, with a problem, until the person deletes it. `install()` returns these problems. The module document and the ledgers are written once and never replaced. The ledgers are Obsidian bases, live views over the properties of the session documents, and Yami keeps those properties current.
+`<internal>/<id>/installed.json` records the SHA-256 of each text that Yami wrote. A vault that an earlier Yami set up has no record, so each of its documents that differs from this version's text is kept, with a problem, until the person deletes it. `install()` returns these problems. The module document and the ledgers are written once and never replaced. The ledgers are Obsidian bases, live views over the properties of the session documents, and Yami keeps those properties current.
 
 ## Package Entries
 
@@ -258,7 +265,7 @@ Only `yami/obsidian` uses the Obsidian API, CodeMirror, and the DOM. The other e
 
 ## `yami`
 
-`VERSION` is the version of the package as its `package.json` gives it, such as `"0.22.0"`. A host can show it, for example in a bug report, or check it when its build and the CHANGELOG seem to disagree.
+`VERSION` is the version of the package as its `package.json` gives it, such as `"0.23.0"`. A host can show it, for example in a bug report, or check it when its build and the CHANGELOG seem to disagree.
 
 ### Modules
 
@@ -368,9 +375,9 @@ A vault module is a `VaultModule`, a subclass of `YamiModule`, so a host uses it
 | Call | What it does |
 | --- | --- |
 | `yami.discover()` | Writes the base skill when it is missing or holds a text that an earlier Yami shipped (see [The Yami](#the-yami)). Reads the vault modules again, and updates `yami.modules` and `yami.problems`. A module whose documents did not change keeps its object. A new module gets its ledger, and the agents get the skill sets as they are now. A live run keeps the module and the flow it started with. Calls run one after another. `yami.enable()` calls it, and in Obsidian `createYami` calls it after the vault changes (see [`watchModules`](#objects-for-a-hosts-own-commands-and-views)). |
-| `yami.problems` | What a person must fix or know, from the last `discover`, by module and by document. Each `ModuleProblem` has the `module` id, the `path` of its document or folder, the `document` with the problem when one holds it (a view can open it; there is none for a problem of the folder, such as its name or a missing module document), and a `message` that says how to fix it. A problem of the module `yami`, at `BASE_SKILL`, says that the base skill holds a person's edits and not the text of this version. |
+| `yami.problems` | What a person must fix or know, from the last `discover`, by module and by document. Each `ModuleProblem` has the `module` id, the `path` of its document or folder, the `document` with the problem when one holds it (a view can open it; there is none for a problem of the folder, such as its name or a missing module document), and a `message` that says how to fix it. A problem of the module `yami`, at `baseSkill(vault.folders)`, says that the base skill holds a person's edits and not the text of this version. |
 | `yami.onModulesChange(listener)` | Calls the listener when a `discover` finds a vault module or a flow that is new, changed, or gone, or a problem that is new or fixed. Returns the function that stops it. |
-| `yami.createModule(name)` | Writes a starter vault module, `internal/<idFromName(name)>/`, in the five forms: the module document `<id>.md`; the flow `flows/task/FLOW.md`; the skill `skills/task/SKILL.md`; the read-only agent `agents/checker/AGENT.md`; the policy `policies/stay-in-scope/POLICY.md`; and the promise `promises/result-note/PROMISE.md`, with the `exists` check on `<id>/{{session}}/Result.md`. Then it discovers and returns the new module. A session from the starter runs to `done` when the agent writes its result note and the review finds the policy followed. It refuses a name that gives no id, `yami`, and an id that a module or a folder of `internal/` has. |
+| `yami.createModule(name)` | Writes a starter vault module, `<internal>/<idFromName(name)>/`, in the five forms: the module document `<id>.md`; the flow `flows/task/FLOW.md`; the skill `skills/task/SKILL.md`; the read-only agent `agents/checker/AGENT.md`; the policy `policies/stay-in-scope/POLICY.md`; and the promise `promises/result-note/PROMISE.md`, with the `exists` check on `<id>/{{session}}/Result.md`. Then it discovers and returns the new module. A session from the starter runs to `done` when the agent writes its result note and the review finds the policy followed. It refuses a name that gives no id, `yami`, and an id that a module or a folder of the internal folder has. |
 
 A problem never stops Yami, another module, or a valid flow of the same module. Each problem is in `yami.problems`, says how to fix it, and keeps out what it names:
 
@@ -537,17 +544,17 @@ A later run continues the iteration count.
 | `vault` | The `Vault` to run in. |
 | `agents` | The agents that run sessions; the first is the default. |
 | `modules` | The plugin's modules. |
-| `wikiModule` | `false` leaves the built-in wiki module out: no ingest or checkout sessions, no wiki tools or skills, no files under `internal/wiki/`, no ledger, no color, and in Obsidian no wiki commands. `yami.wiki`, the index over the vault, stays, because the checks, the links, and a host's own search use it. `yami.ingest` then throws `This Yami has no wiki module, so nothing can ingest: the host left it out with the option wikiModule: false.` With the default, `true`, a module of the host with the id `wiki` throws as one with the id `threads` does, with `wikiModule` in the message. |
+| `wikiModule` | `false` leaves the built-in wiki module out: no ingest or checkout sessions, no wiki tools or skills, no files under `<internal>/wiki/`, no ledger, no color, and in Obsidian no wiki commands. `yami.wiki`, the index over the vault, stays, because the checks, the links, and a host's own search use it. `yami.ingest` then throws `This Yami has no wiki module, so nothing can ingest: the host left it out with the option wikiModule: false.` With the default, `true`, a module of the host with the id `wiki` throws as one with the id `threads` does, with `wikiModule` in the message. |
 | `threads` | `false` leaves the built-in threads module out: no threads tools, skills, commands, files, ledger, or color, and a module of the host can take the id `threads`. With the default, `true`, a module of the host with the id `threads` throws `The id threads is the built-in threads module's. Give the module another id, or leave the built-in module out with the option threads: false.` |
 | `wiki` | The `WikiOptions` of the vault's wiki. The conversation folder always stays out of its index. |
 | `conversations` | How the conversation notes of runs are kept. The default writes them straight to the vault and denies every approval; `createYami` gives notes with the message box, so a person can watch a run and answer its approvals. A `Conversations` of a host's own must start the agent's sessions with `OpenConversation.tools` when the run gives them, in place of the agent's tools: the worker, the review, and the agents rely on it. It must also give two conversations that open at the same time two notes, as two agents of one session need. |
 | `conversationFolder` | The folder of conversation notes, default `conversations`, or a function that Yami reads at each use. `yami.conversationFolder` gives the folder now. |
-| `skills` | The host's own skill sets, as absolute paths or a function that gives them, for example a set that the host builds from the vault's files. Every agent gets them beside Yami's and the modules'. When what the function gives changes, the host calls `yami.refreshSkills()`, and sessions that start after it have the new sets. New since 0.22.0: see the CHANGELOG's Unreleased section. |
+| `skills` | The host's own skill sets, as absolute paths or a function that gives them, for example a set that the host builds from the vault's files. Every agent gets them beside Yami's and the modules'. When what the function gives changes, the host calls `yami.refreshSkills()`, and sessions that start after it have the new sets. New in 0.23.0. |
 
 What the Yami does with its agents and tools:
 
 - `yami.agents` lists the agents, the first being the default, and `yami.setAgents(agents)` replaces them while Yami runs. A live run keeps the agent it started with until it ends, also an agent that is gone, and the next run takes one from the new list; the sessions' acts follow at once. In Obsidian, `ObsidianYami.setAgents` takes names and colors too.
-- Yami sets each agent's working directory to the vault, at the start and for each agent that `setAgents` adds. It gives the agent `yami.tools({ agent })`, one tool set named `yami` with Yami's own tools and the tools of every module, and `yami.skills()`: Yami's skill set `internal/yami` with the base skill, each module's internal folder that holds skills, and the `skills` option.
+- Yami sets each agent's working directory to the vault, at the start and for each agent that `setAgents` adds. It gives the agent `yami.tools({ agent })`, one tool set named `yami` with Yami's own tools and the tools of every module, and `yami.skills()`: Yami's skill set `<internal>/yami` with the base skill, each module's internal folder that holds skills, and the `skills` option.
 - `yami.tools(caller?)` gives the tool set for a caller, `{ agent, module, session, access, approval }`, all optional. The set's `yami_agent` runs agents on the caller's agent (default: the Yami's first), resolves a bare name in the caller's `module`, links the caller's `session` from their notes, and takes the caller's `access` and `approval` (default: the agent's preferences). Each run's worker gets the set for its session: `yami.tools({ agent, module: "notes", session: "notes/Weekly.md", access: "edit", approval: "accept-edits" })`.
 - Yami's own tools:
   - `yami_check({ session })`, which every agent gets, runs the checks of a session's promises and returns `session.check()`, with no record in the document.
@@ -558,7 +565,8 @@ What the Yami does with its agents and tools:
 The rest of the Yami:
 
 - `yami.wiki` is the vault's one `Wiki`. The conversation folder stays out of its index.
-- `yami.enable()` installs every code module and the base skill, then discovers the vault modules. A host calls it on every start. The base skill, `BASE_SKILL`, is `internal/yami/skills/run/SKILL.md`, so a person can read and edit it. At each `discover`, Yami writes `BASE_SKILL_TEXT` there when no file is at the path, or when the file holds a text that an earlier version of Yami shipped, since then the person never edited it. Yami keeps a file with any other text, since it holds a person's edits, and `yami.problems` reports it with the module `yami`. To get the new text, delete the file; the next `discover` writes it again.
+- `yami.enable()` installs every code module and the base skill, then discovers the vault modules. A host calls it on every start. The base skill, `baseSkill(vault.folders)`, is `<internal>/yami/skills/run/SKILL.md`, so a person can read and edit it. At each `discover`, Yami writes `BASE_SKILL_TEXT` there when no file is at the path, or when the file holds a text that an earlier version of Yami shipped, since then the person never edited it. Yami keeps a file with any other text, since it holds a person's edits, and `yami.problems` reports it with the module `yami`. To get the new text, delete the file; the next `discover` writes it again.
+- `yami.moveFolders(settings)` moves the internal folder and the wiki folder (see [Where the Folders Go](#where-the-folders-go)).
 - `yami.discover()`, `yami.problems`, `yami.onModulesChange(listener)`, and `yami.createModule(name)` handle vault modules (see [Vault Modules](#vault-modules)); `yami.createForm(module, kind, name)` writes a starter form (see [Vault Flows in a Code Module](#vault-flows-in-a-code-module)).
 - `yami.ingest({ files | folder, name?, policies? })` captures files as sources of the wiki and creates an ingest session that links them, with the policies on top of the wiki's own. A file or a folder is a vault path or an absolute path. An absolute path inside the vault counts as its vault path, and a file outside the vault is read from the disk, so a person can ingest a deck from a course folder with no copy in the vault. A folder outside the vault gives every file in it and its subfolders except hidden ones. A file that Yami cannot read throws, and no session is created. The tool `wiki_ingest` calls it and starts the session.
 - `yami.close()` kills every live run, waits for the harness sessions of every run to close, and closes every agent session, including those of an agent that `setAgents` removed.
@@ -690,7 +698,7 @@ A topic can hold figures: the pictures of its sources, or a drawing of what a so
 - **The ingest notes figures.** The extractor's Item Map has `figures`: for each figure of its chunk, the locator, what it shows, what a reader must take from it, the subjects it serves, and `picture`, the path a captured text embeds at that place (a `.pptx` or a `.docx` capture writes its pictures beside its text), or null. The drafter puts a figure in the section whose claim it supports, at most three in a topic. With a picture, it writes the embed and one italic caption line with the citation, `*Figure: … ([[Source]], slide 4).*`. Without one, it writes a **figure marker**, a line Obsidian hides in reading view: `%% figure: what it shows and conveys · from: [[Source]] p. 4, Figure 2 %%`. `figureMarkers(body)` in `yami/wiki` parses them, `figureMarker(shows, from)` writes one, and `FIGURE_MARKER` is the pattern.
 - **The markers are the list.** Lint warns `figure-missing` on a topic with a marker, with each figure to make. No list is stored.
 - **A figures session makes them.** The `figures` flow (read-only; the command Wiki: new figures creates one) has the field `topics`, the topics to work on, or none for every topic with a marker; the skill `/wiki:figures`; the read-only agent `illustrator`, which the skill runs once per marker; the policies `cite-every-claim`, `one-plan`, and `encyclopedic-voice`; and the promises `change-applied` and `figures-made`. The check `figures` of `figures-made` is met when no marker is left in the session's topics, in the wiki or in the body that a standing change of the session writes. The illustrator reads the source at the locator (a PDF page with Read, a slide of a captured text, a picture) and returns the figure with a caption: as SVG, a redrawing, or as PNG when a drawing would lose it and the machine has a tool that renders a page. The lead saves each with `wiki_figure` and proposes one change that puts the embed and its caption in the marker's place.
-- **`wiki_figure({ topic, name, svg? | png?, replace? })`** writes `internal/wiki/figures/<topic>/<name>.svg` or `.png` (`FIGURES`) and returns `{ path, embed }`. `saveFigure(vault, topicPath, figure)` in `yami` does it. It refuses a topic that is not one; a name a file cannot take or with an extension; both or neither of `svg` and `png`; an SVG over 1 MB or with a script, an event handler, an element that embeds other content, or a reference outside itself (`svgProblem`); bytes that are not a PNG or are over 4 MB (`pngProblem`); and a name in use unless `replace` is set. SVG is the form because Obsidian renders it itself, so no browser is needed on the machine, and the SVG is the figure's source. The figures folder is not the knowledge base: a figure file is not in a version, and the topic's embed of it goes through a change plan as any write does.
+- **`wiki_figure({ topic, name, svg? | png?, replace? })`** writes `<internal>/wiki/figures/<topic>/<name>.svg` or `.png` (`vault.folders.figures`) and returns `{ path, embed }`. `saveFigure(vault, topicPath, figure)` in `yami` does it. It refuses a topic that is not one; a name a file cannot take or with an extension; both or neither of `svg` and `png`; an SVG over 1 MB or with a script, an event handler, an element that embeds other content, or a reference outside itself (`svgProblem`); bytes that are not a PNG or are over 4 MB (`pngProblem`); and a name in use unless `replace` is set. SVG is the form because Obsidian renders it itself, so no browser is needed on the machine, and the SVG is the figure's source. The figures folder is not the knowledge base: a figure file is not in a version, and the topic's embed of it goes through a change plan as any write does.
 
 #### Verify
 
@@ -730,7 +738,7 @@ threadPhase(thread); nextStep(thread);                          // the same, wit
 
 ## `yami/document`
 
-`Vault` is the host's access to the vault: `read`, `write`, `exists`, `list`, and the parsing and writing of properties. `ObsidianVault` in `yami/obsidian` implements it over the Obsidian API, and tests implement it over the file system.
+`Vault` is the host's access to the vault: `read`, `write`, `exists`, `list`, `rename`, the parsing and writing of properties, and `folders`, where the vault keeps Yami's folders (see [Where the Folders Go](#where-the-folders-go)). `readFolders(root)` reads them from a vault's `.yami.json`; `Folders`, `folderProblem`, `parseFolderSettings`, `folderSettingsText`, `mapFolders`, `DEFAULT_FOLDERS`, and `FOLDER_SETTINGS` are the parts. `ObsidianVault` in `yami/obsidian` implements it over the Obsidian API, and tests implement it over the file system.
 
 **Documents.** `readDocument`, `writeDocument`, and `updateDocument` handle a document as `{ path, properties, body }`. `updateDocument(vault, path, change)` reads the document, applies `change`, and writes it back. The updates of one document run one after another, so two at the same time, such as the progress lines of two agents, do not lose one; a module's tool that changes a session document uses it for the same reason. Properties that do not parse throw a `PropertiesError`, which names the document and gives the parser's reason.
 
@@ -740,7 +748,7 @@ threadPhase(thread); nextStep(thread);                          // the same, wit
 
 **Schemas.** The schemas of the built-in types are `MODULE`, `SESSION`, and `CONVERSATION`, and of the forms `AGENT`, `POLICY`, `PROMISE`, `SKILL`, and `FLOW`. `FORMS` gives each form's folder, file, and schema: `FORMS.policy` is `{ folder: "policies", file: "POLICY.md", schema: POLICY }`. `documentName(path)` gives the name of a form from its folder. `validate` returns one message for each field that does not match, and `withDefaults` fills in defaults. A module adds its own session fields in the same `Schema` form. A field's type is `text`, `number`, `boolean`, `date`, `list`, `link`, `links`, or `map` (names with values).
 
-**Ledgers.** `vaultLedger` and `moduleLedger` return the text of the two bases.
+**Ledgers.** `moduleLedger` returns the text of a module's base.
 
 **Text operations.** `diffOps(before, after)` gives the changes that turn one text into another, as `TextOp`s `{ from, to, insert }` in ascending order; `diffOps(before, after, { semantic: false })` gives a character-level diff with no cleanup. `applyOps(text, ops)` applies them, `deltaOps(delta)` turns a Yjs text delta into ops, `shiftOps(ops, offset)` moves them, and `normalizeNewlines(text)` turns `\r\n` and `\r` into `\n`. A plugin's unit test imports them from `yami/document` and mocks no Obsidian class, since `yami/document` never loads `obsidian`. `yami/obsidian` exports the same functions, for code that imports it anyway.
 
@@ -751,7 +759,7 @@ expect(applyOps("The quick fox", diffOps("The quick fox", "The slow fox"))).toBe
 
 ### Protected Text
 
-A person can protect text in any note against change by an agent: their own words in a topic, a conclusion they wrote, a list they keep by hand. The map is `internal/yami/protected.json`, `PROTECTED_PATH`, read and written with `readProtected(vault)` and `writeProtected(vault, map)`:
+A person can protect text in any note against change by an agent: their own words in a topic, a conclusion they wrote, a list they keep by hand. The map is `<internal>/yami/protected.json`, `vault.folders.protected`, read and written with `readProtected(vault)` and `writeProtected(vault, map)`:
 
 ```json
 { "version": 1, "notes": { "wiki/topics/Levain.md": [{ "text": "My own words: I feed mine at dawn.", "since": "2026-11-04T12:00:00", "note": "mine" }] } }
@@ -1174,7 +1182,7 @@ The Obsidian layer holds what needs the Obsidian API: `createYami`, the vault ad
 | `wiki` | | Options of the wiki, such as an `embedder` or the `defaultAlgorithm`. The conversation folder and Obsidian's Excluded files always stay out of its index. |
 | `citationPreview` | `true` | Whether a citation of a source shows where it leads at a hover, in the editor and in Reading view (see [The Wiki in Obsidian](#the-wiki-in-obsidian)). Only with the wiki module. |
 | `conversationFolder` | `conversations` | The folder of conversation notes. A value, or a function that Yami reads at each use. |
-| `skills` | none | The plugin's own skill sets, as the option of `Yami`. New since 0.22.0. |
+| `skills` | none | The plugin's own skill sets, as the option of `Yami`. New in 0.23.0. |
 | `idleMinutes` | 15 (`IDLE_MINUTES`) | Minutes after which an agent process with no open message box and no turn closes. A value, or a function that Yami reads at each use. |
 | `animate` | `true` | Whether an agent's edits play as typing in a note that the person sees. A value, or a function that Yami reads at each edit. While the system asks for reduced motion (`prefers-reduced-motion: reduce`), edits never play as typing. `yami.animate()` gives the result of this rule now. |
 | `commands` | every group | `{ conversations, sessions, wiki, modules, protected }` (`CommandGroup`): the groups of commands to add. `modules` is the New module command. The wiki commands come only with the wiki module. The commands of the modules' flows and actions are always added. |
@@ -1220,11 +1228,10 @@ The other options are fixed at `createYami`, because they choose the parts of th
 
 ### What `createYami` Adds to a Vault
 
-A plugin author tells users what appears in their vault. With no modules of the plugin's own, and both built-in modules in, `enable` writes these files when they are missing. It replaces a form that holds the text it wrote last and keeps one that a person edited (see [The Layout in the Vault](#the-layout-in-the-vault)); the base skill has its own rule (see [The Yami](#the-yami)).
+A plugin author tells users what appears in their vault. With no modules of the plugin's own, and both built-in modules in, `enable` writes these files when they are missing. It replaces a form that holds the text it wrote last and keeps one that a person edited (see [The Layout in the Vault](#the-layout-in-the-vault)); the base skill has its own rule (see [The Yami](#the-yami)). The paths are those of the default folders; `.yami.json` moves them (see [Where the Folders Go](#where-the-folders-go)), and nothing is written at the vault's root but that file, when a person moves a folder.
 
 | File | What it is |
 | --- | --- |
-| `Yami.base` | The vault ledger: every module, and every session grouped by module. |
 | `internal/yami/skills/run/SKILL.md` | The base skill, `/yami:run`, which every session run invokes. |
 | `internal/wiki/wiki.md` | The wiki module's document. |
 | `internal/wiki/sessions.base` | The wiki module's ledger: its ingest sessions, versions, and changes. |
@@ -1544,7 +1551,7 @@ await page.click('.workspace-leaf.mod-active .yami-questions button[type="submit
 Each Yami plugin builds its own Yami. Two in one vault, such as Duet and `yami-wiki`, share the window's one shared-document hub (`installCollab`: the first plugin makes it, the next finds it) and keep the rest apart:
 
 - **Conversation notes.** A note records the `plugin` whose Yami runs it, and a plugin's conversation manager gives a message box to its own notes only. A note with no `plugin`, from before 0.20, goes to the plugin whose manager was installed first in the window, which is the order Obsidian loads them in; add `plugin: <id>` to a note to pin it. A `ConversationManager` built with no `plugin` option takes every conversation note.
-- **Files.** Each plugin installs the documents of its own modules. Both write `Yami.base` and the base skill, which are the same text at the same version of the library. Keep the plugins on one version of `yami`, or the older one reports the newer base skill as a person's edit.
+- **Files.** Each plugin installs the documents of its own modules. Both write the base skill, which is the same text at the same version of the library. Keep the plugins on one version of `yami`, or the older one reports the newer base skill as a person's edit.
 - **Agents.** Each plugin runs its own agents, with its own settings. A tool of one plugin's module is not in the sessions of another plugin.
 - **Commands and status bar.** Each plugin adds its own. Turn off a group that another plugin provides with `commands`, as Duet turns off the session and wiki commands.
 - **Vault modules.** Every Yami discovers them, so each plugin lists them and adds their commands. A vault module runs the same in either.

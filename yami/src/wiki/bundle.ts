@@ -6,7 +6,7 @@ import { harnessEnv } from "../agent/executable.js";
 import { basename, link, linksOf, linkTarget, parseDocument, PropertiesError, serializeDocument, type Document } from "../document/document.js";
 import { timestamp } from "../document/schema.js";
 import type { Properties, Vault } from "../document/vault.js";
-import { ORIGINALS, SOURCES, TOPICS } from "./folders.js";
+import { DEFAULT_FOLDERS, mapFolders } from "../document/folders.js";
 import { isAbsolute } from "./source.js";
 import type { Note, Wiki } from "./wiki.js";
 
@@ -76,12 +76,13 @@ async function withSources(wiki: Wiki, topics: string[], given: string[]): Promi
     }
   }
   const originals: string[] = [];
-  const files = await wiki.vault.files(ORIGINALS);
+  const { originals: folder } = wiki.folders;
+  const files = await wiki.vault.files(folder);
   for (const path of sources) {
     const { properties } = wiki.note(path)!;
     for (const key of ["file", "text"]) {
       const target = linkTarget(String(properties[key] ?? ""));
-      if (!target.startsWith(`${ORIGINALS}/`)) continue;
+      if (!target.startsWith(`${folder}/`)) continue;
       const file = target.endsWith(".md") || /\.[a-z0-9]{1,5}$/i.test(target) ? target : `${target}.md`;
       if (files.includes(file) && !originals.includes(file)) originals.push(file);
       // The pictures of a captured text sit in the folder of its name.
@@ -164,9 +165,10 @@ export const BUNDLE_README = "README.md";
  * folder is a vault path, or an absolute path outside the vault. It refuses a folder under `wiki/`.
  */
 export async function writeBundle(wiki: Wiki, selection: BundleSelection, folder: string, options: WriteBundleOptions = {}): Promise<WrittenBundle> {
-  const { vault } = wiki;
+  const { vault, folders } = wiki;
   if (!folder.trim()) throw new Error("Give the folder to write the bundle to.");
-  if (!isAbsolute(folder) && (folder === "wiki" || folder.startsWith("wiki/") || folder.includes(".."))) throw new Error(`${folder} is in the knowledge base; write the bundle elsewhere.`);
+  if (!isAbsolute(folder) && (folder === folders.wiki || folder.startsWith(`${folders.wiki}/`) || folder.includes(".."))) throw new Error(`${folder} is in the knowledge base; write the bundle elsewhere.`);
+  const portable = (text: string) => mapFolders(text, folders, DEFAULT_FOLDERS);
   const name = options.name?.trim() || (selection.topic ? basename(selection.topic) : "Bundle");
   const out = destination(vault, folder);
   const rows = { topics: [] as string[], sources: [] as string[] };
@@ -178,17 +180,17 @@ export async function writeBundle(wiki: Wiki, selection: BundleSelection, folder
       const note = wiki.note(path);
       if (!note) throw new Error(`${path} is not a note of the wiki.`);
       const doc: Document = { path, properties: { ...note.properties, [BUNDLE_PROPERTY]: name }, body: note.body };
-      await out.write(path, serializeDocument(vault, doc));
-      rows[kind].push(`- ${link(path)}${note.description ? ` · ${note.description}` : ""}`);
+      await out.write(portable(path), portable(serializeDocument(vault, doc)));
+      rows[kind].push(`- ${link(portable(path))}${note.description ? ` · ${note.description}` : ""}`);
     }
   }
   const originals = options.originals === false ? [] : selection.originals;
-  for (const path of originals) await out.writeBinary(path, await vault.readBinary(path));
+  for (const path of originals) await out.writeBinary(portable(path), await vault.readBinary(path));
   const readme: Document = {
     path: BUNDLE_README,
     properties: {
       [BUNDLE_PROPERTY]: name,
-      ...(selection.topic && { topic: link(selection.topic) }),
+      ...(selection.topic && { topic: link(portable(selection.topic)) }),
       ...(selection.size && { size: selection.size }),
       exported: timestamp(),
       topics: selection.topics.length,
@@ -207,7 +209,7 @@ export async function writeBundle(wiki: Wiki, selection: BundleSelection, folder
       "",
       ...(rows.sources.length ? rows.sources : ["- none"]),
       "",
-      ...(originals.length ? ["## Originals", "", `${originals.length} file${originals.length === 1 ? "" : "s"} under \`${ORIGINALS}/\`: the frozen copies that the sources embed.`, ""] : []),
+      ...(originals.length ? ["## Originals", "", `${originals.length} file${originals.length === 1 ? "" : "s"} under \`${DEFAULT_FOLDERS.originals}/\`: the frozen copies that the sources embed.`, ""] : []),
     ].join("\n"),
   };
   await out.write(BUNDLE_README, serializeDocument(vault, readme));
@@ -216,7 +218,7 @@ export async function writeBundle(wiki: Wiki, selection: BundleSelection, folder
 
 /** One note of a bundle, read: where it goes in the knowledge base, and its content with the `bundle` property removed. */
 export interface BundleNote {
-  /** The note's path in the knowledge base: `wiki/topics/<name>.md` or `wiki/sources/<name>.md`. */
+  /** The note's path in this vault's knowledge base: `<topics>/<name>.md` or `<sources>/<name>.md`. */
   path: string;
   type: "topic" | "source";
   properties: Properties;
@@ -230,7 +232,7 @@ export interface Bundle {
   /** The bundle's name, from its README or its notes, when it has one. */
   name?: string;
   notes: BundleNote[];
-  /** The files under `internal/wiki/originals/`, by vault path. */
+  /** The originals, each at its path in this vault's originals folder. */
   originals: { path: string; data: Uint8Array }[];
   /** The markdown files that are neither topics nor sources, by their path in the bundle, with the reason. */
   skipped: { path: string; reason: string }[];
@@ -291,7 +293,8 @@ async function diskFiles(folder: string): Promise<string[]> {
  * may name a branch and a folder as `/tree/<branch>/<folder>`). Every markdown file with `type: topic` or
  * `type: source` is a note of the bundle, wherever it sits in the folder, so a folder of notes made by hand
  * imports as a bundle does; the `bundle` property is removed. Files under `internal/wiki/originals/` are the
- * originals. Anything else is skipped with its reason. It throws for a folder it cannot read, and for one
+ * originals. The paths of the default layout are mapped to this vault's folders, in the notes too. Anything
+ * else is skipped with its reason. It throws for a folder it cannot read, and for one
  * with no note.
  */
 export async function readBundle(vault: Vault, from: string): Promise<Bundle> {
@@ -305,15 +308,16 @@ export async function readBundle(vault: Vault, from: string): Promise<Bundle> {
     const read = (file: string) => (onDisk ? readFile(join(folder, ...file.split("/")), "utf8") : vault.read(`${folder}/${file}`));
     const readBinary = async (file: string) => (onDisk ? new Uint8Array(await readFile(join(folder, ...file.split("/")))) : vault.readBinary(`${folder}/${file}`));
     const bundle: Bundle = { from, notes: [], originals: [], skipped: [] };
+    const local = (text: string) => mapFolders(text, DEFAULT_FOLDERS, vault.folders);
     for (const file of files) {
-      if (file.startsWith(`${ORIGINALS}/`)) {
-        bundle.originals.push({ path: file, data: await readBinary(file) });
+      if (file.startsWith(`${DEFAULT_FOLDERS.originals}/`)) {
+        bundle.originals.push({ path: local(file), data: await readBinary(file) });
         continue;
       }
       if (!file.endsWith(".md")) continue;
       let doc: Document;
       try {
-        doc = parseDocument(vault, file, await read(file));
+        doc = parseDocument(vault, file, local(await read(file)));
       } catch (error) {
         bundle.skipped.push({ path: file, reason: error instanceof PropertiesError ? `its properties do not parse: ${error.reason}` : String(error) });
         continue;
@@ -326,7 +330,7 @@ export async function readBundle(vault: Vault, from: string): Promise<Bundle> {
         continue;
       }
       const name = file.slice(file.lastIndexOf("/") + 1);
-      bundle.notes.push({ path: `${type === "topic" ? TOPICS : SOURCES}/${name}`, type, properties, body: doc.body });
+      bundle.notes.push({ path: `${type === "topic" ? vault.folders.topics : vault.folders.sources}/${name}`, type, properties, body: doc.body });
     }
     if (!bundle.notes.length) throw new Error(`No topic or source under ${from}: a bundle is a folder of notes with type: topic or type: source.`);
     return bundle;

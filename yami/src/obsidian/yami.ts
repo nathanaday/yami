@@ -2,11 +2,11 @@ import { MarkdownView, Menu, Notice, type App, type Plugin, type TAbstractFile, 
 import type { Agent } from "../agent/agent.js";
 import type { Harness } from "../agent/types.js";
 import { basename } from "../document/document.js";
+import { WIKI_ID } from "../document/folders.js";
 import { Flow, type ActionResult, type ModuleAct, type ModuleAction, type YamiModule } from "../module/module.js";
 import type { Session } from "../module/session.js";
 import { Yami } from "../module/yami.js";
 import type { ChangeAct } from "../wiki/change.js";
-import { WIKI } from "../wiki/folders.js";
 import type { WikiOptions } from "../wiki/wiki.js";
 import { noAgentsMessage, vaultRoot, type ConversationAgent } from "./agents.js";
 import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
@@ -53,7 +53,7 @@ export interface YamiPluginOptions {
   modules?: YamiModule[];
   /**
    * Whether the Yami holds the built-in wiki module: its sessions, its change plans, its tools, its files
-   * under `internal/wiki/`, and the wiki commands. Default true. With false, the vault keeps its wiki index,
+   * under `<internal>/wiki/`, and the wiki commands. Default true. With false, the vault keeps its wiki index,
    * `yami.wiki`, and a module of the plugin can take the id `wiki`. A plugin that does something other than
    * the wiki leaves it to the plugin that does.
    */
@@ -91,7 +91,7 @@ export interface YamiPluginOptions {
    * switches for the session. A function is read at each use, so the mode can follow a setting.
    */
   protectedEditing?: ProtectedEditing | (() => ProtectedEditing);
-  /** Each module's folders in the module's colors in the file explorer, and `internal/` in gray. Default true. */
+  /** Each module's folders in the module's colors in the file explorer, and the internal folder in gray. Default true. */
   folderColors?: boolean;
 }
 
@@ -188,7 +188,7 @@ export class ObsidianYami extends Yami {
     plugin.register(hub.observe(protectedGuard(this.protected, (message) => new Notice(message, 8_000))));
     plugin.register(this.protected.onBlocked(() => new Notice(PROTECTED_BLOCKED)));
     // The citation preview is the wiki's: a Yami without the wiki module has no sources to lead to.
-    if (this.module(WIKI) && options.citationPreview !== false) {
+    if (this.module(WIKI_ID) && options.citationPreview !== false) {
       this.citations = new CitationPreview(app, this.vault, this.wiki);
       plugin.registerEditorExtension(citationExtension(this.citations) as never);
       plugin.registerMarkdownPostProcessor(citationPostProcessor(this.citations));
@@ -238,7 +238,7 @@ export class ObsidianYami extends Yami {
     if (groups.conversations) this.#agentCommands.push(addConversationCommands(this));
     if (groups.sessions) this.#agentCommands.push(addSessionCommands(this));
     // The wiki commands are the wiki module's: a Yami without the module has nothing for them to act on.
-    if (groups.wiki && this.module(WIKI)) addWikiCommands(this);
+    if (groups.wiki && this.module(WIKI_ID)) addWikiCommands(this);
     if (groups.modules) addNewModuleCommand(this);
     if (groups.protected) addProtectedCommands(this);
     checkModuleIcons(this.modules);

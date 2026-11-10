@@ -22,8 +22,11 @@ import { TFile } from "obsidian";
 import { link } from "../../../src/document/index.js";
 import { CITATION_ATTRIBUTE, CITATION_CLASS, CITATION_POPOVER_CLASS, citationExtension, citationPostProcessor, CitationPreview, wrapCitations } from "../../../src/obsidian/wiki/citations.js";
 import { FsVault } from "../../../src/testing/index.js";
-import { captureSource, SOURCES, TOPICS, Wiki } from "../../../src/wiki/index.js";
+import { captureSource, Wiki } from "../../../src/wiki/index.js";
 import { installDom } from "./dom.js";
+import { DEFAULT_FOLDERS } from "../../../src/document/index.js";
+
+const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
 
 let root: string;
 let vault: FsVault;

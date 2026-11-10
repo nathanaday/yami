@@ -1,15 +1,10 @@
 import { z } from "../../agent/index.js";
 import type { Check } from "../checks.js";
-import { moduleLayout } from "../module.js";
-import { WIKI } from "../../wiki/folders.js";
 
 /** The most documents one checkout holds. */
 export const MAX_DOCUMENTS = 60;
 /** The end of a copy's name: `Q-learning (checkout).md`. */
 export const COPY = " (checkout)";
-
-/** The folder of the wiki's sessions, where a checkout's reading list and the folder of its copies go. */
-const SESSIONS = moduleLayout(WIKI, "internal").sessions;
 
 /** The skill of a checkout session, `/wiki:checkout`. */
 export const checkoutSkill = `---
@@ -43,7 +38,7 @@ The session document is the reading list: \`wiki_checkout\` with this session's 
 export const orderShape = {
   request: z.string().describe("The user's request, in their words."),
   session: z.string().optional().describe("In a checkout session: the session document, as a vault path. It becomes the reading list, and its copies go in the folder of its name."),
-  name: z.string().optional().describe(`With no session: a short name. The reading list is ${SESSIONS}/<date> <name>.md, and its copies are in the folder of that name.`),
+  name: z.string().optional().describe(`With no session: a short name. The reading list is \`<date> <name>.md\` in the wiki's sessions folder, and its copies are in the folder of that name.`),
   documents: z
     .array(z.object({ path: z.string().describe("The note, as a path or a [[link]] name."), why: z.string().describe("One line: what it gives the reader.") }))
     .min(1)

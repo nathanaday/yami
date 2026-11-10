@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTool } from "../../src/agent/index.js";
-import { followEdit, link, marksOf, protect, PROTECTED_PATH, protectedLost, protectedRanges, readDocument, readProtected, renameProtected, touches, unprotect, writeProtected, type ProtectedMap } from "../../src/document/index.js";
+import { DEFAULT_FOLDERS, followEdit, link, marksOf, protect, protectedLost, protectedRanges, readDocument, readProtected, renameProtected, touches, unprotect, writeProtected, type ProtectedMap } from "../../src/document/index.js";
 import { runCheck, type WikiModule } from "../../src/index.js";
 import { testYami, type FsVault, type TestYami } from "../../src/testing/index.js";
-import { InvalidPlan, SOURCES, TOPICS, type Wiki } from "../../src/wiki/index.js";
+import { InvalidPlan, type Wiki } from "../../src/wiki/index.js";
+
+const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
 
 let t: TestYami;
 let vault: FsVault;
@@ -81,15 +83,15 @@ describe("the protected text map", () => {
     expect(await readProtected(vault)).toEqual({ version: 1, notes: {} });
     const map = protect({ version: 1, notes: {} }, TOPIC, MINE, { since: "s" });
     await writeProtected(vault, map);
-    expect(await vault.exists(PROTECTED_PATH)).toBe(true);
+    expect(await vault.exists(DEFAULT_FOLDERS.protected)).toBe(true);
     expect(await readProtected(vault)).toEqual(map);
     await writeProtected(vault, { version: 1, notes: {} });
     expect(await readProtected(vault)).toEqual({ version: 1, notes: {} });
-    await vault.write(PROTECTED_PATH, "{ not json");
-    await expect(readProtected(vault)).rejects.toThrow(`${PROTECTED_PATH} does not parse`);
-    await vault.write(PROTECTED_PATH, JSON.stringify({ version: 2, notes: {} }));
+    await vault.write(DEFAULT_FOLDERS.protected, "{ not json");
+    await expect(readProtected(vault)).rejects.toThrow(`${DEFAULT_FOLDERS.protected} does not parse`);
+    await vault.write(DEFAULT_FOLDERS.protected, JSON.stringify({ version: 2, notes: {} }));
     await expect(readProtected(vault)).rejects.toThrow("is not a protected text map of version 1");
-    await vault.write(PROTECTED_PATH, JSON.stringify({ version: 1, notes: { [TOPIC]: [{ text: "", since: "s" }, { text: "ok", since: "s" }, "junk"] } }));
+    await vault.write(DEFAULT_FOLDERS.protected, JSON.stringify({ version: 1, notes: { [TOPIC]: [{ text: "", since: "s" }, { text: "ok", since: "s" }, "junk"] } }));
     expect(await readProtected(vault)).toEqual({ version: 1, notes: { [TOPIC]: [{ text: "ok", since: "s" }] } });
   });
 });
@@ -115,8 +117,8 @@ describe("protected text and the wiki", () => {
     await wiki.approve(own.path, { person: true });
     expect((await readDocument(vault, TOPIC)).body).toContain("My own words, changed by me.");
     // A map that does not parse refuses every plan, and says why.
-    await vault.write(PROTECTED_PATH, "{");
-    await expect(wiki.change(modify(BODY))).rejects.toThrow(`${PROTECTED_PATH} does not parse`);
+    await vault.write(DEFAULT_FOLDERS.protected, "{");
+    await expect(wiki.change(modify(BODY))).rejects.toThrow(`${DEFAULT_FOLDERS.protected} does not parse`);
   });
 
   it("lets the return of a checkout change protected text, since the edits are the person's own", async () => {
@@ -150,8 +152,8 @@ describe("protected text and the wiki", () => {
     expect((await wiki.lint({ paths: [TOPIC] })).filter((f) => f.check === "protected-lost")).toEqual([
       { path: TOPIC, check: "protected-lost", severity: "warning", message: `no longer holds the protected text "${MINE}"`, fix: "put the text back, protect the text that replaced it, or unprotect it" },
     ]);
-    await vault.write(PROTECTED_PATH, "{");
-    expect((await wiki.lint())[0]).toMatchObject({ path: PROTECTED_PATH, check: "bad-protected-map", severity: "error" });
+    await vault.write(DEFAULT_FOLDERS.protected, "{");
+    expect((await wiki.lint())[0]).toMatchObject({ path: DEFAULT_FOLDERS.protected, check: "bad-protected-map", severity: "error" });
   });
 
   it("gives the wiki's flows the protected-text policy", async () => {
