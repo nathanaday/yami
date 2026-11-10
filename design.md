@@ -69,7 +69,7 @@ The two views are in the library, so a library change that a plugin needs ships 
 ## Layout
 
 ```
-Yami.base                   vault ledger: every module, and every session grouped by module
+.yami.json                  where the vault keeps the internal folder and the wiki folder, when not at the defaults
 conversations/              every conversation with an agent, one note each
 threads/                    the threads, and the sessions of the person's own flows of threads
 wiki/                       the knowledge base: what the wiki module produces, for a person to read
@@ -98,14 +98,15 @@ internal/wiki/              the wiki module's own: its sessions and ledger, the 
 1. A module's folder holds what a person reads. For most modules that is the session documents. A module sets `sessionsIn`: `folder` (the default); `internal`, when the module's folder holds its output instead, as the wiki's does, so its sessions go under `internal/<module>/sessions/`; or `none`, when the module has no sessions, and gets no ledger. `ledgerIn` puts the module ledger in the internal folder (the default) or in the module's folder.
 2. A session may keep the files it produces in a folder with its own name, beside its document: `threads/<session>.md` and `threads/<session>/`, or `internal/wiki/sessions/<session>.md` and `internal/wiki/sessions/<session>/` for a checkout. Nothing else goes in a module's folder.
 3. Everything else that a module needs goes under `internal/<module>/`. A code module installs its forms there in the layout of a vault module, but no `FLOW.md`: its flows are code, made with `this.flow`.
-4. The paths come from `YamiModule.layout` in `yami/src/module/module.ts`. No other code builds these paths. The wiki folders are constants in `yami/src/wiki/folders.ts`, which assume the module id `wiki`.
-5. Each module has a color, so a person sees which folders belong together. The module's folder takes the color; its internal folder takes the color muted halfway toward gray, because a person reads it less; `internal/` is gray. A module sets its own `color`, or takes a basic color chosen by its id, so the color is the same on every start. The wiki is cyan. The colors are in `yami/src/module/colors.ts`; `yami/obsidian` shows them in the file explorer. Each module also has an icon, a name in the host's icon set, so a view can show the module at a glance. In Obsidian an icon that the app does not have shows as the default, `box`, and the console says so, because an icon name that a Lucide update removes must not stop the plugin from loading.
+4. The paths come from `YamiModule.layout` in `yami/src/module/module.ts`, over the vault's `Folders` in `yami/src/document/folders.ts`. No other code builds these paths. `internal/` and `wiki/` above are the defaults: a person chooses other paths for the two, and `.yami.json`, hidden at the vault's root, holds the choice, so every plugin of the vault and the agent plugin outside it read the same folders. The settings belong to the vault, not to one plugin, for that reason. Neither folder can be hidden, because Obsidian leaves a hidden folder out of its index and its notes, links, and embeds would stop working. A move of either folder (`yami.moveFolders`) carries the links into it and the records that name its paths, and the host builds its Yami again after it.
+5. Nothing of Yami's sits at the vault's root, except `.yami.json` once a person moves a folder. The vault ledger, `Yami.base`, listed every module and every session; it went away after 0.22, because most work is now one module's, and each module's own ledger lists its sessions. An earlier vault keeps its `Yami.base` until the person deletes it.
+6. Each module has a color, so a person sees which folders belong together. The module's folder takes the color; its internal folder takes the color muted halfway toward gray, because a person reads it less; `internal/` is gray. A module sets its own `color`, or takes a basic color chosen by its id, so the color is the same on every start. The wiki is cyan. The colors are in `yami/src/module/colors.ts`; `yami/obsidian` shows them in the file explorer. Each module also has an icon, a name in the host's icon set, so a view can show the module at a glance. In Obsidian an icon that the app does not have shows as the default, `box`, and the console says so, because an icon name that a Lucide update removes must not stop the plugin from loading.
 
 ## Ledgers
 
 1. A ledger is a base. It reads the properties of documents, so it is current when the properties are current.
 2. Code writes a base once, from `yami/src/document/bases.ts`, and never updates it. A module adds its own tables to its ledger as data, `ledgerViews`; the wiki adds its versions and its changes.
-3. Code never stores a count or a summary that a base can compute. A module with zero sessions appears in the vault ledger because the ledger lists module documents, not because code counts sessions.
+3. Code never stores a count or a summary that a base can compute.
 4. The session document is its own ledger. A per-session base would need per-session records as files, and Yami does not create those.
 
 ## Layers

@@ -17,7 +17,7 @@ import type { SessionState } from "../document/schema.js";
 import type { Vault } from "../document/vault.js";
 import type { Wiki } from "../wiki/wiki.js";
 import { AGENT_TOOL } from "./agent-run.js";
-import { BASE_SKILL, BASE_SKILL_COMMAND, BASE_SKILL_TEXT, YAMI_SKILLS } from "./base-skill.js";
+import { BASE_SKILL_COMMAND, BASE_SKILL_TEXT, baseSkill, yamiSkills } from "./base-skill.js";
 import { runCheck, type CheckResult } from "./checks.js";
 import { freshRun, stopOnAbort } from "./fresh-run.js";
 import { linkedDocuments, nameOf } from "./links.js";
@@ -464,15 +464,16 @@ async function contextPrompt(vault: Vault, agent: Agent, module: YamiModule, flo
     : "";
   const agents = linked.agents.length
     ? `## Agents\n\nThe agents of this session. Each works in a fresh context, with its own brief, and returns its final message. To run one, call the tool \`${AGENT_TOOL}\` with its name and a task that holds everything it needs. Several can run at the same time.\n\n${linked.agents
-        .map((d) => `- \`${nameOf(d.path, module.id)}\`: ${String(d.properties.description ?? "")}${d.properties.access === "edit" ? " It can edit files." : " It is read-only."}`)
+        .map((d) => `- \`${nameOf(d.path, module.id, vault.folders)}\`: ${String(d.properties.description ?? "")}${d.properties.access === "edit" ? " It can edit files." : " It is read-only."}`)
         .join("\n")}`
     : "";
-  const invoked = sets.has(`${root}/${YAMI_SKILLS}`) && (await vault.exists(BASE_SKILL));
-  const base = invoked ? "" : `## How to run a Yami session\n\n${parseDocument(vault, BASE_SKILL, (await vault.exists(BASE_SKILL)) ? await vault.read(BASE_SKILL) : BASE_SKILL_TEXT).body.trim()}`;
+  const skill = baseSkill(vault.folders);
+  const invoked = sets.has(`${root}/${yamiSkills(vault.folders)}`) && (await vault.exists(skill));
+  const base = invoked ? "" : `## How to run a Yami session\n\n${parseDocument(vault, skill, (await vault.exists(skill)) ? await vault.read(skill) : BASE_SKILL_TEXT).body.trim()}`;
   const body = [
     base,
     `This is the Yami session "${basename(path)}", ${kind}. The session document is ${path}.`,
-    module.instructions,
+    typeof module.instructions === "function" ? module.instructions(vault.folders) : module.instructions,
     flow?.instructions,
     fields && `## Session properties\n\n${fields}`,
     `## Session\n\n${doc.body.trim()}`,

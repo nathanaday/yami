@@ -1,5 +1,5 @@
 import type { App, Component, TAbstractFile } from "obsidian";
-import { BASE_SKILL } from "../module/base-skill.js";
+import { baseSkill } from "../module/base-skill.js";
 import { definesModule } from "../module/vault-module.js";
 import type { Yami } from "../module/yami.js";
 import { ChangeFeed } from "./change-feed.js";
@@ -14,7 +14,7 @@ export function watchModules(app: App, component: Component, yami: Yami): void {
   const feed = new ChangeFeed("modules", 300);
   feed.on(() => void yami.discover().catch((error) => console.error("yami: could not read the vault modules", error)));
   const changed = (file: TAbstractFile, moved: boolean) => {
-    if (moved || definesModule(file.path) || file.path === BASE_SKILL) feed.changed();
+    if (moved || definesModule(file.path, yami.vault.folders) || file.path === baseSkill(yami.vault.folders)) feed.changed();
   };
   component.registerEvent(app.vault.on("create", (file) => changed(file, true)));
   component.registerEvent(app.vault.on("delete", (file) => changed(file, true)));

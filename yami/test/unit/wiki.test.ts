@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTool } from "../../src/agent/index.js";
 import { link, linkTarget, PropertiesError, readDocument } from "../../src/document/index.js";
 import { runCheck, Yami, type WikiModule } from "../../src/index.js";
-import { algorithms, bodyHash, captureSource, captureSources, CHANGE_STATUS_LABELS, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, metaVoice, normalizeTag, readProposal, SOURCES, sourceChunks, stem, tokens, TOPICS, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
+import { algorithms, bodyHash, captureSource, captureSources, CHANGE_STATUS_LABELS, chunk, countPages, hash, hashBytes, InvalidPlan, lineChunks, metaVoice, normalizeTag, readProposal, sourceChunks, stem, tokens, Wiki, type ChangePlan, type Embedder } from "../../src/wiki/index.js";
 import { statusText } from "../../src/wiki/change.js";
 import { CHANGE_STATUSES } from "../../src/document/index.js";
 import { FsVault, testYami } from "../../src/testing/index.js";
+import { DEFAULT_FOLDERS } from "../../src/document/index.js";
+
+const { sources: SOURCES, topics: TOPICS } = DEFAULT_FOLDERS;
 
 const linksOfSession = (value: unknown) => (value as string[]).map(linkTarget);
 

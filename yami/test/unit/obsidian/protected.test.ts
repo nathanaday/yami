@@ -24,7 +24,7 @@ vi.mock("obsidian", async () => {
 import { EditorState, Transaction } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { editorInfoField, MarkdownView, type Command, type TFile } from "obsidian";
-import { PROTECTED_PATH, readProtected } from "../../../src/document/index.js";
+import { DEFAULT_FOLDERS, readProtected } from "../../../src/document/index.js";
 import { AgentPeer } from "../../../src/obsidian/collab/agent-peer.js";
 import { bindingPlugin, setBindingHost, syncAnnotation } from "../../../src/obsidian/collab/binding.js";
 import { CollabHub } from "../../../src/obsidian/collab/hub.js";
@@ -100,13 +100,13 @@ describe("the protected store", () => {
   });
 
   it("keeps a map that does not parse as it is, and refuses changes with the reason", async () => {
-    await vault.write(PROTECTED_PATH, "{ broken");
+    await vault.write(DEFAULT_FOLDERS.protected, "{ broken");
     const broken = new ProtectedStore(vault, () => "block");
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await broken.load();
     expect(broken.problem).toContain("does not parse");
     expect(() => broken.protect(file.path, MINE, TEXT)).toThrow("The protected text map cannot be used");
-    expect(await vault.read(PROTECTED_PATH)).toBe("{ broken");
+    expect(await vault.read(DEFAULT_FOLDERS.protected)).toBe("{ broken");
     error.mockRestore();
   });
 });

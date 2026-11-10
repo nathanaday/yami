@@ -2,7 +2,8 @@ import Graph from "graphology";
 import louvain from "graphology-communities-louvain";
 import { basename, link, LINK, linkTarget, parseDocument, PropertiesError, readDocument, writeDocument } from "../document/document.js";
 import { timestamp, type ChangeStatus } from "../document/schema.js";
-import { PROTECTED_PATH, readProtected, type ProtectedMap } from "../document/protected.js";
+import { readProtected, type ProtectedMap } from "../document/protected.js";
+import { DEFAULT_FOLDERS, escapeRegExp, type Folders } from "../document/folders.js";
 import type { Properties, Vault } from "../document/vault.js";
 import { algorithms, type Algorithm, type Hit, type Query, type Scored } from "./algorithms/index.js";
 import { Bm25, normalize, type Fields } from "./bm25.js";
@@ -32,7 +33,6 @@ import { chunk, type Chunk } from "./chunks.js";
 import { lintCitations } from "./citations.js";
 import { EmbeddingCache, type Embedder } from "./embed.js";
 import { BUNDLE_PROPERTY } from "./bundle.js";
-import { CACHE_PATH, ORIGINALS, WIKI_INTERNAL } from "./folders.js";
 import { lint, type Finding, type LintOptions } from "./lint.js";
 import { match, type Match, type MatchOptions } from "./match.js";
 import { TagIndex, type Neighbors, type TagCount, type TagView } from "./tags.js";
@@ -77,7 +77,7 @@ export interface WikiOptions {
   /** Note types that stay out of the index. Default: the records that are not knowledge, and copy it: conversation, session, module, change, snapshot. */
   skipTypes?: string[];
   embedder?: Embedder;
-  /** Where the embeddings are kept. Default `internal/wiki/cache/embeddings.json`. */
+  /** Where the embeddings are kept. Default `<internal>/wiki/cache/embeddings.json`. */
   cachePath?: string;
   /** The algorithm of a query that names none. Default `bm25`. A function is read at each query, so it can follow a setting. */
   defaultAlgorithm?: string | (() => string);
@@ -90,7 +90,15 @@ export const FIELD_WEIGHTS = { title: 3, aliases: 3, tags: 2, description: 2, bo
  * frozen copies that sources embed, also inside an exported bundle, and the folder of a wiki session, which holds the copies of a checkout or
  * the staged notes of an import.
  */
-const UNINDEXED = [/^internal\/[^/]+\/(agents|flows|policies|promises|skills)\//, new RegExp(`(^|/)${ORIGINALS}/`), new RegExp(`^${WIKI_INTERNAL}/sessions/[^/]+/`)];
+function unindexed(folders: Folders): RegExp[] {
+  return [
+    new RegExp(`^${escapeRegExp(folders.internal)}/[^/]+/(agents|flows|policies|promises|skills)/`),
+    new RegExp(`^${escapeRegExp(folders.originals)}/`),
+    // A bundle holds its originals in the default layout.
+    new RegExp(`/${escapeRegExp(DEFAULT_FOLDERS.originals)}/`),
+    new RegExp(`^${escapeRegExp(folders.wikiInternal)}/sessions/[^/]+/`),
+  ];
+}
 
 /** A seed of a graph query: a note and its weight. */
 export interface Seed {
@@ -122,6 +130,7 @@ export class Wiki {
   private pending: Promise<void> | undefined;
   /** Snapshots, restores, proposals, approvals, and rejections run one at a time, in the order they arrive. */
   private serial: Promise<unknown> = Promise.resolve();
+  private readonly unindexed: RegExp[];
   readonly options: Required<Pick<WikiOptions, "exclude" | "skipTypes" | "defaultAlgorithm">> & WikiOptions;
 
   constructor(
@@ -134,7 +143,13 @@ export class Wiki {
       defaultAlgorithm: "bm25",
       ...options,
     };
-    if (options.embedder) this.cache = new EmbeddingCache(vault, options.embedder, options.cachePath ?? CACHE_PATH);
+    this.unindexed = unindexed(vault.folders);
+    if (options.embedder) this.cache = new EmbeddingCache(vault, options.embedder, options.cachePath ?? vault.folders.cache);
+  }
+
+  /** Where the vault keeps the knowledge base and what the wiki keeps for itself. */
+  get folders(): Folders {
+    return this.vault.folders;
   }
 
   get embedder(): Embedder | undefined {
@@ -150,7 +165,7 @@ export class Wiki {
    */
   setEmbedder(embedder: Embedder | undefined): void {
     this.options.embedder = embedder;
-    this.cache = embedder ? new EmbeddingCache(this.vault, embedder, this.options.cachePath ?? CACHE_PATH) : undefined;
+    this.cache = embedder ? new EmbeddingCache(this.vault, embedder, this.options.cachePath ?? this.vault.folders.cache) : undefined;
   }
 
   /** The algorithm of a query that names none, as the option gives it now. */
@@ -339,7 +354,7 @@ export class Wiki {
     try {
       guarded = await readProtected(this.vault);
     } catch (error) {
-      broken = [{ path: PROTECTED_PATH, check: "bad-protected-map", severity: "error", message: error instanceof Error ? error.message : String(error), fix: "fix the JSON, or remove the file and protect the texts again" }];
+      broken = [{ path: this.vault.folders.protected, check: "bad-protected-map", severity: "error", message: error instanceof Error ? error.message : String(error), fix: "fix the JSON, or remove the file and protect the texts again" }];
     }
     return [...broken, ...lint(this, options, guarded), ...(await lintCitations(this, options))];
   }
@@ -444,7 +459,7 @@ export class Wiki {
 
   /** Whether the index reads a note at this path. */
   private reads(path: string, exclude: string[]): boolean {
-    return !UNINDEXED.some((pattern) => pattern.test(path)) && !exclude.some((entry) => path === entry || path.startsWith(`${entry}/`));
+    return !this.unindexed.some((pattern) => pattern.test(path)) && !exclude.some((entry) => path === entry || path.startsWith(`${entry}/`));
   }
 
   /** Whether the index keeps a note with these properties. A copy of another note, such as a checkout copy, and a note of an exported bundle are not knowledge of their own. */

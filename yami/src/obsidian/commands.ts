@@ -1,11 +1,11 @@
 import { Notice, type Command, type Editor, type Plugin } from "obsidian";
 import { basename } from "../document/document.js";
+import { WIKI_ID } from "../document/folders.js";
 import { excerpt } from "../document/protected.js";
 import type { ChangeStatus, FormKind } from "../document/schema.js";
 import type { YamiModule } from "../module/module.js";
 import type { SessionAct } from "../module/session.js";
 import { describeCounts, type ChangeAct, type ChangeSummary } from "../wiki/change.js";
-import { CHANGES, WIKI, WIKI_INTERNAL } from "../wiki/folders.js";
 import type { WikiModule } from "../module/wiki/index.js";
 import { noAgentsMessage } from "./agents.js";
 import { moduleIcon } from "./icons.js";
@@ -383,7 +383,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
         wiki.rebuild().then(({ notes, links, communities, ms }) => `Wiki: ${notes} notes, ${links} links, ${communities} communities, in ${ms} ms.`),
       ),
   });
-  const knowledge = (path: string) => [WIKI, WIKI_INTERNAL.split("/")[0]!, yami.conversationFolder].some((folder) => path === folder || path.startsWith(`${folder}/`));
+  const knowledge = (path: string) => [yami.vault.folders.wiki, yami.vault.folders.internal, yami.conversationFolder].some((folder) => path === folder || path.startsWith(`${folder}/`));
   addCommand(plugin, {
     id: "wiki-ingest-file",
     name: "Wiki: ingest this file",
@@ -419,7 +419,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
           if (!topics.length) return "The wiki has no topic to export.";
           const topic = await yami.pick(topics, (note) => `${note.name}${note.description ? ` · ${note.description}` : ""}`, EXPORT_PLACEHOLDER);
           if (!topic) return;
-          const module = yami.module(WIKI) as WikiModule;
+          const module = yami.module(WIKI_ID) as WikiModule;
           new WikiExportModal(app, module, topic.path, (written) => {
             const inVault = !/^([A-Za-z]:[\\/]|[\\/])/.test(written.folder);
             void yami.notify(Promise.resolve({ message: `Exported ${written.topics.length} topic(s) and ${written.sources.length} source(s) to ${written.folder}.`, open: inVault ? `${written.folder.replace(/\/+$/, "")}/${written.readme}` : undefined }));
@@ -434,7 +434,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
       yami.notify(
         yami.ask(IMPORT_PLACEHOLDER, IMPORT_HINT).then(async (from) => {
           if (!from) return;
-          const module = yami.module(WIKI) as WikiModule;
+          const module = yami.module(WIKI_ID) as WikiModule;
           const result = await module.importBundle({ from });
           const counts = `${result.staged.length} note(s) staged${result.dropped.length ? `, ${result.dropped.length} already in the wiki` : ""}`;
           const next = result.change ? "Approve its change in the panel." : result.staged.length ? "Run the session to merge them." : "Nothing to merge.";
@@ -450,7 +450,7 @@ export function addWikiCommands(yami: ObsidianYami): void {
   /** The change document open in the editor, from Obsidian's cache. */
   const activeChange = (): Pick<ChangeSummary, "path" | "status" | "title"> | undefined => {
     const file = activeNote();
-    if (!file || !file.path.startsWith(`${CHANGES}/`)) return undefined;
+    if (!file || !file.path.startsWith(`${yami.vault.folders.changes}/`)) return undefined;
     const properties = yami.properties(file.path);
     return properties.type === "change" ? { path: file.path, status: properties.status as ChangeStatus, title: String(properties.title ?? file.basename) } : undefined;
   };

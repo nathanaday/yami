@@ -12,30 +12,6 @@ export interface LedgerView {
   sort?: { property: string; direction: "ASC" | "DESC" }[];
 }
 
-/** The vault ledger: every module, and every session grouped by module. */
-export function vaultLedger(vault: Vault): string {
-  return vault.stringifyProperties({
-    filters: { or: ['type == "module"', 'type == "session"'] },
-    properties: { "file.name": { displayName: "Name" } },
-    views: [
-      {
-        type: "table",
-        name: "Modules",
-        filters: { and: ['type == "module"'] },
-        order: ["file.name", "name", "description", "created"],
-      },
-      {
-        type: "table",
-        name: "Sessions",
-        filters: { and: ['type == "session"'] },
-        groupBy: { property: "module", direction: "ASC" },
-        order: SESSION_COLUMNS,
-        sort: NEWEST_FIRST,
-      },
-    ],
-  });
-}
-
 /** The module ledger: the sessions of one module, and the views the module adds, for example its versions. */
 export function moduleLedger(vault: Vault, moduleId: string, views: LedgerView[] = []): string {
   return vault.stringifyProperties({

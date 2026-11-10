@@ -1,12 +1,19 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import YAML from "yaml";
-import type { Properties, Vault } from "../document/index.js";
+import { readFolders, type Folders, type Properties, type Vault } from "../document/index.js";
 
 /** A vault on the file system, for tests and the benchmark. */
 export class FsVault implements Vault {
-  constructor(readonly root: string) {}
+  /** The folders of the vault's settings file when the vault was opened, unless given. */
+  readonly folders: Folders;
+  constructor(
+    readonly root: string,
+    folders?: Folders,
+  ) {
+    this.folders = folders ?? readFolders(root);
+  }
   private abs(path: string) {
     return join(this.root, path);
   }
@@ -31,6 +38,11 @@ export class FsVault implements Vault {
       .filter((e) => e.isFile() && !relative(this.root, join(e.parentPath, e.name)).split("/").some((part) => part.startsWith(".")))
       .map((e) => relative(this.root, join(e.parentPath, e.name)))
       .sort();
+  }
+  async rename(from: string, to: string) {
+    if (existsSync(this.abs(to))) throw new Error(`${to} exists already.`);
+    await mkdir(dirname(this.abs(to)), { recursive: true });
+    await rename(this.abs(from), this.abs(to));
   }
   async remove(path: string) {
     await rm(this.abs(path), { force: true });

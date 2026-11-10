@@ -1,6 +1,6 @@
 import { basename, linksOf, readDocument } from "../../document/document.js";
 import { readProposal, type Proposal } from "../../wiki/change.js";
-import { TOPICS } from "../../wiki/folders.js";
+import type { Folders } from "../../document/folders.js";
 import type { Check, CheckContext } from "../checks.js";
 
 /** How many topics one verify session takes when its `topics` field names none. */
@@ -27,7 +27,7 @@ async function standing(context: CheckContext): Promise<Proposal[]> {
 export const verified: Check = async (_promise, context) => {
   const { wiki, vault } = context;
   const since = typeof context.properties.created === "string" ? context.properties.created : "";
-  const writes = (await standing(context)).flatMap((p) => p.writes).filter((w) => w.op === "modify" && w.path.startsWith(`${TOPICS}/`));
+  const writes = (await standing(context)).flatMap((p) => p.writes).filter((w) => w.op === "modify" && w.path.startsWith(`${context.vault.folders.topics}/`));
   const named = linksOf(context.properties.topics);
   const missing: string[] = [];
   const topics: string[] = [];
@@ -67,7 +67,7 @@ check: verified
 Every topic that the session's \`topics\` property links, or every topic the session read when it links none, has \`verified\` set to the session's date: a change of this session that is proposed or applied writes the topic with the property, and with the fix of each claim its source does not support.
 `;
 
-export const verifierAgent = `---
+export const verifierAgent = (f: Folders) => `---
 name: verifier
 description: "Reads each citation of one topic at its locator in the source's copy and grades the claim it supports: supported, unsupported, contradicted, or misplaced. It writes nothing."
 access: read-only
@@ -82,7 +82,7 @@ You are a verification worker of a wiki. The task gives you a topic's path and i
 
 \`\`\`json
 {
-  "topic": "${TOPICS}/Self-supervised learning.md",
+  "topic": "${f.topics}/Self-supervised learning.md",
   "verdicts": [
     {
       "citation": "([[DINOv2 (source)]], p. 3)",
@@ -110,7 +110,7 @@ You are a verification worker of a wiki. The task gives you a topic's path and i
 `;
 
 /** The skill of a verify session, `/wiki:verify`. */
-export const verifySkill = `---
+export const verifySkill = (f: Folders) => `---
 name: verify
 description: "Verify the claims of topics against their sources: read each citation at its locator with the verifier agent, and propose one change plan that fixes the claims the sources do not support and stamps each topic verified."
 ---
@@ -118,9 +118,9 @@ description: "Verify the claims of topics against their sources: read each citat
 
 Every claim of a topic names its source and a place in it. This session reads each citation at that place and holds the claim to it. It is read-only: a topic changes only through \`wiki_change\`.
 
-1. **The topics.** The session's \`topics\` property links the topics to verify. When it links none, call \`wiki_lint\` with \`folder: "${TOPICS}"\` and take first the topics with a \`bad-citation\` finding, then the topics with no \`verified\` property or the oldest one (\`wiki_search\` with \`types: ["topic"]\` lists them), at most ${VERIFY_BATCH} in one session.
+1. **The topics.** The session's \`topics\` property links the topics to verify. When it links none, call \`wiki_lint\` with \`folder: "${f.topics}"\` and take first the topics with a \`bad-citation\` finding, then the topics with no \`verified\` property or the oldest one (\`wiki_search\` with \`types: ["topic"]\` lists them), at most ${VERIFY_BATCH} in one session.
 2. **The citations.** For each topic, call \`wiki_citations\`. It returns each citation with its claim, the source note, the file to read, the lines or pages the locator names, and a \`problem\` for a citation code can already see leads nowhere: a locator past the file, or a note that is not a source.
-3. **Read.** For each topic, call \`yami_agent\` with the agent \`verifier\`, in waves of at most four: the task is the topic's path and the output of \`wiki_citations\` for it. A topic with more than 40 citations goes in two tasks. With one or two topics, verify them yourself from the verifier's brief, \`internal/wiki/agents/verifier/AGENT.md\`: read the file at each range, and grade each claim as the brief says.
+3. **Read.** For each topic, call \`yami_agent\` with the agent \`verifier\`, in waves of at most four: the task is the topic's path and the output of \`wiki_citations\` for it. A topic with more than 40 citations goes in two tasks. With one or two topics, verify them yourself from the verifier's brief, \`${f.wikiInternal}/agents/verifier/AGENT.md\`: read the file at each range, and grade each claim as the brief says.
 4. **Fix.** One plan for \`wiki_change\`: a \`modify\` of every topic you read, with \`verified\` set to today's date and time (\`YYYY-MM-DDTHH:MM:SS\`) in its properties, and the whole new body when a claim changes:
    - \`supported\`: nothing.
    - \`unsupported\` or \`contradicted\`: the claim as the passage states it, with its citation; a claim the passage supports nothing of goes, with its citation, and the plan's \`notes\` say so. Never write a claim without a source.

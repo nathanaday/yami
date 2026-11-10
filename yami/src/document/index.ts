@@ -1,5 +1,19 @@
 export type { Properties, Vault } from "./vault.js";
 export {
+  DEFAULT_FOLDER_SETTINGS,
+  DEFAULT_FOLDERS,
+  FOLDER_SETTINGS,
+  folderProblem,
+  Folders,
+  folderSettingsText,
+  mapFolders,
+  normalizeFolder,
+  parseFolderSettings,
+  readFolders,
+  WIKI_ID,
+  type FolderSettings,
+} from "./folders.js";
+export {
   basename,
   checkSection,
   documentName,
@@ -42,7 +56,7 @@ export {
   type Schema,
   type SessionState,
 } from "./schema.js";
-export { moduleLedger, vaultLedger, type LedgerView } from "./bases.js";
+export { moduleLedger, type LedgerView } from "./bases.js";
 export { applyOps, deltaOps, diffOps, normalizeNewlines, shiftOps, type TextOp } from "./text-ops.js";
 export {
   emptyProtected,
@@ -51,7 +65,6 @@ export {
   mapThrough,
   marksOf,
   protect,
-  PROTECTED_PATH,
   PROTECTED_VERSION,
   protectedLost,
   protectedRanges,

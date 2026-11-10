@@ -1,12 +1,17 @@
 import { normalizePath, parseYaml, stringifyYaml, type App } from "obsidian";
-import type { Properties, Vault } from "../document/index.js";
+import { readFolders, type Folders, type Properties, type Vault } from "../document/index.js";
 
 /** The Yami vault interface over the Obsidian API. */
 export class ObsidianVault implements Vault {
+  /** The folders of the vault's settings file when the plugin loaded. */
+  readonly folders: Folders;
+
   constructor(
     private readonly app: App,
     readonly root: string,
-  ) {}
+  ) {
+    this.folders = readFolders(root);
+  }
 
   read(path: string): Promise<string> {
     return this.app.vault.adapter.read(normalizePath(path));
@@ -15,6 +20,8 @@ export class ObsidianVault implements Vault {
   async write(path: string, text: string): Promise<void> {
     path = normalizePath(path);
     await this.ensureFolder(path);
+    // Obsidian keeps a hidden file, such as the folder settings, out of its index, so it goes through the adapter.
+    if (path.split("/").some((part) => part.startsWith("."))) return this.app.vault.adapter.write(path, text);
     const file = this.app.vault.getFileByPath(path);
     if (file) await this.app.vault.modify(file, text);
     else if (await this.app.vault.adapter.exists(path)) await this.app.vault.adapter.write(path, text);
@@ -39,6 +46,16 @@ export class ObsidianVault implements Vault {
       .getFiles()
       .map((file) => file.path)
       .filter((path) => path.startsWith(prefix));
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    to = normalizePath(to);
+    const file = this.app.vault.getAbstractFileByPath(normalizePath(from));
+    if (!file) throw new Error(`${from} is not in the vault.`);
+    if (await this.app.vault.adapter.exists(to)) throw new Error(`${to} exists already.`);
+    const slash = to.lastIndexOf("/");
+    if (slash !== -1 && !this.app.vault.getAbstractFileByPath(to.slice(0, slash))) await this.app.vault.createFolder(to.slice(0, slash));
+    await this.app.fileManager.renameFile(file, to);
   }
 
   async remove(path: string): Promise<void> {

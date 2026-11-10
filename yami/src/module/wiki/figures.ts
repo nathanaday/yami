@@ -1,8 +1,8 @@
 import { basename, linksOf, readDocument } from "../../document/document.js";
 import type { Vault } from "../../document/vault.js";
 import { readProposal, type Proposal } from "../../wiki/change.js";
-import { FIGURES, figureMarkers, fromBase64, pngProblem, svgProblem } from "../../wiki/figures.js";
-import { TOPICS } from "../../wiki/folders.js";
+import type { Folders } from "../../document/folders.js";
+import { figureMarkers, fromBase64, pngProblem, svgProblem } from "../../wiki/figures.js";
 import type { Check, CheckContext } from "../checks.js";
 import { checkName } from "../module.js";
 
@@ -26,14 +26,14 @@ export interface SavedFigure {
 }
 
 /**
- * Saves a figure under `internal/wiki/figures/<topic>/<name>.svg` or `.png`, for a topic to embed. It
+ * Saves a figure under `<figures>/<topic>/<name>.svg` or `.png`, for a topic to embed. It
  * refuses a topic that is not one, a name a file cannot take, both or neither of `svg` and `png`, an SVG with
  * a script, an event handler, or a reference outside itself, bytes that are not a PNG, a file over the size
  * limit, and a name in use unless `replace` is set. The figures folder is not the knowledge base: a figure
  * file is not in a version, and the topic's embed of it goes through a change plan as any write does.
  */
 export async function saveFigure(vault: Vault, topicPath: string | undefined, figure: FigureFile): Promise<SavedFigure> {
-  if (!topicPath || !topicPath.startsWith(`${TOPICS}/`)) throw new Error(`${figure.topic} is not a topic of the wiki.`);
+  if (!topicPath || !topicPath.startsWith(`${vault.folders.topics}/`)) throw new Error(`${figure.topic} is not a topic of the wiki.`);
   const name = figure.name.trim();
   checkName(name);
   if (name.includes(".")) throw new Error(`"${name}" cannot name a figure: give the name without an extension.`);
@@ -57,7 +57,7 @@ export async function saveFigure(vault: Vault, topicPath: string | undefined, fi
     data = bytes;
     extension = "png";
   }
-  const path = `${FIGURES}/${basename(topicPath)}/${name}.${extension}`;
+  const path = `${vault.folders.figures}/${basename(topicPath)}/${name}.${extension}`;
   if (!figure.replace && (await vault.exists(path))) throw new Error(`A figure is at ${path}; give another name, or set replace.`);
   await vault.writeBinary(path, data);
   return { path, embed: `![[${path}]]` };
@@ -145,7 +145,7 @@ You are an illustration worker of a wiki. The task gives you a topic's path, one
 `;
 
 /** The skill of a figures session, `/wiki:figures`. */
-export const figuresSkill = `---
+export const figuresSkill = (f: Folders) => `---
 name: figures
 description: "Make the figures that topics mark as missing: for each %% figure: … %% marker, draw the figure with the illustrator agent, save it with wiki_figure, and propose one change plan that puts each figure in its marker's place."
 ---
@@ -153,10 +153,10 @@ description: "Make the figures that topics mark as missing: for each %% figure: 
 
 A topic marks a figure it lacks with a line Obsidian hides in reading view: \`%% figure: what it shows · from: [[Source]] slide 7 %%\`. The drafter of an ingest writes one for each figure it has no picture of. This session makes them. It is read-only: a figure is saved through \`wiki_figure\`, and a topic changes only through \`wiki_change\`.
 
-1. **The topics.** The session's \`topics\` property links the topics to work on. When it links none, call \`wiki_lint\` with \`folder: "${TOPICS}"\` and take every topic with a \`figure-missing\` finding.
+1. **The topics.** The session's \`topics\` property links the topics to work on. When it links none, call \`wiki_lint\` with \`folder: "${f.topics}"\` and take every topic with a \`figure-missing\` finding.
 2. **The markers.** Read each topic, and list its markers: the text after \`figure:\`, and where the source has it after \`from:\`. Find the source note and, when the source has a captured text with pictures, the picture at that place. A marker with no \`from\` is a figure to draw from the topic's text.
-3. **Draw.** For each marker, call \`yami_agent\` with the agent \`illustrator\`, in waves of at most four: the task gives the topic's path, the marker's text, the source note's path, the locator, and the picture's path when there is one. Each returns the figure as SVG or PNG with a caption, or \`none\` with a reason. With one or two markers, draw them yourself from the illustrator's brief, \`internal/wiki/agents/illustrator/AGENT.md\`.
-4. **Save.** Call \`wiki_figure\` with the topic, a short name for the figure (\`encoder-decoder\`), and the \`svg\` text or the \`png\` base64. It writes \`${FIGURES}/<topic>/<name>.svg\` and returns the embed. A refused figure says why: fix it, or ask the illustrator again.
+3. **Draw.** For each marker, call \`yami_agent\` with the agent \`illustrator\`, in waves of at most four: the task gives the topic's path, the marker's text, the source note's path, the locator, and the picture's path when there is one. Each returns the figure as SVG or PNG with a caption, or \`none\` with a reason. With one or two markers, draw them yourself from the illustrator's brief, \`${f.wikiInternal}/agents/illustrator/AGENT.md\`.
+4. **Save.** Call \`wiki_figure\` with the topic, a short name for the figure (\`encoder-decoder\`), and the \`svg\` text or the \`png\` base64. It writes \`${f.figures}/<topic>/<name>.svg\` and returns the embed. A refused figure says why: fix it, or ask the illustrator again.
 5. **Place.** One plan for \`wiki_change\`: a \`modify\` of each topic whose body replaces each marker with the embed on a line of its own, then the caption as one italic line with the source's citation: \`*Figure: <caption> ([[Source]], slide 7).*\`. Change nothing else in the topic. A figure that could not be made keeps its marker, and the plan's \`notes\` say why. Give the plan a \`title\` ("Figures for <topics>") and \`session\`.
 6. **Propose and end.** Call \`wiki_change\`. Your work ends when the plan is proposed; a person approves it in Obsidian. Do not wait for that.
 `;

@@ -17,9 +17,10 @@ async function fresh(...modules: YamiModule[]) {
 }
 
 describe("a module's files", () => {
-  it("installs the ledgers, the module document, and each form in a folder of its name, with no type and no module", async () => {
+  it("installs the module ledger, the module document, and each form in a folder of its name, with no type and no module", async () => {
     const { vault } = await fresh();
-    for (const file of ["Yami.base", "internal/hello/sessions.base", "internal/hello/hello.md", "internal/hello/policies/always-say-hello/POLICY.md", "internal/hello/skills/greeting/SKILL.md"]) {
+    expect(await vault.exists("Yami.base")).toBe(false);
+    for (const file of ["internal/hello/sessions.base", "internal/hello/hello.md", "internal/hello/policies/always-say-hello/POLICY.md", "internal/hello/skills/greeting/SKILL.md"]) {
       expect(await vault.exists(file), file).toBe(true);
     }
     expect(await vault.exists("hello/sessions.base")).toBe(false);

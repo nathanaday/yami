@@ -1,7 +1,7 @@
 import { link, readDocument, writeDocument } from "../document/document.js";
 import { timestamp } from "../document/schema.js";
+import { DEFAULT_FOLDER_SETTINGS, Folders, mapFolders, type FolderSettings } from "../document/folders.js";
 import type { Vault } from "../document/vault.js";
-import { KNOWLEDGE, SNAPSHOTS } from "./folders.js";
 import { hash } from "./tokens.js";
 
 /** One version of the knowledge base, as its snapshot document records it. */
@@ -22,6 +22,8 @@ export interface Archive {
   created: string;
   hash: string;
   notes: Record<string, string>;
+  /** The vault's folders when the archive was written. An archive without them was written with the defaults. */
+  folders?: FolderSettings;
 }
 
 export interface Captured {
@@ -33,7 +35,7 @@ export interface Captured {
 
 /** The notes of the knowledge base, by path, and the hash of all of them. */
 export async function knowledge(vault: Vault): Promise<{ notes: Record<string, string>; hash: string }> {
-  const paths = (await Promise.all(KNOWLEDGE.map((folder) => vault.list(folder)))).flat().sort();
+  const paths = (await Promise.all(vault.folders.knowledge.map((folder) => vault.list(folder)))).flat().sort();
   const notes: Record<string, string> = {};
   for (const path of paths) notes[path] = await vault.read(path);
   return { notes, hash: hashOf(notes) };
@@ -47,13 +49,15 @@ export function hashOf(notes: Record<string, string>): string {
 /** Every version, oldest first. */
 export async function versions(vault: Vault): Promise<Version[]> {
   const out: Version[] = [];
-  for (const path of await vault.list(SNAPSHOTS)) {
+  for (const path of await vault.list(vault.folders.snapshots)) {
     const doc = await readDocument(vault, path);
     if (doc.properties.type !== "snapshot" || typeof doc.properties.version !== "number") continue;
+    // The archive sits beside its document, which a move of the folders takes along with it.
+    const archive = String(doc.properties.archive ?? "");
     out.push({
       version: doc.properties.version,
       path,
-      archive: String(doc.properties.archive ?? ""),
+      archive: archive && `${path.slice(0, path.lastIndexOf("/"))}/${archive.slice(archive.lastIndexOf("/") + 1)}`,
       hash: String(doc.properties.hash ?? ""),
       created: String(doc.properties.created ?? ""),
       notes: Number(doc.properties.notes ?? 0),
@@ -88,9 +92,9 @@ export async function snapshot(vault: Vault, options: SnapshotOptions = {}): Pro
   const previous = all.at(-1);
   const version = (previous?.version ?? 0) + 1;
   const created = timestamp();
-  const archivePath = `${SNAPSHOTS}/v${version}.json.gz`;
-  const path = `${SNAPSHOTS}/v${version}.md`;
-  const archive: Archive = { version, created, hash: current, notes };
+  const archivePath = `${vault.folders.snapshots}/v${version}.json.gz`;
+  const path = `${vault.folders.snapshots}/v${version}.md`;
+  const archive: Archive = { version, created, hash: current, notes, folders: vault.folders.settings };
   await vault.writeBinary(archivePath, await gzip(JSON.stringify(archive)));
   const before = previous ? (await readArchive(vault, previous)).notes : {};
   const body = [`# Version ${version}`, "", ...describe(before, notes, previous?.version)].join("\n");
@@ -132,8 +136,14 @@ export async function writeArchive(vault: Vault, version: Version): Promise<{ wr
   return { written, removed };
 }
 
+/** Reads a version's archive, with its notes at the paths of the vault's folders now. */
 export async function readArchive(vault: Vault, version: Version): Promise<Archive> {
-  return JSON.parse(await gunzip(await vault.readBinary(version.archive))) as Archive;
+  const archive = JSON.parse(await gunzip(await vault.readBinary(version.archive))) as Archive;
+  const from = new Folders(archive.folders ?? DEFAULT_FOLDER_SETTINGS);
+  const to = vault.folders;
+  if (from.wiki === to.wiki && from.internal === to.internal) return archive;
+  const notes = Object.fromEntries(Object.entries(archive.notes).map(([path, text]) => [mapFolders(path, from, to), mapFolders(text, from, to)]));
+  return { ...archive, notes, folders: to.settings };
 }
 
 /** Lines that say which notes a version added, changed, and removed since the one before. */

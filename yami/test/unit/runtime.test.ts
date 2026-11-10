@@ -158,11 +158,10 @@ describe("what a Yami adds to the vault and to its agents", () => {
   ];
   const WIKI_TOOLS = ["wiki_search", "wiki_match", "wiki_lint", "wiki_tags", "wiki_neighbors", "wiki_chunks", "wiki_citations", "wiki_change", "wiki_ingest", "wiki_figure", "wiki_export", "wiki_import", "wiki_checkout"];
 
-  it("writes the vault ledger, the base skill, and the documents of the wiki and threads, and gives each agent its tools and three skill sets, as the README lists them", async () => {
+  it("writes the base skill and the documents of the wiki and threads, and nothing at the vault's root, and gives each agent its tools and three skill sets, as the README lists them", async () => {
     t = await testYami();
     const root = t.root;
     expect(await listed(root)).toEqual([
-      "Yami.base",
       "internal/threads/agents/reviewer/AGENT.md",
       "internal/threads/agents/validator/AGENT.md",
       "internal/threads/installed.json",
@@ -193,7 +192,7 @@ describe("what a Yami adds to the vault and to its agents", () => {
 
   it("writes nothing of threads, and gives no tool, skill set, or color of it, when the host leaves it out", async () => {
     t = await testYami({ threads: false });
-    expect(await listed(t.root)).toEqual(["Yami.base", ...WIKI_FILES, "internal/yami/skills/run/SKILL.md"]);
+    expect(await listed(t.root)).toEqual([...WIKI_FILES, "internal/yami/skills/run/SKILL.md"]);
     expect(t.agent.preferences.tools?.tools.map((tool) => tool.name)).toEqual(["yami_check", "yami_protected", "yami_agent", ...WIKI_TOOLS]);
     expect(t.agent.preferences.skills).toEqual([join(t.root, "internal/yami"), join(t.root, "internal/wiki")]);
     expect(t.yami.modules.map((module) => module.id)).toEqual(["wiki"]);

@@ -1,9 +1,6 @@
 import { normalizeNewlines, type TextOp } from "./text-ops.js";
 import type { Vault } from "./vault.js";
 
-/** Where the vault keeps the text that a person protected: one file, under Yami's own folder. */
-export const PROTECTED_PATH = "internal/yami/protected.json";
-
 /** The version of the map's form. A file of another version is not read. */
 export const PROTECTED_VERSION = 1;
 
@@ -42,17 +39,17 @@ export function emptyProtected(): ProtectedMap {
  * Reads the map, or an empty one when the vault has none. A file whose JSON does not parse, or of another
  * version, throws, so a broken map is seen and not silently taken as empty.
  */
-export async function readProtected(vault: Vault): Promise<ProtectedMap> {
-  if (!(await vault.exists(PROTECTED_PATH))) return emptyProtected();
+export async function readProtected(vault: Vault, file = vault.folders.protected): Promise<ProtectedMap> {
+  if (!(await vault.exists(file))) return emptyProtected();
   let data: unknown;
   try {
-    data = JSON.parse(await vault.read(PROTECTED_PATH));
+    data = JSON.parse(await vault.read(file));
   } catch (error) {
-    throw new Error(`${PROTECTED_PATH} does not parse: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`${file} does not parse: ${error instanceof Error ? error.message : String(error)}`);
   }
   const map = data as Partial<ProtectedMap> | null;
   if (!map || map.version !== PROTECTED_VERSION || typeof map.notes !== "object" || map.notes === null) {
-    throw new Error(`${PROTECTED_PATH} is not a protected text map of version ${PROTECTED_VERSION}.`);
+    throw new Error(`${file} is not a protected text map of version ${PROTECTED_VERSION}.`);
   }
   const notes: Record<string, ProtectedMark[]> = {};
   for (const [path, marks] of Object.entries(map.notes)) {
@@ -64,8 +61,8 @@ export async function readProtected(vault: Vault): Promise<ProtectedMap> {
 }
 
 /** Writes the map, also an empty one: a file that says nothing is protected is not a missing file. */
-export async function writeProtected(vault: Vault, map: ProtectedMap): Promise<void> {
-  await vault.write(PROTECTED_PATH, `${JSON.stringify(map, null, 2)}\n`);
+export async function writeProtected(vault: Vault, map: ProtectedMap, file = vault.folders.protected): Promise<void> {
+  await vault.write(file, `${JSON.stringify(map, null, 2)}\n`);
 }
 
 /** The marks of a note, in the order they were made. */

@@ -1,18 +1,17 @@
 // The Yami SDK: define modules, and run the sessions of their agent workflows. It needs no Obsidian, so a
 // module and its tests run in plain Node; `createYami` in `yami/obsidian` builds a Yami for a plugin.
 export { Yami, type IngestOptions, type SessionListener, type YamiOptions } from "./module/yami.js";
+export { moveFolders, type MovedFolders } from "./module/move.js";
 export {
   checkName,
   Flow,
   formPath,
   idFromName,
-  INTERNAL,
   MODULE_ICON,
   ModuleDocument,
   moduleSkills,
   safeName,
   skillCommand,
-  VAULT_LEDGER,
   YamiModule,
   type ActionResult,
   type Choice,
@@ -21,6 +20,7 @@ export {
   type DocumentRef,
   type FlowOptions,
   type FormParts,
+  type FormText,
   type Layout,
   type LinkedKind,
   type ModuleAct,
@@ -43,7 +43,7 @@ export {
   type SessionSummary,
 } from "./module/session.js";
 export { VaultModule, type ModuleProblem } from "./module/vault-module.js";
-export { BASE_SKILL, BASE_SKILL_COMMAND, BASE_SKILL_TEXT } from "./module/base-skill.js";
+export { BASE_SKILL_COMMAND, BASE_SKILL_TEXT, baseSkill, yamiSkills } from "./module/base-skill.js";
 export { VERSION } from "./version.js";
 export type { ReviewItem, ReviewRecord, Verdict } from "./module/review.js";
 export { LINKED_KINDS, type LinkedDocument } from "./module/links.js";

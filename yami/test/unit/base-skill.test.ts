@@ -1,8 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
-import { BASE_SKILL, BASE_SKILL_TEXT, VERSION } from "../../src/index.js";
+import { BASE_SKILL_TEXT, baseSkill, VERSION } from "../../src/index.js";
 import { hashText, SHIPPED } from "../../src/module/base-skill.js";
 import { testYami, type TestYami } from "../../src/testing/index.js";
+import { DEFAULT_FOLDERS } from "../../src/document/index.js";
+
+const BASE_SKILL = baseSkill(DEFAULT_FOLDERS);
 
 let t: TestYami | undefined;
 afterEach(async () => {

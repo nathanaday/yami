@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readDocument } from "../../src/document/index.js";
+import { DEFAULT_FOLDERS, Folders, readDocument } from "../../src/document/index.js";
 import { VaultModule, type Properties } from "../../src/index.js";
 import { definesModule } from "../../src/module/vault-module.js";
 import { review, testYami, type TestYami, type Turn } from "../../src/testing/index.js";
@@ -171,15 +171,19 @@ describe("a vault module", () => {
   });
 
   it("says which paths define a module", () => {
-    expect(definesModule("internal/a/a.md")).toBe(true);
+    expect(definesModule("internal/a/a.md", DEFAULT_FOLDERS)).toBe(true);
     for (const folder of ["agents", "flows", "policies", "promises", "skills"]) {
-      expect(definesModule(`internal/a/${folder}/x/FORM.md`), folder).toBe(true);
-      expect(definesModule(`internal/a/${folder}/x.md`), folder).toBe(true);
+      expect(definesModule(`internal/a/${folder}/x/FORM.md`, DEFAULT_FOLDERS), folder).toBe(true);
+      expect(definesModule(`internal/a/${folder}/x.md`, DEFAULT_FOLDERS), folder).toBe(true);
     }
-    expect(definesModule("internal/a/b.md")).toBe(false);
-    expect(definesModule("internal/a/templates/T.md")).toBe(false);
-    expect(definesModule("internal/a/articles/x.md")).toBe(false);
-    expect(definesModule("notes/a/a.md")).toBe(false);
+    expect(definesModule("internal/a/b.md", DEFAULT_FOLDERS)).toBe(false);
+    expect(definesModule("internal/a/templates/T.md", DEFAULT_FOLDERS)).toBe(false);
+    expect(definesModule("internal/a/articles/x.md", DEFAULT_FOLDERS)).toBe(false);
+    expect(definesModule("notes/a/a.md", DEFAULT_FOLDERS)).toBe(false);
+    const nested = new Folders({ internal: "system/yami" });
+    expect(definesModule("system/yami/a/a.md", nested)).toBe(true);
+    expect(definesModule("system/yami/a/skills/x/SKILL.md", nested)).toBe(true);
+    expect(definesModule("internal/a/a.md", nested)).toBe(false);
   });
 });
 

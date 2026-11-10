@@ -1,7 +1,3 @@
-import { WIKI_INTERNAL } from "./folders.js";
-
-/** Where the figures that a figures session makes go: `internal/wiki/figures/<topic>/<name>.svg`. */
-export const FIGURES = `${WIKI_INTERNAL}/figures`;
 
 /**
  * A figure marker in a topic: a line that says where a figure goes and what it must show, which Obsidian
