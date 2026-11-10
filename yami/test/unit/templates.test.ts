@@ -238,3 +238,95 @@ describe("a wiki from before templates", () => {
     expect(await vault.exists("wiki/topics/Old.md")).toBe(false);
   });
 });
+
+describe("what review found", () => {
+  it("imports a page with its template, holds a page whose template this wiki lacks for the run, and matches names across templates", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "yami-bundle-"));
+    const page = (type: string, extra = "") => `---\ntype: ${type}\ndescription: A ${type}.\n${extra}---\nx\n`;
+    await writeFile(join(folder, "NeurIPS 2025.md"), page("event", "date: 2025-12-02\n"));
+    await writeFile(join(folder, "Ada.md"), page("person"));
+    await writeFile(join(folder, "Fair.md"), page("event", "date: 2026-09-01\naliases: [Harvest fair]\n"));
+    await note(`${PAGES}/Harvest fair.md`, { description: "A fair, written by hand with no type." }, "x\n");
+    await wiki.refresh();
+    const module = t.yami.module("wiki") as import("../../src/index.js").WikiModule;
+    const result = await module.importBundle({ from: folder });
+    const by = Object.fromEntries(result.staged.map((s) => [s.target, s]));
+    expect(by[`${PAGES}/Ada.md`]).toMatchObject({ status: "conflict", reason: expect.stringContaining("its type, person, is no template of this wiki") });
+    expect(by[`${PAGES}/Fair.md`]).toMatchObject({ status: "conflict", with: [`${PAGES}/Harvest fair.md`] });
+    expect(result.change).toBeUndefined();
+
+    const alone = await mkdtemp(join(tmpdir(), "yami-bundle-"));
+    await writeFile(join(alone, "NeurIPS 2025.md"), page("event", "date: 2025-12-02\n"));
+    const direct = await module.importBundle({ from: alone });
+    await wiki.approve(direct.change!);
+    expect((await readDocument(vault, `${PAGES}/NeurIPS 2025.md`)).properties).toMatchObject({ type: "event", date: "2025-12-02" });
+  });
+
+  it("moves each topic into a pages folder that exists, and reports the one whose name is taken", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yami-legacy-"));
+    await mkdir(join(root, "topics"));
+    await mkdir(join(root, "pages"));
+    await writeFile(join(root, "topics/Old.md"), "---\ntype: topic\ndescription: Old.\n---\nSee [[wiki/topics/Both]].\n");
+    await writeFile(join(root, "topics/Both.md"), "---\ntype: topic\ndescription: The old one.\n---\nx\n");
+    await writeFile(join(root, "pages/Both.md"), "---\ntype: topic\ndescription: The new one.\n---\nx\n");
+    const legacy = await testYami({ files: { "wiki/topics": join(root, "topics"), "wiki/pages": join(root, "pages") } });
+    try {
+      expect(await legacy.vault.read("wiki/pages/Old.md")).toContain("See [[wiki/topics/Both]].");
+      expect(await legacy.vault.read("wiki/pages/Both.md")).toContain("The new one.");
+      expect(await legacy.vault.exists("wiki/topics/Both.md")).toBe(true);
+      expect(legacy.yami.problems.find((p) => p.path === "wiki/topics")?.message).toContain("still holds 1 note(s) whose names wiki/pages/ holds already, such as wiki/topics/Both.md");
+    } finally {
+      await legacy.dispose();
+    }
+  });
+
+  it("gives a required property with values its first value, and refuses a default that is not one of them", async () => {
+    await vault.write(`${TEMPLATES}/talk/TEMPLATE.md`, "---\nname: talk\ndescription: A talk.\nproperties:\n  format: {type: text, required: true, values: [keynote, poster]}\nsections: []\ncites: false\n---\n");
+    const module = t.yami.module("wiki") as import("../../src/index.js").WikiModule;
+    const path = await module.newPage({ template: "talk", name: "Opening", description: "The opening talk." });
+    expect((await readDocument(vault, path)).properties.format).toBe("keynote");
+    expect(parseSchema({ format: { type: "text", default: "panel", values: ["keynote"] } }).problems).toEqual(["the property format: its default must be one of its values"]);
+  });
+
+  it("reports a template that does not read in yami.problems at the start", async () => {
+    await vault.write(`${TEMPLATES}/topic/TEMPLATE.md`, "---\nname: topic\n---\n");
+    await vault.write(`${TEMPLATES}/recipe/TEMPLATE.md`, "---\nname: recipe\ndescription: A recipe.\nchecks: [tasty]\n---\n");
+    await t.yami.enable();
+    const messages = t.yami.problems.map((p) => p.message);
+    expect(messages).toContain("The property description is missing. Until then, the wiki uses the library's text of the template.");
+    expect(messages).toContain("The check tasty is not a template check. The checks are chronological, coverage. Until then, the wiki has no template of that name.");
+  });
+
+  it("reads a timeline's entries only in its Entries section and outside code, keeps kind that a template declares, and takes an empty type as a topic", async () => {
+    const body = "## Overview\n\n```\n- **later**: a skeleton\n```\n\n## Entries\n\n- **2023**: First.\n  - **sub**: a note on it.\n- **2024**: Second.\n\n## Related\n\n## Sources\n\n- **[[Book (source)]]**: the dates.\n\n## Notes\n";
+    await note(`${PAGES}/History.md`, { type: "timeline", description: "History.", ...cited }, body);
+    await vault.write(`${TEMPLATES}/person/TEMPLATE.md`, "---\nname: person\ndescription: A person.\nproperties: {kind: text}\nsections: []\ncites: false\n---\n");
+    await note(`${PAGES}/Ada.md`, { type: "person", kind: "mathematician", description: "Ada." }, "x [[History]]\n");
+    await note(`${PAGES}/Blank.md`, { type: "", description: "No type.", ...cited }, "## Definition\n\n## Explanation\n\n## Related\n\n## Sources\n\n## Notes\n[[Ada]]\n");
+    await wiki.refresh();
+    expect((await wiki.lint({ paths: [`${PAGES}/History.md`] })).filter((f) => f.check === "chronological")).toEqual([]);
+    expect(await checks(`${PAGES}/Ada.md`)).not.toContain("kind-retired");
+    expect(await checks(`${PAGES}/Blank.md`)).not.toContain("unknown-template");
+    expect(wiki.templateOf(wiki.note(`${PAGES}/Blank.md`)!)!.name).toBe("topic");
+  });
+
+  it("warns on a source among the pages and a page among the sources", async () => {
+    await note(`${PAGES}/Paper.md`, { type: "source", description: "A paper.", file: "[[book.pdf]]" }, "x\n");
+    await note(`${SOURCES}/Idea.md`, { type: "topic", description: "An idea." }, "x\n");
+    await wiki.refresh();
+    expect((await wiki.lint({ paths: [`${PAGES}/Paper.md`, `${SOURCES}/Idea.md`] })).map((f) => [f.path, f.check])).toEqual([
+      [`${PAGES}/Paper.md`, "misplaced"],
+      [`${SOURCES}/Idea.md`, "misplaced"],
+    ]);
+  });
+
+  it("holds a figures session from before yami 0.24 to the pages of its topics field", async () => {
+    await note(`${PAGES}/Loop.md`, { type: "topic", description: "A loop.", ...cited }, "%% figure: the loop · from: [[Book (source)]] p. 1 %%\n");
+    await note(`${PAGES}/Other.md`, { type: "topic", description: "Other.", ...cited }, "%% figure: other %%\n");
+    await wiki.refresh();
+    const { figures } = await import("../../src/module/wiki/figures.js");
+    const result = await figures({ path: "p", properties: { check: "figures" }, body: "" } as never, { wiki, vault, properties: { topics: [link(`${PAGES}/Loop.md`)], changes: [] } } as never);
+    expect(result).toMatchObject({ status: "unmet", detail: expect.stringContaining("Loop (1)") });
+    expect(result.detail).not.toContain("Other");
+  });
+});

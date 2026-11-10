@@ -166,8 +166,35 @@ export interface TemplateCheck {
   run(wiki: Wiki, note: Note): string[];
 }
 
-/** An entry line of a timeline: `- **2024-03-14**: …`. */
-const ENTRY = /^\s*[-*+]\s+\*\*([^*]+)\*\*/;
+/** An entry line of a timeline: `- **2024-03-14**: …`, at the start of the line. */
+const ENTRY = /^[-*+]\s+\*\*([^*]+)\*\*/;
+
+/** The lines of a body outside its code blocks: those of its `## Entries` section when it has one, else all. */
+function entryLines(body: string): string[] {
+  const lines: string[] = [];
+  let fence: string | undefined;
+  let section: string | undefined;
+  let entries = false;
+  for (const line of body.split("\n")) {
+    const opened = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (opened && opened[0] === fence[0] && opened.length >= fence.length) fence = undefined;
+      continue;
+    }
+    if (opened) {
+      fence = opened;
+      continue;
+    }
+    const heading = /^ {0,3}##[ \t]+(.+?)[ \t#]*$/.exec(line)?.[1];
+    if (heading) {
+      section = heading.trim().toLowerCase();
+      entries ||= section === "entries";
+      continue;
+    }
+    lines.push(`${section ?? ""}\u0000${line}`);
+  }
+  return lines.filter((line) => !entries || line.startsWith("entries\u0000")).map((line) => line.slice(line.indexOf("\u0000") + 1));
+}
 const DATE = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?$/;
 
 /** The date of an entry, as a number that orders the entries: a year alone comes before its months. */
@@ -179,12 +206,12 @@ function entryDate(text: string): number | undefined {
 /** The template checks, by name. A template names the ones that apply to its pages in `checks`. */
 export const templateChecks: Readonly<Record<string, TemplateCheck>> = {
   chronological: {
-    description: "The entry lines, `- **<date>**: …`, are in date order, oldest first, and each date is a year, a month, or a day.",
+    description: "The entry lines, `- **<date>**: …` at the start of a line, are in date order, oldest first, and each date is a year, a month, or a day. With an `## Entries` section, only its lines are entries; lines in code blocks never are.",
     fix: "put the entries in date order, oldest first, with each date as YYYY, YYYY-MM, or YYYY-MM-DD",
     run(_wiki, note) {
       const messages: string[] = [];
       let last: { text: string; date: number } | undefined;
-      for (const line of note.body.split("\n")) {
+      for (const line of entryLines(note.body)) {
         const text = ENTRY.exec(line)?.[1];
         if (text === undefined) continue;
         const date = entryDate(text);
@@ -213,7 +240,7 @@ export const templateChecks: Readonly<Record<string, TemplateCheck>> = {
   },
 };
 
-/** An empty value of each field type, for a required property that a new page leaves for the person to fill. */
+/** An empty value of each field type, for a required property that a new page leaves for the person to fill. A property with `values` takes its first. */
 const EMPTY: Record<string, unknown> = { text: "", date: "", link: "", number: 0, boolean: false, list: [], links: [], map: {} };
 
 /**
@@ -223,7 +250,7 @@ const EMPTY: Record<string, unknown> = { text: "", date: "", link: "", number: 0
 export function pageSkeleton(template: Pick<Template, "name" | "properties" | "sections">, description: string): { properties: Record<string, unknown>; body: string } {
   const properties: Record<string, unknown> = { type: template.name, description };
   for (const [name, field] of Object.entries(template.properties)) {
-    if (field.required) properties[name] = field.default ?? EMPTY[field.type];
+    if (field.required) properties[name] = field.default ?? field.values?.[0] ?? EMPTY[field.type];
   }
   const body = template.sections.map((section) => `## ${section}\n`).join("\n");
   return { properties, body };

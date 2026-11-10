@@ -28,7 +28,8 @@ export const verified: Check = async (_promise, context) => {
   const { wiki, vault } = context;
   const since = typeof context.properties.created === "string" ? context.properties.created : "";
   const writes = (await standing(context)).flatMap((p) => p.writes).filter((w) => w.op === "modify" && context.vault.folders.inPages(w.path));
-  const named = linksOf(context.properties.pages);
+  // A session from before yami 0.24 names its pages in `topics`.
+  const named = linksOf(context.properties.pages ?? context.properties.topics);
   const missing: string[] = [];
   const pages: string[] = [];
   if (named.length) {
@@ -118,7 +119,7 @@ description: "Verify the claims of pages against their sources: read each citati
 
 Every claim of a page names its source and a place in it. This session reads each citation at that place and holds the claim to it. It is read-only: a page changes only through \`wiki_change\`.
 
-1. **The pages.** The session's \`pages\` property links the pages to verify. When it links none, call \`wiki_lint\` with \`folder: "${f.pages}"\` and take first the pages with a \`bad-citation\` finding, then the pages with no \`verified\` property or the oldest one (\`wiki_search\` with \`types: ["page"]\` lists them), at most ${VERIFY_BATCH} in one session.
+1. **The pages.** The session's \`pages\` property links the pages to verify (a session from before yami 0.24 has \`topics\` instead). When it links none, call \`wiki_lint\` with \`folder: "${f.pages}"\` and take first the pages with a \`bad-citation\` finding, then the pages with no \`verified\` property or the oldest one (\`wiki_search\` with \`types: ["page"]\` lists them), at most ${VERIFY_BATCH} in one session.
 2. **The citations.** For each page, call \`wiki_citations\`. It returns each citation with its claim, the source note, the file to read, the lines or pages the locator names, and a \`problem\` for a citation code can already see leads nowhere: a locator past the file, or a note that is not a source.
 3. **Read.** For each page, call \`yami_agent\` with the agent \`verifier\`, in waves of at most four: the task is the page's path and the output of \`wiki_citations\` for it. A page with more than 40 citations goes in two tasks. With one or two pages, verify them yourself from the verifier's brief, \`${f.wikiInternal}/agents/verifier/AGENT.md\`: read the file at each range, and grade each claim as the brief says.
 4. **Fix.** One plan for \`wiki_change\`: a \`modify\` of every page you read, with \`verified\` set to today's date and time (\`YYYY-MM-DDTHH:MM:SS\`) in its properties, and the whole new body when a claim changes:

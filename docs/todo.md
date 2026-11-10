@@ -145,7 +145,7 @@ What the wiki plugin still needs, in the order they were raised, and what each b
    3. `change.ts`: the type from the properties, a type change by modify, and the section warnings.
    4. `lint.ts`: `missing-section`, `stub`, `unknown-template`, the template checks, and `no-sources` by `cites`.
    5. The wiki module: it installs the templates, adds `wiki_templates`, and revises the extractor, the drafter, the ingest skill, and the policies. The tests for `"topic"` in `checkout.ts`, `import.ts`, `figures.ts`, `verify.ts`, `bundle.ts`, `citations.ts`, and `match.ts` become `isPage`.
-   6. `yami/obsidian`: the commands Wiki: new page (pick a template, write its skeleton) and Wiki: new template, the topic picker of `commands.ts`, and a Stubs table in the wiki's ledger.
+   6. `yami/obsidian`: the commands Wiki: new page (pick a template, write its skeleton) and Wiki: new template, and the page picker of `commands.ts`. Lint lists the stubs: a table in the wiki's ledger cannot, since the ledger's base keeps only the module's own documents.
    7. The migration.
    8. Unit tests: each built-in template is valid; a person's template with a property of its own; a broken template; a stub that becomes an event; `missing-section`; `chronological`; `coverage`; the migration. The README, and the CHANGELOG with the breaks: the folder, the types, `kind`, and `pageForms`.
 3. **yami-wiki**: takes yami 0.24.0. The settings text and the README name pages and templates. The Obsidian test drives Wiki: new page and a person's own template.

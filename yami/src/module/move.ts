@@ -64,16 +64,33 @@ export async function moveFolders(yami: Yami, settings: Partial<FolderSettings>)
 /**
  * Moves the pages of a wiki from before yami 0.24, which kept them in `<wiki>/topics/`, to `<wiki>/pages/`,
  * with every link into them, the protected text map, and the notes that each change document names, as
- * `moveFolders` does. It does nothing, and returns false, when the vault has no topics folder, or has a pages
- * folder already. The wiki module calls it at each start, before it installs its documents.
+ * `moveFolders` does. With no pages folder yet, the folder moves whole. With one, as when another device of a
+ * synced vault made it, each file moves on its own, and one whose name the pages folder holds already stays.
+ * Returns the files left in the topics folder, which the wiki module reports as a problem. The wiki module calls
+ * it at each start, before it installs its documents.
  */
-export async function moveLegacyTopics(vault: Vault): Promise<boolean> {
+export async function moveLegacyTopics(vault: Vault): Promise<string[]> {
   const { legacyTopics, pages } = vault.folders;
-  if (!(await vault.exists(legacyTopics)) || (await vault.exists(pages))) return false;
-  await vault.rename(legacyTopics, pages);
-  const move = (path: string) => movedPath(path, legacyTopics, pages);
+  if (!(await vault.exists(legacyTopics))) return [];
+  const files = await vault.files(legacyTopics);
+  if (!files.length) return [];
+  let move: (path: string) => string;
+  if (!(await vault.exists(pages))) {
+    await vault.rename(legacyTopics, pages);
+    move = (path) => movedPath(path, legacyTopics, pages);
+  } else {
+    const moved = new Set<string>();
+    for (const file of files) {
+      const target = movedPath(file, legacyTopics, pages);
+      if (await vault.exists(target)) continue;
+      await vault.rename(file, target);
+      moved.add(file);
+      if (file.endsWith(".md")) moved.add(file.slice(0, -3));
+    }
+    move = (path) => (moved.has(path) ? movedPath(path, legacyTopics, pages) : path);
+  }
   await moveNoteLinks(vault, vault.folders, move, await moveRecords(vault, vault.folders, move));
-  return true;
+  return vault.files(legacyTopics);
 }
 
 /** Moves the links of every note but the ones Yami installed, and the paths that each change document names. */

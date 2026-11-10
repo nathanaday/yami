@@ -119,6 +119,15 @@ export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedM
       add(note, "duplicate-name", "warning", `shares a name or alias with ${[...others].join(", ")}; a link by name is ambiguous`, "rename one, or drop the alias");
     }
     const page = wiki.isPage(note);
+    const inSources = note.path.startsWith(`${wiki.folders.sources}/`);
+    if (page && note.type === "source") {
+      add(note, "misplaced", "warning", `is a source in ${wiki.folders.pages}/, where the pages are`, `move it to ${wiki.folders.sources}/, or give it the type of a page's template`);
+      continue;
+    }
+    if (inSources && note.type !== "source") {
+      add(note, "misplaced", "warning", `has the type ${String(note.type ?? "none")} in ${wiki.folders.sources}/, where only sources are`, `move a page to ${wiki.folders.pages}/; a source has type: source`);
+      continue;
+    }
     if (!page && note.type !== "source") continue;
     if (!note.description.trim()) add(note, "no-description", "error", "has no description", "add a one-sentence description property");
     const template = page ? wiki.templateOf(note) : wiki.template("source");
@@ -138,7 +147,7 @@ export function lint(wiki: Wiki, options: LintOptions = {}, guarded?: ProtectedM
         for (const message of check.run(wiki, note)) add(note, name, "warning", message, check.fix);
       }
     }
-    if (page && typeof note.properties.kind === "string") {
+    if (page && typeof note.properties.kind === "string" && !(template && "kind" in template.properties)) {
       const type = KIND_TYPES[note.properties.kind];
       add(note, "kind-retired", "info", `has kind: ${note.properties.kind}; the template in type says what kind of page it is now`, type ? `set type: ${type}, and remove kind` : "set type to its template, and remove kind");
     }

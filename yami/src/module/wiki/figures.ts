@@ -81,7 +81,8 @@ async function standing(context: CheckContext): Promise<Proposal[]> {
  */
 export const figures: Check = async (_promise, context) => {
   const { wiki, vault } = context;
-  const named = linksOf(context.properties.pages);
+  // A session from before yami 0.24 names its pages in `topics`.
+  const named = linksOf(context.properties.pages ?? context.properties.topics);
   const missing: string[] = [];
   const pages: string[] = [];
   if (named.length) {
@@ -153,7 +154,7 @@ description: "Make the figures that pages mark as missing: for each %% figure: â
 
 A page marks a figure it lacks with a line Obsidian hides in reading view: \`%% figure: what it shows Â· from: [[Source]] slide 7 %%\`. The drafter of an ingest writes one for each figure it has no picture of. This session makes them. It is read-only: a figure is saved through \`wiki_figure\`, and a page changes only through \`wiki_change\`.
 
-1. **The pages.** The session's \`pages\` property links the pages to work on. When it links none, call \`wiki_lint\` with \`folder: "${f.pages}"\` and take every page with a \`figure-missing\` finding.
+1. **The pages.** The session's \`pages\` property links the pages to work on (a session from before yami 0.24 has \`topics\` instead). When it links none, call \`wiki_lint\` with \`folder: "${f.pages}"\` and take every page with a \`figure-missing\` finding.
 2. **The markers.** Read each page, and list its markers: the text after \`figure:\`, and where the source has it after \`from:\`. Find the source note and, when the source has a captured text with pictures, the picture at that place. A marker with no \`from\` is a figure to draw from the page's text.
 3. **Draw.** For each marker, call \`yami_agent\` with the agent \`illustrator\`, in waves of at most four: the task gives the page's path, the marker's text, the source note's path, the locator, and the picture's path when there is one. Each returns the figure as SVG or PNG with a caption, or \`none\` with a reason. With one or two markers, draw them yourself from the illustrator's brief, \`${f.wikiInternal}/agents/illustrator/AGENT.md\`.
 4. **Save.** Call \`wiki_figure\` with the page as \`topic\`, a short name for the figure (\`encoder-decoder\`), and the \`svg\` text or the \`png\` base64. It writes \`${f.figures}/<page>/<name>.svg\` and returns the embed. A refused figure says why: fix it, or ask the illustrator again.

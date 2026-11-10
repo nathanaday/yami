@@ -11,7 +11,7 @@ import { resolveCitations } from "../../wiki/citations.js";
 import { deltaChunks } from "../../wiki/delta.js";
 import { isAbsolute } from "../../wiki/source.js";
 import { BUILT_IN_TEMPLATES } from "../../wiki/template-texts.js";
-import { pageSkeleton, RESERVED_TEMPLATE_NAMES, starterTemplate, templatePath } from "../../wiki/templates.js";
+import { pageSkeleton, readTemplates, RESERVED_TEMPLATE_NAMES, starterTemplate, templatePath } from "../../wiki/templates.js";
 import { normalizeTag } from "../../wiki/wiki.js";
 import { WIKI_COLOR } from "../colors.js";
 import { checkName, ID, idFromName, YamiModule } from "../module.js";
@@ -22,6 +22,9 @@ import { absorbed, drafterAgent, extractorAgent, pageRules, proposed } from "./i
 import { figures, figuresMade, figuresSkill, illustratorAgent, saveFigure } from "./figures.js";
 import { bundleImported, imported, importSkill, stagingFolder, type ImportedBundle, type StagedNote } from "./import.js";
 import { claimsVerified, verified, verifierAgent, verifySkill } from "./verify.js";
+
+/** Whether a template's path is one of a built-in template. */
+const isBuiltIn = (path: string, templates: string) => path.slice(templates.length + 1).split("/")[0]! in BUILT_IN_TEMPLATES;
 
 /** The vault folder where a bundle goes when the export names none: `exports/<name>/`. */
 export const EXPORTS = "exports";
@@ -80,13 +83,6 @@ export class WikiModule extends YamiModule {
       name: "Changes",
       filters: { and: ['type == "change"'] },
       order: ["file.name", "status", "reason", "creates", "modifies", "removes", "session", "before", "after", "applied", "rejected"],
-      sort: [{ property: "created", direction: "DESC" }],
-    },
-    {
-      type: "table",
-      name: "Stubs",
-      filters: { and: ['type == "stub"'] },
-      order: ["file.name", "description", "becomes", "tags", "created"],
       sort: [{ property: "created", direction: "DESC" }],
     },
     {
@@ -534,8 +530,12 @@ End with one line: the folder, and the counts of pages and sources. A bundle ins
         plan.push({ note, status: "conflict", with: [existing.path], reason: `a note holds this path with another text: merge into ${link(existing.path)}` });
         continue;
       }
+      if (note.type !== "source" && !wiki.template(note.type)) {
+        plan.push({ note, status: "conflict", with: [], reason: `its type, ${note.type}, is no template of this wiki: create it with a template here that fits, or add the template to ${vault.folders.templates}/ first` });
+        continue;
+      }
       const names = [basename(note.path), ...(Array.isArray(note.properties.aliases) ? note.properties.aliases.map(String) : [])];
-      const matches = await wiki.match(names, { types: [note.type] });
+      const matches = await wiki.match(names, { types: [note.type === "source" ? "source" : "page"] });
       const hit = matches.find((m) => m.match === "hit" && m.path && m.path !== note.path && outside(m.path));
       if (hit) {
         plan.push({ note, status: "conflict", with: [hit.path!], reason: `${link(hit.path!)} holds the name "${hit.name}": the same subject, or another that needs a name of its own` });
@@ -569,7 +569,7 @@ End with one line: the folder, and the counts of pages and sources. A bundle ins
     let change: string | undefined;
     if (direct) {
       const writes: Write[] = staged.map((s) => {
-        const { type: _type, ...properties } = plan.find((p) => p.note.path === s.target)!.note.properties;
+        const { properties } = plan.find((p) => p.note.path === s.target)!.note;
         return { op: "create", path: s.target, properties, body: plan.find((p) => p.note.path === s.target)!.note.body, why: `imported from ${name}` };
       });
       change = (await wiki.change({ title: `Import ${name}`, notes: `Every note of the bundle is new to this wiki, so code proposed the plan at once.${dropped.length ? ` Dropped, as the wiki holds them already: ${dropped.map((d) => basename(d.target)).join(", ")}.` : ""}`, session, writes })).path;
@@ -604,8 +604,15 @@ End with one line: the folder, and the counts of pages and sources. A bundle ins
 
   /** Moves the pages of a wiki from before yami 0.24 to the pages folder, then installs the module's documents. */
   async install(): Promise<ModuleProblem[]> {
-    await moveLegacyTopics(this.vault);
-    return super.install();
+    const left = await moveLegacyTopics(this.vault);
+    const problems = await super.install();
+    const { legacyTopics, pages } = this.vault.folders;
+    if (left.length) {
+      problems.push({ module: this.id, path: legacyTopics, message: `${legacyTopics}/ still holds ${left.length} note(s) whose names ${pages}/ holds already, such as ${left[0]}. The wiki reads only ${pages}/: merge each into its namesake, or rename it and move it there.` });
+    }
+    const { problems: templates } = await readTemplates(this.vault);
+    for (const problem of templates) problems.push({ module: this.id, path: problem.path, document: problem.path, message: `${problem.message} Until then, the wiki ${isBuiltIn(problem.path, this.vault.folders.templates) ? "uses the library's text of the template" : "has no template of that name"}.` });
+    return problems;
   }
 
   tools(): AgentTool[] {

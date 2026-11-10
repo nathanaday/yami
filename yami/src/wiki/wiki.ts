@@ -316,7 +316,7 @@ export class Wiki {
 
   /** The template of a page: the one its `type` names, or `topic` for a page with no type. Undefined for a type that names no template. */
   templateOf(note: Note): Template | undefined {
-    return this.templateMap.get(note.type ?? DEFAULT_TEMPLATE);
+    return this.templateMap.get(note.type?.trim() || DEFAULT_TEMPLATE);
   }
 
   /**

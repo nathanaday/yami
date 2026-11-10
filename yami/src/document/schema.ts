@@ -272,6 +272,7 @@ export function parseSchema(map: unknown): { schema: Schema; problems: string[] 
     }
     if ("default" in rest) {
       if (FIELD_TYPES.includes(type as FieldType) && !matches(rest.default, type as FieldType)) problems.push(`the property ${name}: its default must be ${describe(type as FieldType)}`);
+      else if (Array.isArray(values) && !values.includes(rest.default)) problems.push(`the property ${name}: its default must be one of its values`);
       else field.default = rest.default;
     }
     const unknown = Object.keys(rest).filter((key) => key !== "default");
