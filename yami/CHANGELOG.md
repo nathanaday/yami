@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.23.0 · folders a vault chooses
+
+A vault keeps its wiki and Yami's internal folder where the person wants them, moves them with every link into them, and holds nothing of Yami's at its root.
 
 ### Added
 - **Folders a vault chooses.** The internal folder (default `internal`) and the wiki folder (default `wiki`) can be any folder of the vault, as the hidden file `.yami.json` at its root says: `{ "internal": "system", "wiki": "library/wiki" }`. `vault.folders`, a `Folders`, gives every path that comes from them, and every part of Yami builds its paths there: the modules' layouts, the base skill, the protected map, the wiki's index, changes, versions, sources, originals, figures, and bundles, the tools' descriptions, the folder colors, and the wiki commands. `yami/document` has `Folders`, `readFolders`, `parseFolderSettings`, `folderSettingsText`, `folderProblem`, `normalizeFolder`, `mapFolders`, `DEFAULT_FOLDERS`, `DEFAULT_FOLDER_SETTINGS`, `FOLDER_SETTINGS`, and `WIKI_ID`. A hidden folder is refused, since Obsidian leaves it out of its index.
