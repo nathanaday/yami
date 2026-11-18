@@ -64,7 +64,7 @@ afterEach(async () => {
 
 /** An editor over a note, with the binding (as every Obsidian editor has) and the protected extension. */
 function editor(text = TEXT, shared?: SharedNote) {
-  setBindingHost({ bindings: new Set(), get: (path) => (shared && path === file.path ? shared : undefined) });
+  setBindingHost({ bindings: new Set(), unsound: () => undefined, get: (path) => (shared && path === file.path ? shared : undefined) });
   const info = Object.assign(new MarkdownView({} as never), { file, editor: {} as { cm?: EditorView } });
   const view = new EditorView({ state: EditorState.create({ doc: text, extensions: [editorInfoField.init(() => info), bindingPlugin, protectedExtension(store)] }), parent: document.body.createDiv() });
   info.editor.cm = view;

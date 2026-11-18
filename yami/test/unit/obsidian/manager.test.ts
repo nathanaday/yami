@@ -158,6 +158,11 @@ function fakeApp() {
         folders.add(path);
       }),
       adapter: { exists: async (path: string) => folders.has(path) || onDisk.has(path) },
+      read: async (file: TFile) => text.get(file) ?? "",
+      process: async (file: TFile, change: (data: string) => string) => {
+        text.set(file, change(text.get(file) ?? ""));
+        return text.get(file)!;
+      },
       create: async (path: string, content: string) => {
         const file = new FakeFile(path);
         file.parent = { path: path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "/" } as TFile["parent"];
@@ -306,6 +311,36 @@ describe("ConversationManager", () => {
       await wiki.destroy();
       await duet.destroy();
     });
+  });
+
+  it("writes the conversation through the vault when the plugin has no hub", async () => {
+    manager = new ConversationManager(fake.app as never, undefined, {} as never, {
+      agents: () => agents,
+      folder: () => "conversations",
+      animate: () => false,
+      idleMinutes: () => 15,
+      onActivity: () => undefined,
+    });
+    const { file, text } = await start({ message: "Hello", open: false });
+    expect(text()).toMatch(/> \[!user\]\n> Hello\n\n\n$/);
+    const ended = new Promise((resolve) => manager.onTurnEnd(file.path, resolve));
+    session.emit({ type: "turn-start" } as AgentEvent);
+    session.emit({ type: "text-delta", text: "Hi there." } as AgentEvent);
+    session.emit({ type: "turn-end", result: { status: "completed", text: "Hi there." } });
+    await ended;
+    expect(text()).toMatch(/> \[!user\]\n> Hello\n\n[\s\S]*Hi there\.[\s\S]*\n\n$/);
+    // The next message goes after the reply, and its reply after the message.
+    const next = new Promise((resolve) => manager.onTurnEnd(file.path, resolve));
+    void manager.controller(file)!.send("And again");
+    await flush();
+    session.emit({ type: "turn-start" } as AgentEvent);
+    session.emit({ type: "text-delta", text: "Second reply." } as AgentEvent);
+    session.emit({ type: "turn-end", result: { status: "completed", text: "Second reply." } });
+    await next;
+    const order = ["> Hello", "Hi there.", "> And again", "Second reply."].map((part) => text().indexOf(part));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect(text().match(/Hi there\./g)).toHaveLength(1);
   });
 
   it("creates the note in the conversation folder, named after the message, and sends the message", async () => {

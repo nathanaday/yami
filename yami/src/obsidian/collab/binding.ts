@@ -13,6 +13,8 @@ export const presenceAnnotation = Annotation.define<true>();
 export interface BindingHost {
   bindings: Set<EditorBinding>;
   get(path: string): SharedNote | undefined;
+  /** Stops sharing a note whose document is not `sound`. */
+  unsound(note: SharedNote): void;
 }
 
 /** A range in the editor that follows the user's edits, for example a reply callout before the note is shared. */
@@ -81,6 +83,7 @@ export class EditorBinding implements NoteView {
     const note = file && this.host.get(file.path);
     if (note === this.note) return;
     this.unbind();
+    if (note && !note.sound) return this.host.unsound(note);
     if (note && ![...note.views].some((view) => view !== this && view instanceof EditorBinding)) this.bind(note);
   }
 
@@ -137,7 +140,9 @@ export class EditorBinding implements NoteView {
   }
 
   private applyToNote(transaction: CmTransaction): void {
-    const note = this.note!;
+    const note = this.note;
+    if (!note) return;
+    if (!note.sound) return this.host.unsound(note);
     // Obsidian replaces the whole text with userEvent "set". Its positions can refer to an older text.
     if (transaction.isUserEvent("set") || note.text.length !== transaction.startState.doc.length) {
       note.applyOps(diffOps(note.content, transaction.newDoc.toString()), this);

@@ -9,7 +9,7 @@ import { Yami } from "../module/yami.js";
 import type { ChangeAct } from "../wiki/change.js";
 import type { WikiOptions } from "../wiki/wiki.js";
 import { noAgentsMessage, vaultRoot, type ConversationAgent } from "./agents.js";
-import { CollabHub, installCollab, uninstallCollab } from "./collab/hub.js";
+import { type CollabHub, collabOwner, installCollab, uninstallCollab } from "./collab/hub.js";
 import { ChangeFeed } from "./change-feed.js";
 import { showFolderColors } from "./colors.js";
 import { watchModules } from "./discovery.js";
@@ -18,6 +18,7 @@ import { addConversationCommands, addModuleCommands, addNewModuleCommand, addPro
 import { protectedExtension, protectedPostProcessor } from "./protected/editor.js";
 import { CitationPreview, citationExtension, citationPostProcessor } from "./wiki/citations.js";
 import { protectedGuard } from "./protected/guard.js";
+import { installVaultGuard } from "./protected/vault-guard.js";
 import { ProtectedStore, type ProtectedEditing } from "./protected/store.js";
 import { ConversationManager } from "./conversation/manager.js";
 import { ObsidianConversations } from "./conversation/obsidian-conversations.js";
@@ -64,6 +65,15 @@ export interface YamiPluginOptions {
   wiki?: WikiOptions;
   /** Whether a citation of a source shows where it leads at a hover, in the editor and in Reading view. Default true, with the wiki module. */
   citationPreview?: boolean;
+  /**
+   * Whether the plugin edits notes live with its agents, through the window's hub (`yami.hub`): a reply
+   * plays as typing with the agent's cursor, a file that an agent's tools change merges into unsaved
+   * typing, and Undo the agent's last changes works. Default false. One plugin of a window can have the
+   * hub, because each plugin bundles its own copy of Yjs: a plugin that asks while another has it shows
+   * a notice and goes on without. With no hub, Yami writes a conversation note through the vault, a few
+   * times a second while a reply grows, and guards protected text at each write of a file.
+   */
+  collab?: boolean;
   /** The folder of conversation notes. Default `conversations`. A function is read at each use. */
   conversationFolder?: string | (() => string);
   /**
@@ -122,8 +132,8 @@ const read = <T>(value: T | (() => T)): T => (typeof value === "function" ? (val
 export class ObsidianYami extends Yami {
   readonly app: App;
   readonly plugin: Plugin;
-  /** The shared documents of the window. */
-  readonly hub: CollabHub;
+  /** The shared documents of the window. None without the `collab` option, or while another plugin has the hub. */
+  readonly hub: CollabHub | undefined;
   /** The conversation notes, with their message box. Other plugins start conversations with it. */
   readonly conversations: ConversationManager;
   /** The text that a person protected against change by an agent, and how the editor treats it. */
@@ -165,7 +175,10 @@ export class ObsidianYami extends Yami {
     this.#registered = registered;
     this.#idleMinutes = options.idleMinutes ?? IDLE_MINUTES;
     this.#animate = options.animate ?? true;
-    const hub = installCollab(app, plugin);
+    const hub = options.collab ? installCollab(app, plugin) : undefined;
+    if (options.collab && !hub) {
+      new Notice(`${plugin.manifest.name}: live editing is off, because ${collabOwner() ?? "another plugin"} has it in this window. Update your Yami plugins, then restart Obsidian.`, 15_000);
+    }
     const conversations = new ConversationManager(app, hub, new PermissionPrompts(app), {
       agents: () => this.#registered,
       folder: () => this.conversationFolder,
@@ -185,7 +198,9 @@ export class ObsidianYami extends Yami {
     void this.protected.load();
     plugin.registerEditorExtension(protectedExtension(this.protected) as never);
     plugin.registerMarkdownPostProcessor(protectedPostProcessor(this.protected));
-    plugin.register(hub.observe(protectedGuard(this.protected, (message) => new Notice(message, 8_000))));
+    const kept = (message: string) => void new Notice(message, 8_000);
+    if (hub) plugin.register(hub.observe(protectedGuard(this.protected, kept)));
+    else installVaultGuard(plugin, app, this.protected, kept, () => this.conversations.working[0]?.agentName ?? this.works[0]?.name);
     plugin.register(this.protected.onBlocked(() => new Notice(PROTECTED_BLOCKED)));
     // The citation preview is the wiki's: a Yami without the wiki module has no sources to lead to.
     if (this.module(WIKI_ID) && options.citationPreview !== false) {
@@ -231,7 +246,7 @@ export class ObsidianYami extends Yami {
       void conversations
         .destroy()
         .catch((error) => console.error(error))
-        .finally(() => uninstallCollab(hub));
+        .finally(() => hub && uninstallCollab(hub));
     });
 
     const groups = { conversations: true, sessions: true, wiki: true, modules: true, protected: true, ...options.commands };

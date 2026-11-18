@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.25.0 · live editing is one plugin's
+
+Two plugins that shared the window's hub wrote to one Yjs document with two copies of Yjs. Text that the second copy inserted did not show, its removals applied, and the note corrupted at the person's next edit ([obsidian-duet#12](https://github.com/nathanaday/obsidian-duet/issues/12)). The hub now belongs to the one plugin that installs it, and a plugin installs it only when it asks.
+
+### Breaking
+- **`createYami` installs the hub only with `collab: true`**, and `yami.hub` is `CollabHub | undefined`. A plugin whose agents edit ordinary notes with the person sets `collab`; a plugin that only runs conversations and sessions needs no change, and runs no Yjs.
+- **`installCollab` returns `CollabHub | undefined`**: nothing while another loaded plugin has the hub, or while a plugin on a Yami before 0.25 has its hub in the window. It no longer gives a plugin the hub of another. A host that builds the parts itself passes the result to `ConversationManager`, which takes `CollabHub | undefined`, and calls `uninstallCollab` only for a hub it got.
+- **With no hub, a conversation note is written through the vault**: a reply reaches the file about four times a second while it grows, with no agent cursor and no typing; a file that an agent's tools change does not merge into unsaved typing; and Undo the agent's last changes (`yami-revert`) is not offered.
+- A plugin on a Yami before 0.25 that loads after the hub's owner fails at its first use of the hub, with a notice. Update it to 0.25.
+- `BindingHost` has `unsound(note)`.
+
+### Added
+- `collabOwner()`, the name of the plugin that has the hub.
+- `SharedNote.sound`, false when the document counts characters that its text does not show, and `CollabHub.unsound(note)`, which stops sharing such a note without saving it. The editor binding and the hub's save call it, so a document in that state is dropped at the next edit, with a notice, and never written.
+- `installVaultGuard(plugin, app, store, notify, who)`, the guard of protected text for a plugin with no hub, at each write of a file.
+- `ConversationNote`, `TurnOutput`, `SharedConversationNote`, `PlainConversationNote`, and `replaceReply`: how a `ConversationController` writes its note, with the hub and without.
+
+### Fixed
+- The window is free for a new hub as soon as the owner's unload starts. Before, the hub stayed in the window until the conversations closed, so the next instance of a plugin that was updated or reloaded took the old instance's hub.
+- An `AgentPeer` refuses a note of another copy of Yjs, with the reason.
+
 ## 0.24.0 · pages of a template
 
 The wiki's knowledge is pages of a template and sources. A template, a document in the vault, says what kind of page a note is, the properties of its own, the sections it holds, and how to write it. The wiki installs eight, and a person edits them and adds their own.

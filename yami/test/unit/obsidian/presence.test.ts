@@ -38,7 +38,7 @@ const views: EditorView[] = [];
 async function editor(text: string) {
   const file = { path: "Note.md" } as TFile;
   const note = new SharedNote(file, text, text, { read: async () => text, author: () => undefined });
-  setBindingHost({ bindings: new Set(), get: (path) => (path === file.path ? note : undefined) });
+  setBindingHost({ bindings: new Set(), unsound: () => undefined, get: (path) => (path === file.path ? note : undefined) });
   const info = Object.assign(new MarkdownView({} as never), { file, editor: {} as { cm?: EditorView } });
   const parent = document.body.createDiv();
   const view = new EditorView({ state: EditorState.create({ doc: text, extensions: [editorInfoField.init(() => info), bindingPlugin, presenceExtensions] }), parent });

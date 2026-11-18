@@ -77,6 +77,14 @@ export class SharedNote {
     return this.text.toJSON();
   }
 
+  /**
+   * False when the document counts characters that its text does not show, which happens when another
+   * copy of Yjs wrote to it. Positions in such a document no longer match the text.
+   */
+  get sound(): boolean {
+    return this.text.length === this.content.length;
+  }
+
   /** True when an editor shows the note and the user can see it. */
   get visible(): boolean {
     for (const view of this.views) if (view.visible) return true;
