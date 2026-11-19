@@ -114,7 +114,7 @@ export function addConversationCommands(yami: ObsidianYami): () => void {
     name: "Undo the agent's last changes in this note",
     checkCallback: (checking) => {
       const file = yami.activeFile();
-      const note = file && yami.hub.get(file.path);
+      const note = file && yami.hub?.get(file.path);
       if (!note?.agentUndo.canUndo()) return false;
       if (!checking) note.agentUndo.undo();
       return true;

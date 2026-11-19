@@ -1,6 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import { around } from "monkey-around";
-import { type App, MarkdownView, normalizePath, type Plugin, TFile, type Vault } from "obsidian";
+import { type App, MarkdownView, normalizePath, Notice, type Plugin, TFile, type Vault } from "obsidian";
 import { AgentPeer, type AgentIdentity } from "./agent-peer.js";
 import { bindingPlugin, type BindingHost, EditorBinding, setBindingHost } from "./binding.js";
 import { presenceExtensions } from "./presence.js";
@@ -63,7 +63,7 @@ export interface HubObserver {
  * - `Vault.modify`: Obsidian saves an editor with it. The hub records what was written, so the save does
  *   not come back as an outside change.
  *
- * One Obsidian window has one hub. `installCollab` makes it, and a second plugin finds the first one.
+ * One Obsidian window has one hub, which only the plugin that made it uses: `installCollab`.
  */
 export class CollabHub implements BindingHost {
   readonly bindings = new Set<EditorBinding>();
@@ -226,6 +226,16 @@ export class CollabHub implements BindingHost {
     }
   }
 
+  /** Stops sharing a note whose document is not `sound`, and does not save it: the editor and the file keep their text. */
+  unsound(note: SharedNote): void {
+    if (this.notes.get(note.path) !== note) return;
+    console.error(`Yami: the shared document of ${note.path} does not match its text; sharing stopped.`);
+    new Notice(`Yami stopped live editing of ${note.path}, because its shared copy no longer matched the text. The note is as the editor shows it.`, 15_000);
+    window.clearTimeout(this.saves.get(note));
+    this.saves.delete(note);
+    this.dispose(note);
+  }
+
   /** The editor binding that shows a note, if the note is open. */
   editorFor(file: TFile): EditorBinding | undefined {
     for (const binding of this.bindings) if (binding.file === file) return binding;
@@ -298,6 +308,7 @@ export class CollabHub implements BindingHost {
 
   private async save(note: SharedNote): Promise<void> {
     if (note.views.size) return;
+    if (!note.sound) return this.unsound(note);
     const text = note.content;
     if (text === (await this.read(note.file))) return;
     await this.app.vault.modify(note.file, text);
@@ -342,26 +353,90 @@ export class CollabHub implements BindingHost {
   }
 }
 
-const HUB_KEY = "__yamiCollabHub";
+const LOCK_KEY = "__yamiCollab";
+/** Where a Yami before 0.25 kept the hub itself, for any plugin of the window to use. */
+const LEGACY_KEY = "__yamiCollabHub";
+const TRIPWIRE = "yamiCollabTripwire";
+
+/** Who has the window's hub. Plain data, so a plugin with another copy of Yami can read it. */
+interface CollabLock {
+  token: object;
+  plugin: Plugin;
+  name: string;
+}
+
+const releases = new WeakMap<CollabHub, () => void>();
+
+function shared(): Record<string, unknown> {
+  return window as unknown as Record<string, unknown>;
+}
+
+/** The lock of a plugin that is still loaded. */
+function liveLock(): CollabLock | undefined {
+  const lock = shared()[LOCK_KEY] as CollabLock | undefined;
+  return lock && (lock.plugin as unknown as { _loaded?: boolean })._loaded !== false ? lock : undefined;
+}
+
+/** A hub that a Yami before 0.25 left in the window. */
+function legacyHub(): boolean {
+  const legacy = shared()[LEGACY_KEY] as Record<string, unknown> | undefined;
+  return Boolean(legacy) && legacy![TRIPWIRE] !== true;
+}
 
 /**
- * The one hub of this Obsidian window. The first plugin that calls this
- * installs the hub; later plugins get the same one. The installing plugin
- * must call `uninstallCollab` when it unloads.
+ * Stands where a Yami before 0.25 looks for the hub. Such a plugin would write to the hub's documents with
+ * its own copy of Yjs, which corrupts them, so its first use throws and the plugin does not load.
  */
-export function installCollab(app: App, plugin: Plugin): CollabHub {
-  const shared = window as unknown as Record<string, CollabHub | undefined>;
-  let hub = shared[HUB_KEY];
-  if (!hub) {
-    hub = new CollabHub(app);
-    hub.install(plugin);
-    shared[HUB_KEY] = hub;
-  }
+function tripwire(owner: string): object {
+  let told = false;
+  return new Proxy(
+    {},
+    {
+      get(_target, key) {
+        if (key === TRIPWIRE) return true;
+        if (typeof key === "symbol") return undefined;
+        const message = `${owner} has live editing in this window, and a plugin built on an older Yami cannot share it. Update your Yami plugins.`;
+        if (!told) new Notice(message, 15_000);
+        told = true;
+        throw new Error(`Yami: ${message}`);
+      },
+    },
+  );
+}
+
+/**
+ * The name of the plugin that has the window's hub, when another plugin cannot install one. It reads
+ * `a plugin built on an older Yami` for a hub from before 0.25.
+ */
+export function collabOwner(): string | undefined {
+  return liveLock()?.name ?? (legacyHub() ? "a plugin built on an older Yami" : undefined);
+}
+
+/**
+ * Installs the hub of this Obsidian window for one plugin, which alone uses it: each plugin bundles its own
+ * copy of Yjs, and two copies cannot write to one document. It returns nothing when another loaded plugin
+ * has the hub; `collabOwner` names it. The window is free again as soon as the plugin unloads.
+ * `uninstallCollab` destroys the hub.
+ */
+export function installCollab(app: App, plugin: Plugin): CollabHub | undefined {
+  if (liveLock() || legacyHub()) return undefined;
+  const slots = shared();
+  const token = {};
+  const guard = tripwire(plugin.manifest.name);
+  slots[LOCK_KEY] = { token, plugin, name: plugin.manifest.name } satisfies CollabLock;
+  slots[LEGACY_KEY] = guard;
+  const hub = new CollabHub(app);
+  const release = () => {
+    if ((slots[LOCK_KEY] as CollabLock | undefined)?.token === token) delete slots[LOCK_KEY];
+    if (slots[LEGACY_KEY] === guard) delete slots[LEGACY_KEY];
+  };
+  releases.set(hub, release);
+  plugin.register(release);
+  hub.install(plugin);
   return hub;
 }
 
 export function uninstallCollab(hub: CollabHub): void {
-  const shared = window as unknown as Record<string, CollabHub | undefined>;
-  if (shared[HUB_KEY] === hub) delete shared[HUB_KEY];
+  releases.get(hub)?.();
   hub.destroy();
 }

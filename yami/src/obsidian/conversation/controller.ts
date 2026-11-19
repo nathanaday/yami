@@ -15,13 +15,12 @@ import type {
   ToolSet,
   TurnStatus,
 } from "../../agent/index.js";
-import { availablePath, frontmatterEdit, isUnnamed, nameFrom, renderTurn, TurnTranscript, userBlock } from "../../conversation/index.js";
+import { availablePath, isUnnamed, nameFrom, renderTurn, TurnTranscript, userBlock } from "../../conversation/index.js";
 import { LINK } from "../../document/index.js";
-import { activity, type ConversationAgent, Presence } from "../agents.js";
+import { activity, type ConversationAgent } from "../agents.js";
 import type { TurnEnd } from "../api.js";
-import type { CollabHub, DiskWriter } from "../collab/hub.js";
-import { LiveRegion } from "../collab/region.js";
-import { LOCAL_ORIGIN, type SharedNote } from "../collab/shared-note.js";
+import type { CollabHub } from "../collab/hub.js";
+import { type ConversationNote, PlainConversationNote, SharedConversationNote, type TurnOutput } from "./note.js";
 import { SessionSlot } from "../note-sessions.js";
 import type { PermissionPrompts } from "../prompts/permission-modal.js";
 
@@ -64,10 +63,7 @@ const MODES: Record<string, ApprovalSetting> = { ask: "ask", edits: "accept-edit
 
 interface Turn {
   transcript: TurnTranscript;
-  region: LiveRegion;
-  /** The agent as a writer of files, while the turn runs. */
-  writer: DiskWriter;
-  stopWriting: () => void;
+  output: TurnOutput;
   /** Files that the agent's tools may be changing now. */
   writing: Map<string, number>;
   /** Who waits for the end of this turn: the sender of its message. */
@@ -102,9 +98,8 @@ export class ConversationController {
   status: string | undefined;
   /** The agent session of the note: it starts when needed, and closes after the idle minutes with no composer. */
   private readonly slot: SessionSlot;
-  private note: SharedNote | undefined;
+  private readonly note: ConversationNote;
   private turn: Turn | undefined;
-  private readonly presence: Presence;
   private readonly listeners = new Set<() => void>();
   private readonly holders = new Set<object>();
   /** The path of the conversation note that the agent was last told. */
@@ -128,13 +123,15 @@ export class ConversationController {
 
   constructor(
     private readonly app: App,
-    private readonly hub: CollabHub,
+    hub: CollabHub | undefined,
     readonly file: TFile,
     private readonly agents: () => readonly ConversationAgent[],
     private readonly prompts: PermissionPrompts,
     private readonly options: ControllerOptions,
   ) {
-    this.presence = new Presence(() => this.registered ?? { name: this.agentName, color: "" }, options.animate);
+    this.note = hub
+      ? new SharedConversationNote(app, hub, file, () => this.registered ?? { name: this.agentName, color: "" }, options.animate)
+      : new PlainConversationNote(app, file);
     this.slot = new SessionSlot({
       agent: () => {
         const chosen = this.#chosen();
@@ -150,8 +147,7 @@ export class ConversationController {
         ...(this.tools && { tools: this.tools }),
         onPermission: (request) => this.ask(request),
         onQuestion: (request) => this.question(request),
-        // Shares a note before the agent's tool changes it, so the change merges as the agent's edit.
-        beforeFileChange: (paths) => this.turn && this.hub.prepare(this.turn.writer, paths),
+        beforeFileChange: (paths) => this.turn?.output.prepare(paths),
       }),
       resume: () => this.property("session"),
       record: (id) => (this.properties.session === id ? undefined : this.setProperty("session", id)),
@@ -247,7 +243,7 @@ export class ConversationController {
   async attach(holder: object): Promise<void> {
     this.holders.add(holder);
     this.slot.hold(holder);
-    this.note ??= await this.hub.acquire(this.file, this);
+    await this.note.acquire();
     if (!this.ended) void this.ensureSession().catch(() => undefined);
   }
 
@@ -401,11 +397,11 @@ export class ConversationController {
       this.turnEnded("failed", (error as Error).message, undefined, waiter);
       return;
     }
-    const note = (this.note ??= await this.hub.acquire(this.file, this));
+    await this.note.acquire();
     // Name a new conversation first, so the agent learns the note's final path.
-    if (!/\n> \[!user\]/.test(note.content)) await this.rename(message).catch(() => undefined);
-    this.appendLocal(note, `${userBlock(message)}\n\n\n`);
-    this.beginTurn(note, waiter);
+    if (!/\n> \[!user\]/.test(await this.note.text())) await this.rename(message).catch(() => undefined);
+    this.note.append(`${userBlock(message)}\n\n\n`);
+    this.beginTurn(waiter);
     this.phase = "working";
     this.status = "Thinking";
     this.changed();
@@ -418,38 +414,26 @@ export class ConversationController {
     await sent.catch((error: Error) => this.turn && this.finishTurn(this.turn, "interrupted", error.message));
   }
 
-  private beginTurn(note: SharedNote, waiter?: TurnWaiter): void {
-    const peer = this.presence.peer(note);
-    peer.beginTurn();
-    // The turn goes before the note's last line break, so text the user types at the very end stays out of it.
-    const at = note.content.length - 1;
+  private beginTurn(waiter?: TurnWaiter): void {
     const writing = new Map<string, number>();
-    const writer: DiskWriter = {
-      name: this.agentName,
-      writes: (path) => writing.has(path),
-      peer: (target) => this.presence.peer(target),
-    };
     this.turn = {
       transcript: new TurnTranscript(),
-      region: new LiveRegion(peer, at, at),
+      output: this.note.beginTurn({ name: this.agentName, writes: (path) => writing.has(path) }),
       writing,
-      writer,
-      stopWriting: this.hub.addWriter(writer),
       waiter,
     };
-    peer.setCursor(note.relative(at, -1));
   }
 
   private handle(event: AgentEvent): void {
     const status = activity(event);
     if (status) {
       this.status = status;
-      this.presence.setStatus(status);
+      this.note.setStatus(status);
     }
-    if (event.type === "turn-start" && !this.turn && this.note) {
+    if (event.type === "turn-start" && !this.turn && this.note.ready) {
       // A turn that the agent started on its own.
-      this.appendLocal(this.note, "\n");
-      this.beginTurn(this.note);
+      this.note.append("\n");
+      this.beginTurn();
       this.phase = "working";
     }
     const turn = this.turn;
@@ -462,7 +446,7 @@ export class ConversationController {
           for (const [path, count] of turn.writing) count <= 1 ? turn.writing.delete(path) : turn.writing.set(path, count - 1);
         }, 1500);
       }
-      turn.region.set(this.turnText(turn));
+      turn.output.set(this.turnText(turn));
       if (event.type === "turn-end") void this.finishTurn(turn, event.result.status, event.result.error, event.result.text);
     }
     if (event.type === "closed") {
@@ -481,15 +465,14 @@ export class ConversationController {
   private async finishTurn(turn: Turn, status: TurnStatus, error?: string, text?: string): Promise<void> {
     if (this.turn !== turn) return;
     this.turn = undefined;
-    turn.region.set(this.turnText(turn));
-    await turn.region.settled();
-    turn.region.close();
-    turn.stopWriting();
-    this.presence.setStatus(undefined);
+    turn.output.set(this.turnText(turn));
+    await turn.output.settled();
+    turn.output.close();
+    this.note.setStatus(undefined);
     this.status = undefined;
     this.phase = "idle";
     window.setTimeout(() => {
-      if (!this.working) this.presence.clear();
+      if (!this.working) this.note.clearPresence();
     }, 1200);
     this.changed();
     this.options.onActivity();
@@ -509,8 +492,7 @@ export class ConversationController {
   }
 
   private releaseNote(): void {
-    if (this.note) this.hub.release(this.note, this);
-    this.note = undefined;
+    this.note.release();
   }
 
   private prompt(message: string): string {
@@ -535,7 +517,7 @@ export class ConversationController {
   async closeSession(): Promise<void> {
     // A resumed session hears the path again; the note can be renamed while it is closed.
     this.toldPath = undefined;
-    this.presence.clear();
+    this.note.clearPresence();
     await this.slot.close();
   }
 
@@ -598,24 +580,9 @@ export class ConversationController {
     }
   }
 
-  private appendLocal(note: SharedNote, text: string): void {
-    const content = note.content;
-    const separator = content.endsWith("\n\n") || !content ? "" : content.endsWith("\n") ? "\n" : "\n\n";
-    note.applyOps([{ from: content.length, to: content.length, insert: separator + text }], LOCAL_ORIGIN);
-  }
-
   private async setProperty(key: string, value: string | undefined): Promise<void> {
     this.written[key] = value;
-    const note = this.note;
-    if (note) {
-      const edit = frontmatterEdit(note.content, key, value);
-      if (edit) note.applyOps([edit], LOCAL_ORIGIN);
-      return;
-    }
-    await this.app.fileManager.processFrontMatter(this.file, (frontmatter: Record<string, unknown>) => {
-      if (value === undefined) delete frontmatter[key];
-      else frontmatter[key] = value;
-    });
+    await this.note.setProperty(key, value);
   }
 
   /** Names a new conversation after its first message. A note that has a chosen name keeps it. */

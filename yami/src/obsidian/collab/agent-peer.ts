@@ -33,6 +33,7 @@ export class AgentPeer {
     readonly identity: AgentIdentity,
     private readonly animations: () => boolean,
   ) {
+    if (!(note.doc instanceof Y.Doc)) throw new Error("Yami: this shared note belongs to another plugin's copy of Yami.");
     this.awareness.on("update", ({ added, updated, removed }: Record<string, number[]>) => {
       const clients = [...added!, ...updated!, ...removed!];
       applyAwarenessUpdate(note.presence, encodeAwarenessUpdate(this.awareness, clients), this);

@@ -60,7 +60,7 @@ vi.mock("obsidian", () => {
 
 import type { Command, Plugin } from "obsidian";
 import { Menu, Notice } from "obsidian";
-import { COMMAND_PREFIX, createYami, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER, type AgentWork, type ObsidianYami, type YamiPluginOptions } from "../../../src/obsidian/index.js";
+import { CollabHub, collabOwner, COMMAND_PREFIX, createYami, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER, type AgentWork, type ObsidianYami, type YamiPluginOptions } from "../../../src/obsidian/index.js";
 import { ScriptedAgent } from "../../../src/testing/index.js";
 import { InvalidPlan, type ChangeAct } from "../../../src/wiki/index.js";
 
@@ -160,6 +160,28 @@ async function build(options: Partial<YamiPluginOptions> = {}): Promise<Obsidian
 }
 
 describe("createYami", () => {
+  it("has no hub unless the plugin asks for live editing, and then the window's one", async () => {
+    const plain = await build();
+    expect(plain.hub).toBeUndefined();
+    expect(collabOwner()).toBeUndefined();
+    expect(fake!.run("yami-revert", true)).toBe(false);
+    await fake!.unload();
+
+    const live = await build({ collab: true });
+    expect(live.hub).toBeInstanceOf(CollabHub);
+    expect(collabOwner()).toBe("Test Plugin");
+    // A second plugin that asks goes on without, and says why.
+    const first = fake!;
+    const second = await build({ collab: true });
+    expect(second.hub).toBeUndefined();
+    expect(notices()).toEqual(["Test Plugin: live editing is off, because Test Plugin has it in this window. Update your Yami plugins, then restart Obsidian."]);
+    await fake!.unload();
+    // The window is free as soon as the first plugin unloads.
+    await first.unload();
+    expect(collabOwner()).toBeUndefined();
+    fake = undefined;
+  });
+
   it("gives every command of the library an id that starts with its prefix", async () => {
     await build({ agents: [new ScriptedAgent()] });
     const ids = [...fake!.commands.keys()];

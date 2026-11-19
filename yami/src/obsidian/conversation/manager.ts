@@ -62,7 +62,8 @@ export class ConversationManager {
 
   constructor(
     private readonly app: App,
-    private readonly hub: CollabHub,
+    /** The window's hub, when the plugin has it. With none, the notes are written through the vault. */
+    private readonly hub: CollabHub | undefined,
     private readonly prompts: PermissionPrompts,
     private readonly options: ConversationOptions,
   ) {}

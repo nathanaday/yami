@@ -2,7 +2,7 @@
 
 Yami is a TypeScript library for building AI agents into Obsidian plugins. Each piece of agent work is a markdown note in the vault: the note says what the work is, which skills and agents it may use, which policies it must follow, and what it must deliver. Yami runs Claude Code or Codex on that note in a loop, checks what code can check, has a fresh read-only agent review the rest, and records every step in the vault.
 
-This README is for authors of Obsidian plugins built on Yami. It covers installing the library, a minimal plugin, and the reference for each package entry. The library is at version 0.24.0. The plugins built on it, [Yami Wiki](https://github.com/nathanaday/yami-wiki), [Yami Threads](https://github.com/nathanaday/yami-threads), and [Duet](https://github.com/nathanaday/obsidian-duet), live in their own repositories. The design policy is in [`design.md`](../design.md).
+This README is for authors of Obsidian plugins built on Yami. It covers installing the library, a minimal plugin, and the reference for each package entry. The library is at version 0.25.0. The plugins built on it, [Yami Wiki](https://github.com/nathanaday/yami-wiki), [Yami Threads](https://github.com/nathanaday/yami-threads), and [Duet](https://github.com/nathanaday/obsidian-duet), live in their own repositories. The design policy is in [`design.md`](../design.md).
 
 ## Install
 
@@ -11,7 +11,7 @@ Yami is not on npm. A plugin takes it from a GitHub release by the URL of its ta
 ```json
 {
   "dependencies": {
-    "yami": "https://github.com/nathanaday/yami/releases/download/yami-0.24.0/yami-0.24.0.tgz"
+    "yami": "https://github.com/nathanaday/yami/releases/download/yami-0.25.0/yami-0.25.0.tgz"
   },
   "devDependencies": {
     "@codemirror/state": "^6.7.6",
@@ -1228,6 +1228,7 @@ The Obsidian layer holds what needs the Obsidian API: `createYami`, the vault ad
 | `threads` | `true` | `false` leaves the built-in threads module out, as the option of `Yami`. |
 | `wiki` | | Options of the wiki, such as an `embedder` or the `defaultAlgorithm`. The conversation folder and Obsidian's Excluded files always stay out of its index. |
 | `citationPreview` | `true` | Whether a citation of a source shows where it leads at a hover, in the editor and in Reading view (see [The Wiki in Obsidian](#the-wiki-in-obsidian)). Only with the wiki module. |
+| `collab` | `false` | Whether the plugin edits notes live with its agents, through the window's hub: see [Live Editing Is One Plugin's](#live-editing-is-one-plugins). New in 0.25.0. |
 | `conversationFolder` | `conversations` | The folder of conversation notes. A value, or a function that Yami reads at each use. |
 | `skills` | none | The plugin's own skill sets, as the option of `Yami`. New in 0.23.0. |
 | `idleMinutes` | 15 (`IDLE_MINUTES`) | Minutes after which an agent process with no open message box and no turn closes. A value, or a function that Yami reads at each use. |
@@ -1243,7 +1244,7 @@ The Obsidian layer holds what needs the Obsidian API: `createYami`, the vault ad
 - rediscovers the vault modules as the vault changes (`watchModules`), then adds and removes each flow's command as the flow appears and goes, and updates the folder colors (removing a command needs Obsidian 1.7.2 or later);
 - enables the modules when the workspace is ready, and shows a notice when one fails;
 - marks the wiki's index stale on each change in the vault;
-- when the plugin unloads, kills the live runs, closes the conversations and the sessions of `noteSessions`, and removes the shared-document hub.
+- when the plugin unloads, kills the live runs, closes the conversations and the sessions of `noteSessions`, and removes the shared-document hub when it has one. The window is free for another plugin's hub as soon as the unload starts.
 
 ### Settings That Change While the Plugin Runs
 
@@ -1331,7 +1332,7 @@ Every command id of the library starts with `yami-`, `COMMAND_PREFIX`, so a host
 | `conversations` | `yami-end-conversation` | End this conversation | the active note is a conversation that has not ended | Interrupts its turn, closes its agent session, and records `status: ended`. The note stays as a record, and Continue it in the note resumes it. |
 | `conversations` | `yami-stop` | Stop the agent in this note | in the active note, a conversation's agent works, or a work of `addWork` has a `stop` | Interrupts the conversation's turn, also one whose agent still starts, and drops its queued messages. Calls the `stop` of each work in the note, such as a turn of `noteSessions`. It does not stop a session's run: `yami-stop-session` does. |
 | `conversations` | `yami-focus-composer` | Focus the message box | the active view shows a conversation note | Puts the cursor in the message box. |
-| `conversations` | `yami-revert` | Undo the agent's last changes in this note | the active note is shared, and holds agent edits to undo | Undoes the last step of agent edits in the note. A step begins when an agent starts a turn in the note, so one call undoes one turn, and the next call the turn before. It covers the edits of every agent that writes through an `AgentPeer` of the hub (a conversation, a run, or a host's own peer that calls `beginTurn` at each turn), and the writes of an agent's own file tools that the hub merges as its edits. It does not undo text that an agent writes as its own output, such as a reply in a conversation note, nor the person's typing. |
+| `conversations` | `yami-revert` | Undo the agent's last changes in this note | the plugin has the hub (`collab`), and the active note is shared and holds agent edits to undo | Undoes the last step of agent edits in the note. A step begins when an agent starts a turn in the note, so one call undoes one turn, and the next call the turn before. It covers the edits of every agent that writes through an `AgentPeer` of the hub (a conversation, a run, or a host's own peer that calls `beginTurn` at each turn), and the writes of an agent's own file tools that the hub merges as its edits. It does not undo text that an agent writes as its own output, such as a reply in a conversation note, nor the person's typing. |
 | `sessions` | `yami-run-session-<agent name>` | Run this session with `<Agent name>` | the active note is a session document with no live run | Starts a run with the agent, and says so in a notice. |
 | `sessions` | `yami-resume-session` | Resume this session | the active session has a conversation and no live run | Resumes it. |
 | `sessions` | `yami-stop-session` | Stop this session | the active session's run is live | Interrupts the run's turn; the run ends `stopped`. |
@@ -1368,7 +1369,7 @@ Every command id of the library starts with `yami-`, `COMMAND_PREFIX`, so a host
 - `animate()`, whether an agent's edits play as typing now, by the `animate` option and the system's reduced motion. A host that makes its own `Presence` or `AgentPeer` passes it, so its agents follow the same rule: `new Presence(identity, yami.animate)`.
 - `registered`, the agents with their names and colors, and `setAgents(entries)`, which changes them (see [Settings That Change While the Plugin Runs](#settings-that-change-while-the-plugin-runs)); `agentName(agent)`, the name the agent is registered under, and `agentNamed(name)`, the agent of a name.
 - `addWork(work)`, `works`, and `noteSessions(options)`: see [Agent Work and Note Sessions](#agent-work-and-note-sessions).
-- `hub` and `conversations`, the shared documents and the conversation notes, for other plugins; `protected`, the `ProtectedStore`; and `citations`, the `CitationPreview`, when the wiki module and `citationPreview` are on.
+- `hub`, the shared documents, which is `undefined` without the `collab` option or while another plugin has the hub; `conversations`, the conversation notes, for other plugins; `protected`, the `ProtectedStore`; and `citations`, the `CitationPreview`, when the wiki module and `citationPreview` are on.
 
 Functions exported beside it:
 
@@ -1456,6 +1457,7 @@ The map and its rules are in [`yami/document`](#protected-text). In Obsidian:
 - `createYami` adds the editor extension `protectedExtension(store)`, which marks protected text with the class `yami-protected`. In `block` mode, it drops a person's edit inside a mark (an edit at either edge, elsewhere, or from the shared note passes) and tells `onBlocked`, so a notice says `This text is protected. Run Toggle editing of protected text to edit it.` (`PROTECTED_BLOCKED`). In `track` mode the edit goes through and the mark follows it. The `protectedEditing` option sets the mode, and the command Toggle editing of protected text switches it for the session, with the notices `PROTECTED_EDITABLE` and `PROTECTED_LOCKED`. The body has the class `yami-protected-editing` in `track` mode.
 - A Reading view block that holds protected text gets `yami-protected-block` (`protectedPostProcessor`).
 - The hub's guard, `protectedGuard(store, notify)`, puts a mark back when an agent's live edit of a shared note removes or changes it, through a character-level map of the change, and leaves the agent's other edits and the person's typing alone. The notice reads `Yami kept the protected text in Levain that claude changed: "…".` The guard's own changes carry `GUARD_ORIGIN`.
+- A plugin with no hub guards the files instead: `installVaultGuard(plugin, app, store, notify, who)` keeps the last text of each note that has marks, and when a write of the file loses a mark, it maps the mark's range through the change and writes the text back. The editor keeps a person's edits out of protected text or moves the mark with them, so such a write came from an agent's tools or another program. `who` names the agent that works now, for the notice; with none it reads `another program`.
 - The commands are the group `protected` (see [Command Ids](#command-ids)).
 
 ### Building the Parts Yourself
@@ -1467,7 +1469,7 @@ import { ConversationManager, installCollab, ObsidianVault, PermissionPrompts, u
 
 // In Plugin.onload:
 const vault = new ObsidianVault(this.app, vaultRoot(this.app));
-const hub = installCollab(this.app, this);
+const hub = installCollab(this.app, this);   // undefined while another plugin has the hub, and the notes are then written through the vault
 const conversations = new ConversationManager(this.app, hub, new PermissionPrompts(this.app), {
   agents: () => [{ name: "claude", color: "#d97757", agent: claudeAgent }],
   folder: () => "conversations",
@@ -1481,7 +1483,7 @@ conversations.install(this);
 
 // In Plugin.onunload:
 await conversations.destroy();
-uninstallCollab(hub);
+if (hub) uninstallCollab(hub);
 ```
 
 ### Shared Documents
@@ -1495,7 +1497,7 @@ While an agent works with a note, the note is a shared document: a Yjs `Y.Doc` w
   - `changed({ note, path, ops, before, agent })` at each change of a shared note's text: the `SharedNote`, its path now, the ops on `before`, the text before the change, and the `agent` that made it, `{ name, color }`, or none for the person's typing and another program's write. `note.content` is the text after the change. An agent's change is an edit, a write of its tools that the hub merges, or its own output such as a reply.
 
   For each note, an observer hears `shared` first, then `changed` for each change, then the function that `shared` gave. An observer that starts while a note is shared hears `shared` for it at once, and its stop function runs that note's function too. An error in an observer goes to the console, and the other observers still hear the change. So a plugin that shows or audits agent text needs no Yjs and keeps no copy of the text: `yami.hub.observe({ changed: ({ note, before, ops, agent }) => agent && ledger.record(note, before, ops, agent.name) })`.
-- While an agent writes files with its own tools (`addWriter`), every note open in an editor is shared, so a change on disk merges with unsaved typing instead of replacing it. The hub patches `MarkdownView.setViewData` and `Vault.modify` while it is installed, so one Obsidian window has one hub: `installCollab` makes it, and a second plugin gets the same one.
+- While an agent writes files with its own tools (`addWriter`), every note open in an editor is shared, so a change on disk merges with unsaved typing instead of replacing it. The hub patches `MarkdownView.setViewData` and `Vault.modify` while it is installed, so one Obsidian window has one hub, and one plugin uses it: see [Live Editing Is One Plugin's](#live-editing-is-one-plugins).
 - `SharedNote` remembers the document state that matches the file on disk. When another program changes the file, the note forks the document at that state, replays the change on the fork, and merges the fork. Text that the user typed after the last save stays, also inside a range that the agent rewrote.
 - `EditorBinding` keeps a CodeMirror editor and a shared note in sync. Changes from the note reach the editor with `addToHistory: false`, so Cmd+Z undoes only the user's own typing.
 - `AgentPeer` is one agent in one note. Its edits carry the peer as the Yjs origin, so editors highlight them and `agentUndo` can revert one turn. It publishes a cursor and a status through the Yjs awareness protocol, and types its edits when the note is visible.
@@ -1596,16 +1598,32 @@ await page.fill(`${question} input.yami-question-other`, "Plum");
 await page.click('.workspace-leaf.mod-active .yami-questions button[type="submit"]');
 ```
 
+#### Live Editing Is One Plugin's
+
+Each plugin bundles its own copy of Yami, and so its own copy of Yjs. Two copies of Yjs cannot write to one `Y.Doc`: text that the second copy inserts does not show, while its removals apply, and the document then counts characters that its text does not hold. Every position after that is wrong, and the note corrupts at the next edit. So the hub belongs to the one plugin that installed it:
+
+- `createYami` installs the hub only with `collab: true`. A plugin whose agents edit ordinary notes with the person, such as Duet, sets it. A plugin without it runs no Yjs.
+- `installCollab(app, plugin)` gives the hub to the first plugin that asks, and nothing to a plugin that asks while the first is loaded; `collabOwner()` names the first. `createYami` then shows a notice and goes on with no hub. The window is free as soon as the owner's unload starts, so the next instance of a plugin that is updated or reloaded gets a hub of its own, and never the old one. A lock that a plugin left without unloading does not count.
+- A plugin on a Yami before 0.25 looked for the hub in the window and used the one it found. While such a plugin has its hub there, `installCollab` gives nothing. When such a plugin loads after the owner, its first use of the hub throws with the reason, and it does not load: update it.
+- A document that is no longer `sound` (`SharedNote.sound`) stops being shared at the next edit or save, with a notice. The hub does not save it: the editor and the file keep their text.
+
+**With no hub**, Yami still runs conversations and guards protected text:
+
+- A conversation note is a file of the vault. Each message and each property is one `Vault.process`, in order, and a reply reaches the file about four times a second while it grows, in the same place as with the hub. The note shows no agent cursor, and the reply does not play as typing. When a person changes the note during a reply, the reply is found again where it now is; when they changed the reply itself, the new text goes to the end of the note.
+- A file that an agent's tools change reaches an open editor as Obsidian takes any change of a file, with no merge into unsaved typing.
+- Protected text is guarded at each write of a file (`installVaultGuard`), in place of the hub's guard.
+- Undo the agent's last changes is not offered.
+
 ### Two Yami Plugins in One Vault
 
-Each Yami plugin builds its own Yami. Two in one vault, such as Duet and `yami-wiki`, share the window's one shared-document hub (`installCollab`: the first plugin makes it, the next finds it) and keep the rest apart:
+Each Yami plugin builds its own Yami. Two in one vault, such as Duet and `yami-wiki`, keep apart:
 
 - **Conversation notes.** A note records the `plugin` whose Yami runs it, and a plugin's conversation manager gives a message box to its own notes only. A note with no `plugin`, from before 0.20, goes to the plugin whose manager was installed first in the window, which is the order Obsidian loads them in; add `plugin: <id>` to a note to pin it. A `ConversationManager` built with no `plugin` option takes every conversation note.
 - **Files.** Each plugin installs the documents of its own modules. Both write the base skill, which is the same text at the same version of the library. Keep the plugins on one version of `yami`, or the older one reports the newer base skill as a person's edit.
 - **Agents.** Each plugin runs its own agents, with its own settings. A tool of one plugin's module is not in the sessions of another plugin.
 - **Commands and status bar.** Each plugin adds its own. Turn off a group that another plugin provides with `commands`, as Duet turns off the session and wiki commands.
 - **Vault modules.** Every Yami discovers them, so each plugin lists them and adds their commands. A vault module runs the same in either.
-- **The hub.** The plugin that made the hub owns its editor extension and its patches. When that plugin unloads, the hub is gone for the others until they reload; there is no handover yet.
+- **The hub.** One plugin has it, the one that set `collab` first; the others write their conversation notes through the vault. See [Live Editing Is One Plugin's](#live-editing-is-one-plugins).
 
 ### The Views
 

@@ -2,7 +2,7 @@ export { activity, type ConversationAgent, Presence, vaultRoot } from "./agents.
 export type { ConversationStatus, NewConversationOptions, TurnEnd } from "./api.js";
 export { AgentPeer, type AgentIdentity } from "./collab/agent-peer.js";
 export { bindingPlugin, EditorBinding, presenceAnnotation, syncAnnotation } from "./collab/binding.js";
-export { CollabHub, type DiskWriter, type HubObserver, installCollab, type NoteChange, uninstallCollab } from "./collab/hub.js";
+export { CollabHub, collabOwner, type DiskWriter, type HubObserver, installCollab, type NoteChange, uninstallCollab } from "./collab/hub.js";
 export { presenceExtensions } from "./collab/presence.js";
 export { LiveRegion } from "./collab/region.js";
 export { DISK_ORIGIN, LOCAL_ORIGIN, type NoteView, type PresenceState, SharedNote } from "./collab/shared-note.js";
@@ -10,6 +10,7 @@ export { applyOps, deltaOps, diffOps, normalizeNewlines, shiftOps, type TextOp }
 export { Composer } from "./conversation/composer.js";
 export { ConversationController, LOCAL_COMMANDS, type LocalCommand, type PendingRequest } from "./conversation/controller.js";
 export { ConversationManager, type ConversationOptions, type CreateOptions } from "./conversation/manager.js";
+export { type ConversationNote, PlainConversationNote, replaceReply, SharedConversationNote, type TurnOutput, type TurnWriter } from "./conversation/note.js";
 export { ObsidianConversations } from "./conversation/obsidian-conversations.js";
 export { type PermissionContext, PermissionPrompts } from "./prompts/permission-modal.js";
 export { type QuestionForm, renderQuestions } from "./prompts/question-form.js";
@@ -17,6 +18,7 @@ export { folderColorRules, showFolderColors } from "./colors.js";
 export { age, COMMAND_PREFIX, EXPORT_PLACEHOLDER, IMPORT_HINT, IMPORT_PLACEHOLDER, NEW_PAGE_DESCRIPTION, NEW_PAGE_NAME, NEW_PAGE_TEMPLATE, NEW_TEMPLATE_NAME, PROTECTED_BLOCKED, PROTECTED_EDITABLE, PROTECTED_LOCKED, REJECT_EMPTY, REJECT_HINT, REJECT_PLACEHOLDER } from "./commands.js";
 export { PROTECTED_BLOCK_CLASS, PROTECTED_CLASS, protectedExtension, protectedPostProcessor } from "./protected/editor.js";
 export { GUARD_ORIGIN, protectedGuard } from "./protected/guard.js";
+export { installVaultGuard } from "./protected/vault-guard.js";
 export { ProtectedStore, type ProtectedEditing } from "./protected/store.js";
 export type { AgentWork, NoteAgent, NoteSession, NoteSessions, NoteSessionSetup, NoteSessionsOptions, SessionIds } from "./note-sessions.js";
 export { checkModuleIcons, moduleIcon } from "./icons.js";
